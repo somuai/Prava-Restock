@@ -23,7 +23,7 @@ from agents import (
 )
 from pydantic import BaseModel
 
-from merchant import zepto_checkout
+from merchant import mock_subscription_checkout, zepto_checkout
 from payments import prava_client
 from payments.models import (
     AuditEventType,
@@ -273,7 +273,12 @@ def _complete_merchant_checkout(
     if mandate is None:
         raise ApprovalRequired("an approved mandate is required before checkout")
     item = context.item(item_id)
-    response = zepto_checkout.complete_checkout(
+    checkout_client = (
+        mock_subscription_checkout
+        if item.preferred_merchant.value == "mock_subscription_billing"
+        else zepto_checkout
+    )
+    response = checkout_client.complete_checkout(
         mandate.credential_reference,
         item.merchant_sku_id,
         mandate.scope_max_amount,

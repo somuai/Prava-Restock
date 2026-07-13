@@ -4,6 +4,10 @@ Restock is a consumption-triggered replenishment agent that predicts when recurr
 
 This repository currently contains pre-hackathon scaffolding and deterministic/stubbed components only. Live Prava and merchant integrations are deliberately deferred to the hackathon window.
 
+## Offline dry run
+
+After installing the project, run `python demo/dry_run.py` to exercise all five seeded items against fake Prava and merchant responses. The Restock Teams billing checkout is an intentional, disclosed simulation.
+
 ## Project specifications
 
 - [Product requirements](PRD.md)
