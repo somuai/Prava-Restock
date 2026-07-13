@@ -8,6 +8,10 @@ This repository currently contains pre-hackathon scaffolding and deterministic/s
 
 After installing the project, run `python demo/dry_run.py` to exercise all five seeded items against fake Prava and merchant responses. The Restock Teams billing checkout is an intentional, disclosed simulation.
 
+## Local API
+
+Run `uvicorn ui.api:app --reload` and open `/`, `/health`, `/audit-log`, or `/notifications/pending`. The included Dockerfile, `render.yaml`, and `railway.json` deploy this same credential-free offline-stub service.
+
 ## Project specifications
 
 - [Product requirements](PRD.md)
