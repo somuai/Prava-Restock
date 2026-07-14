@@ -5,5 +5,5 @@ __pycache__
 *.py[cod]
 .pytest_cache
 *.egg-info
-.env
+.env*
 tests
