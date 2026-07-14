@@ -213,6 +213,12 @@ Build this as a small, tool-using loop — not a chatbot waiting for input. It r
 on a schedule (or a simulated clock tick for the demo) and checks every tracked
 item's depletion status.
 
+Use **`gpt-5.4-mini` as the single model for the entire loop**, including proactive
+notification copy and the Restock Teams renew-vs-switch comparison. Do not add a
+premium-model branch for those calls: the single verified model removes a live-demo
+quota failure mode, while spend limits, substitution rules, and plan-switch approval
+remain bounded by code-level Guardrails and human-in-the-loop controls.
+
 **Tools to define:**
 
 - `check_depletion_status()` → returns items within the trigger window

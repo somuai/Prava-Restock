@@ -9,10 +9,9 @@ from agents.tool_context import ToolContext
 from agents.tool_guardrails import ToolInputGuardrailData
 
 from agent.orchestrator import (
-    JUDGMENT_MODEL,
     NOTIFICATION_AGENT,
+    ORCHESTRATOR_MODEL,
     RESTOCK_AGENT,
-    ROUTINE_MODEL,
     TEAMS_DECISION_AGENT,
     ApprovalRequired,
     OrchestratorContext,
@@ -149,10 +148,11 @@ def test_approval_tool_uses_sdk_resumable_approval_primitive() -> None:
     assert await_passkey_approval.needs_approval is True
 
 
-def test_model_split_matches_spec() -> None:
-    assert RESTOCK_AGENT.model == ROUTINE_MODEL == "gpt-5.4-mini"
-    assert NOTIFICATION_AGENT.model == JUDGMENT_MODEL == "gpt-5.6-sol"
-    assert TEAMS_DECISION_AGENT.model == JUDGMENT_MODEL
+def test_single_model_matches_spec() -> None:
+    assert ORCHESTRATOR_MODEL == "gpt-5.4-mini"
+    assert RESTOCK_AGENT.model == ORCHESTRATOR_MODEL
+    assert NOTIFICATION_AGENT.model == ORCHESTRATOR_MODEL
+    assert TEAMS_DECISION_AGENT.model == ORCHESTRATOR_MODEL
 
 
 def test_checkout_without_approved_mandate_is_rejected(tmp_path) -> None:

@@ -1,7 +1,7 @@
 # Phase 4 Agents SDK Review
 
-Date reviewed: 2026-07-14  
-Scope: findings only; no orchestrator, prompt, or test code changed.
+Date reviewed: 2026-07-14; model configuration updated: 2026-07-15
+Original review scope: findings only; model section later aligned with the implemented single-model decision.
 
 ## 1. Installed SDK compatibility
 
@@ -119,31 +119,31 @@ The production SDK tools `notify_user` and the Teams branch of `request_prava_in
 
 ## 6. Model configuration
 
-The configured strings are literal constants:
+The orchestrator now has one literal model constant:
 
 ```python
-ROUTINE_MODEL = "gpt-5.4-mini"
-JUDGMENT_MODEL = "gpt-5.6-sol"
+ORCHESTRATOR_MODEL = "gpt-5.4-mini"
 ```
 
-They are assigned as specified:
+It is assigned to every SDK Agent object:
 
 ```python
-NOTIFICATION_AGENT = Agent(..., model=JUDGMENT_MODEL)
-TEAMS_DECISION_AGENT = Agent(..., model=JUDGMENT_MODEL, ...)
-RESTOCK_AGENT = Agent(..., model=ROUTINE_MODEL, ...)
+NOTIFICATION_AGENT = Agent(..., model=ORCHESTRATOR_MODEL)
+TEAMS_DECISION_AGENT = Agent(..., model=ORCHESTRATOR_MODEL, ...)
+RESTOCK_AGENT = Agent(..., model=ORCHESTRATOR_MODEL, ...)
 ```
 
-The test suite asserts the exact strings:
+The test suite asserts the exact string and all three assignments:
 
 ```python
-assert RESTOCK_AGENT.model == ROUTINE_MODEL == "gpt-5.4-mini"
-assert NOTIFICATION_AGENT.model == JUDGMENT_MODEL == "gpt-5.6-sol"
-assert TEAMS_DECISION_AGENT.model == JUDGMENT_MODEL
+assert ORCHESTRATOR_MODEL == "gpt-5.4-mini"
+assert RESTOCK_AGENT.model == ORCHESTRATOR_MODEL
+assert NOTIFICATION_AGENT.model == ORCHESTRATOR_MODEL
+assert TEAMS_DECISION_AGENT.model == ORCHESTRATOR_MODEL
 ```
 
-As of this review, the official OpenAI model catalog lists [`gpt-5.4-mini`](https://developers.openai.com/api/docs/models/gpt-5.4-mini) and [`gpt-5.6-sol`](https://developers.openai.com/api/docs/models). This confirms the public model IDs, not access for this particular API project or usage tier. Recheck the official catalog and make one authenticated availability call at hackathon time; do not assume account access from repository configuration alone.
+The official OpenAI model catalog lists [`gpt-5.4-mini`](https://developers.openai.com/api/docs/models/gpt-5.4-mini), and the local verifier confirms both listing access and a minimal authenticated invocation for this project account. Using that one verified model for notification copy and Teams comparison as well as the routine loop removes a constrained-quota live-demo dependency; the hard decisions remain bounded by code-level Guardrails and explicit approval.
 
 ## Conclusion
 
-Phase 4 is compatible with the installed Agents SDK and meets the requested guardrail, approval, tool-surface, model-string, and offline-test requirements. No source-code correction is required by this review. The two operational follow-ups are to pin or deliberately upgrade the SDK before a reproducible release, and to confirm authenticated access to both configured models at hackathon time.
+Phase 4 is compatible with the installed Agents SDK and meets the requested guardrail, approval, tool-surface, model-string, and offline-test requirements. The remaining operational follow-up is to pin or deliberately upgrade the SDK before a reproducible release; authenticated access to the sole configured model is covered by the local verifier.

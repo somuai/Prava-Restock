@@ -42,8 +42,7 @@ from payments.models import (
 from triggers import consumption_model, renewal_model
 
 
-ROUTINE_MODEL = "gpt-5.4-mini"
-JUDGMENT_MODEL = "gpt-5.6-sol"
+ORCHESTRATOR_MODEL = "gpt-5.4-mini"
 DEFAULT_AUDIT_LOG_PATH = Path(__file__).resolve().parents[1] / "logs" / "audit_log.json"
 
 
@@ -396,20 +395,20 @@ SYSTEM_PROMPT = (Path(__file__).with_name("system_prompt.md")).read_text().strip
 NOTIFICATION_AGENT = Agent(
     name="Restock Notification Writer",
     instructions="Write concise proactive Restock proposal copy. Preserve all amounts and merchants.",
-    model=JUDGMENT_MODEL,
+    model=ORCHESTRATOR_MODEL,
 )
 
 TEAMS_DECISION_AGENT = Agent(
     name="Restock Teams Plan Reviewer",
     instructions="Compare renew-as-is and alternate plans; never switch without explicit approval.",
-    model=JUDGMENT_MODEL,
+    model=ORCHESTRATOR_MODEL,
     output_type=TeamsPlanDecision,
 )
 
 RESTOCK_AGENT = Agent(
     name="Restock Orchestrator",
     instructions=SYSTEM_PROMPT,
-    model=ROUTINE_MODEL,
+    model=ORCHESTRATOR_MODEL,
     tools=[
         check_trigger_status,
         request_prava_intent,
