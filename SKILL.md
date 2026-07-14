@@ -34,6 +34,7 @@ it tells you what to actually implement and in what order.
 integration model at the *conceptual* level (Intent → Passkey → Mandate → one-time
 credential), because the exact class/endpoint names may have shifted since this
 skill was written. Before writing the payment integration code, fetch:
+
 - `https://docs.prava.space/llms.txt` (documentation index)
 - The `prava-sdk-integration` and `prava-pay` skill folders in
   `github.com/Prava-Payments/prava-skills` (these contain the actual
@@ -54,6 +55,7 @@ in the moment**, triggered by a predicted depletion date for a recurring househo
 or office consumable.
 
 ### Hard requirements (hackathon rules)
+
 - Must use Prava as a **real part of the product** — not just called once for show.
 - Must demonstrate an **agent completing or enabling a transaction**.
 - Meaningful work must be completed **during** the 48-hour window — disclose anything
@@ -62,6 +64,7 @@ or office consumable.
   rules) be a product that "could live beyond the hackathon."
 
 ### Submission window
+
 **Jul 31 – Aug 2, 2026**, 48 hours, online. Apply on Devfolio (rolling review, 3-day
 RSVP window after acceptance) — do this before anything else if not already done.
 
@@ -145,6 +148,7 @@ credential → merchant checkout.**
 ```
 
 **Implementation instructions for whoever builds this:**
+
 - Do not hardcode API paths/class names here — pull the current `PravaSDK` class
   reference and session API reference from the `prava-sdk-integration` skill
   folder in `Prava-Payments/prava-skills` at build time.
@@ -210,6 +214,7 @@ on a schedule (or a simulated clock tick for the demo) and checks every tracked
 item's depletion status.
 
 **Tools to define:**
+
 - `check_depletion_status()` → returns items within the trigger window
 - `request_prava_intent(merchant, amount, item, constraints)` → §4
 - `await_passkey_approval(intent_id)` → returns approved / adjusted / skipped

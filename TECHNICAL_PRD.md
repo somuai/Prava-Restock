@@ -1,4 +1,5 @@
 # Restock — Technical PRD
+
 **Version 1.0 · Prava Agentic Commerce Hackathon, Jul 31–Aug 2, 2026**
 **Status:** Pre-build design spec. Companion to `PRD.md` (product rationale) and `SKILL.md` (build guide for coding agents).
 
@@ -116,7 +117,7 @@ AuditLogEntry
 
 Both trigger sources answer one question — `should_fire(item) -> bool` — and hand the orchestrator the same shape of output (item, proposed amount, proposed merchant). Everything downstream of that call is identical for both tracks. This is the one abstraction worth getting right early, because it's what lets Restock Teams exist as a data variant instead of a second codebase.
 
-**6.1 Predicted trigger (Restock Home — consumption forecast)**
+### 6.1 Predicted trigger (Restock Home — consumption forecast)
 
 ```
 predicted_depletion_date = last_purchased_at + typical_cadence_days
@@ -133,7 +134,7 @@ typical_cadence_days_new = ALPHA * observed_interval_days
 
 **Explicitly deferred to post-hackathon:** a real regression/time-series model using purchase-history features (day-of-week effects, seasonal consumption changes, household-size inference). Do not attempt this for the 48-hour build — see `PRD.md` §7 scope boundaries.
 
-**6.2 Known-date trigger (Restock Teams — subscription renewal)**
+### 6.2 Known-date trigger (Restock Teams — subscription renewal)
 
 ```
 days_until_renewal = renewal_date - today
@@ -152,10 +153,12 @@ This is deliberately the simpler of the two trigger sources — there's no forec
 Built on OpenAI's **Agents SDK** (not Agent Builder — deprecated June 2026). Runs as a scheduled tool-using loop, not a request/response chat handler. Single agent, not multi-agent — confirmed against the brief's own language ("an AI agent," "an agent," singular both times), not just a 48-hour scope call.
 
 **Model split — two models, not one, split by which calls need judgment vs. which are mechanical:**
+
 - **`gpt-5.4-mini`** (low reasoning effort, low verbosity — the SDK's own default for exactly this shape of workload) for the routine loop: `check_trigger_status`, sequencing tool calls, the mechanical parts of the flow. This runs frequently and needs to be cheap and fast, not clever.
 - **`gpt-5.6-sol`** for the two moments that actually need judgment: writing the `notify_user` proposal copy, and the Restock Teams plan-comparison decision (renew-as-is vs. switch-to-alternate). Reserve the better model for where a wrong call actually costs something.
 
 **Guardrails and human-in-the-loop — named SDK primitives, not hand-rolled checks:**
+
 - Spend caps and the "never silently substitute" rule are implemented as the Agents SDK's **Guardrails** primitive — single-purpose tripwires that validate tool inputs/outputs concurrently with the agent, not something the model self-polices via its instructions. A guardrail rejecting an out-of-cap `request_prava_intent` call happens in code the model doesn't control, regardless of what the model decided.
 - The passkey-approval pause is the SDK's built-in **human-in-the-loop** mechanism (resumable approval flow), not a custom polling loop — `await_passkey_approval` is where the run pauses for the real-world passkey callback before resuming.
 
@@ -189,6 +192,7 @@ log_event(event_type: str, payload: dict) -> None
 ```
 
 **Guardrail constraints — enforced in code, not just stated in the system prompt:**
+
 - Never call `complete_merchant_checkout` without a `MandateResult` showing passkey approval.
 - Never propose an amount exceeding `per_item_cap` or that would exceed `monthly_cap` for the period — a Guardrail on `request_prava_intent`, not a prompt instruction the model could get wrong.
 - If merchant-reported price deviates from `last_purchase_amount` by more than a configured tolerance (e.g., 15%), or the item is out of stock, do not proceed silently — re-route to `notify_user` for explicit re-approval.
