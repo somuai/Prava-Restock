@@ -33,7 +33,9 @@ User <──approve/adjust/skip──> Restock Backend <──intent/mandate─�
 | **Prava client** | Thin wrapper around Prava's SDK — intent creation, mandate status polling/webhook, credential retrieval | Isolate all Prava-specific code behind this interface so a real SDK-signature mismatch only requires changing one file |
 | **Merchant client** | Wraps the Zepto/Swiggy MCP checkout skill (Home) and a disclosed mock subscription-billing checkout (Teams) | Same isolation principle as the Prava client; both implement the same `complete_checkout(...)` contract — see §9.2 |
 | **Audit/notification store** | Persists Intents, Mandates (references only, never raw credentials), Transactions, and the user-facing audit log | See §5 for schemas |
-| **UI (chat surface)** | Displays proactive notifications and the audit/savings log | ChatKit or minimal web dashboard |
+| **UI (chat surface)** | Displays proactive notifications, approve/adjust/skip controls, and the audit/savings log | For the hackathon: a disclosed mocked WhatsApp-style conversational surface for Restock Home and a disclosed mocked Slack-style notification/approval surface for Restock Teams. Real WhatsApp Business API access (including its 1–2 week business-verification lead time) and a real Slack app are post-hackathon roadmap items. |
+
+See `PRD.md` §10, "Distribution and surface," for why these user-facing surfaces remain independent of the merchant apps that Restock calls at the backend.
 
 ## 4. Design principles
 
@@ -287,6 +289,7 @@ Structured log line at every state transition (`Intent` created/approved/rejecte
 - No real SaaS billing-portal integration — the known-date track's checkout is a disclosed mock; the renewal date and Prava mandate flow around it are real.
 - No multi-user/shared household or team mandates.
 - No native mobile app.
+- No real WhatsApp Business API or Slack app integration in this submission — both are disclosed mocked surfaces matching each platform's interaction pattern.
 - Merchant coverage limited to Zepto/Swiggy (or the disclosed mock fallback) for Home; one disclosed mock subscription for Teams.
 
 ## 17. Open questions — verify before/during build

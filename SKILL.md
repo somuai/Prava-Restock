@@ -272,11 +272,21 @@ hackathon. If sandbox merchant access isn't confirmed by roughly hour 8:
 
 ## 9. UI / demo surface
 
-Use OpenAI's **ChatKit** (embeddable chat UI) or a minimal web dashboard — either
-works, but it must be able to **push** a message to the user unprompted (the
-proactive notification is the entire differentiator; if the demo looks like the
-user asked first, you've built the thing you were trying not to build). Show,
-front and center:
+Build two disclosed mocked surfaces matching the primary channels defined in
+`PRD.md` §10, "Distribution and surface":
+
+- **Restock Home:** a WhatsApp-style conversation with a proactive message and
+  interactive approve/adjust/skip controls.
+- **Restock Teams:** a Slack-style billing notification and approval surface.
+
+Do not attempt real WhatsApp Business API or real Slack app integration during
+the hackathon window. WhatsApp Business verification takes 1–2 weeks, outside
+the 48-hour build, and both mocked surfaces must be disclosed in the demo and
+submission. The implementation may use ChatKit or a minimal web dashboard, but
+it must **push** a message to the user unprompted (the proactive notification is
+the entire differentiator; if the demo looks like the user asked first, you've
+built the thing you were trying not to build). Show, front and center:
+
 1. The proactive message firing.
 2. The approve/adjust/skip control.
 3. The passkey approval step (real or, if the demo environment can't show
@@ -300,6 +310,9 @@ just a known fact on the `TrackedItem` record.
   `current_plan_amount`, and a cheaper `alternate_plan_amount` (annual plan).
 - When the trigger fires, the proposal is: *"TeamTool Pro renews in 2 days at
   $29/mo. Switch to the annual plan and save $58/year, or keep as is?"*
+- Present that proposal in the disclosed mocked Slack-style surface with an
+  explicit renew-as-is vs. switch-plan choice. Never switch plans without the
+  user's explicit approval, even when the alternate is cheaper.
 - Same Prava mandate flow, same passkey approval, same audit log as Restock
   Home — only the merchant/billing call differs (see next point).
 - Checkout completion is a **disclosed mock** (`merchant/mock_subscription_checkout.py`)
