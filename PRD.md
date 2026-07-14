@@ -112,6 +112,8 @@ SaaS seats or getting silently auto-renewed at a price they never re-checked.
 - Proactive notification UI with approve/adjust/skip, identical pattern for both tracks.
 - Savings/audit log after every autonomous action.
 
+See §10, Distribution and surface, for the primary WhatsApp/Slack surfaces, the hackathon mock boundary, and why Restock is not embedded in a merchant’s app.
+
 **Explicitly out of scope (roadmap items):**
 
 - A real trained forecasting model — deterministic exponential smoothing only.
@@ -164,10 +166,28 @@ User <--approve/adjust/skip--> Restock Backend <--intent/mandate--> Prava
 | Orchestrator agent | Tool-using loop (OpenAI Agents SDK) deciding what/when to propose, sequencing Prava + merchant calls | Scheduled tick, not a chat handler; trigger-type-agnostic |
 | Prava client | Thin wrapper around Prava’s SDK — intent creation, mandate polling/webhook, credential retrieval | Isolate Prava-specific code behind this interface |
 | Merchant client | Wraps Zepto/Swiggy MCP checkout (Home) and a disclosed mock billing checkout (Teams) | Both implement the same `complete_checkout(...)` contract |
-| Audit/notification store | Persists Intents, Mandate references, Transactions, and the user-facing audit log | See §11 for schemas |
+| Audit/notification store | Persists Intents, Mandate references, Transactions, and the user-facing audit log | See §12 for schemas |
 | UI (chat surface) | Displays proactive notifications and the audit/savings log | ChatKit or minimal web dashboard |
 
-### 10. Design principles
+See §10, Distribution and surface, for why this architecture is independent of every merchant app and where users actually interact with Restock.
+
+### 10. Distribution and surface
+
+Restock is an independent agent. It is not embedded inside Zepto, Swiggy, Amazon, or any other merchant’s app. This is a structural consequence of the payment architecture, not a distribution preference. Prava’s intent → passkey → mandate → one-time-credential model exists so an independent agent can transact on a user’s behalf across merchants with which it has no direct account relationship. A merchant’s own app already has the user’s payment method on file and does not need a scoped, revocable third-party mandate to charge it. “Embed Restock inside Zepto” and “use Prava as a real part of the product” are therefore close to mutually exclusive. Embedding would also trap Restock inside one merchant’s catalog and eliminate the cross-merchant value proposition entirely.
+
+Amazon’s Rufus AutoBuy is the contrast. It works, but only inside Amazon’s catalog, using Amazon’s stored payment method and requiring no third-party mandate. That is the embedded model. Restock deliberately does not copy it.
+
+Integration with Zepto or Swiggy means backend integration through Prava’s published MCP checkout skill. Restock calls the merchant programmatically to complete a transaction. That is real, deep integration at the API layer, invisible to the user; it is never a Restock widget embedded in the merchant’s app screens. The same logic applies to Restock Teams and SaaS billing: Restock pays the invoice through the vendor’s billing surface; it does not live inside the vendor’s dashboard.
+
+The user-facing surface is track-specific:
+
+- **Restock Home — WhatsApp first.** The primary consumer surface is the WhatsApp Business Platform, using proactive template messages with interactive Approve, Adjust, and Skip buttons. This is not a fallback. It gives Restock near-zero install friction and uses the dominant channel for this kind of transactional commerce messaging in India today. A PWA with web push is the secondary option for users who would rather not use WhatsApp.
+- **Restock Teams — Slack.** Small teams and founders already handle billing alerts and approvals where they work. Restock Teams meets that audience in Slack, not WhatsApp.
+- **Native mobile app — deferred, not planned for launch.** Building and maintaining an App Store presence before there is evidence that people act on these notifications is premature investment. Native becomes justified only after usage data from WhatsApp and Slack demonstrates retention and action rates that warrant it.
+
+**Hackathon scope:** real WhatsApp Business Platform access requires Meta business verification, which takes 1–2 weeks and is not available inside a 48-hour hackathon window. The hackathon demo therefore uses a mocked chat surface that reproduces the intended WhatsApp interaction pattern — a proactive message followed by Approve, Adjust, and Skip controls — rather than claiming a live WhatsApp Business API integration. This mock must be disclosed alongside the other hackathon-day simulations in this document.
+
+### 11. Design principles
 
 1. Payment data never touches our storage. Every persisted field is a reference (mandate ID, credential reference, transaction ID) — never a card number, never raw passkey
 material.
@@ -177,7 +197,7 @@ Prava intent is even created.
 beyond tolerance, or a plan switch, always route back to the user.
 4. Idempotency by construction. Every merchant/billing call carries the originating intent_id as an idempotency key.
 
-### 11. Data model
+### 12. Data model
 
 ```text
 User
@@ -248,13 +268,13 @@ AuditLogEntry
   timestamp             timestamp
 ```
 
-### 12. Trigger sources
+### 13. Trigger sources
 
 Both trigger sources answer one question — should_fire(item) -> bool — and hand the
 orchestrator the same shape of output. Everything downstream is identical for both tracks;
 this abstraction is what lets Teams exist as a data variant instead of a second codebase.
 
-#### 12.1 Predicted trigger (Restock Home)
+#### 13.1 Predicted trigger (Restock Home)
 
 ```text
 predicted_depletion_date = last_purchased_at + typical_cadence_days
@@ -269,7 +289,7 @@ typical_cadence_days_new = ALPHA * observed_interval_days
 First-time items seed typical_cadence_days from a user-provided estimate; there’s no cold-start model, just an honest guess corrected within 2–3 real cycles. A real regression/time-series
 model is explicitly deferred to post-hackathon.
 
-#### 12.2 Known-date trigger (Restock Teams)
+#### 13.2 Known-date trigger (Restock Teams)
 
 ```text
 days_until_renewal = renewal_date - today
@@ -286,7 +306,7 @@ simpler track, which is exactly why it’s the right second track to add: near-z
 orchestrator complexity for direct coverage of the brief’s “manage a subscription” and “procure
 software” examples.
 
-### 13. Orchestrator agent
+### 14. Orchestrator agent
 
 Built on OpenAI’s Agents SDK (not Agent Builder — deprecated June 2026, shutting down Nov
 30, 2026). Runs as a scheduled tool-using loop, not a request/response chat handler. Single
@@ -326,7 +346,7 @@ Guardrail constraints — enforced in code, not just stated in the system prompt
 - If price deviates from `last_purchase_amount` by more than ~15%, or the item is out of stock, re-route to `notify_user` rather than proceeding silently.
 - For known-date items: never auto-select `switch_to_alternate` without explicit approval, even when strictly cheaper — a plan switch can carry consequences (feature loss, contract terms) the amount alone doesn’t capture.
 
-### 14. End-to-end sequence (happy path)
+### 15. End-to-end sequence (happy path)
 
 1. Scheduler tick calls check_trigger_status().
 2. Triggered item → request_prava_intent(...) → local Intent created, Prava intent request sent.
@@ -341,7 +361,7 @@ Branches: Skip → Intent.status = rejected, cooldown before re-check. Adjust �
 proposal, loop back to step 2. Out-of-stock/price-tolerance breach/plan-switch proposal
 → re-route to notify_user, never auto-resolve.
 
-### 15. External integration contracts
+### 16. External integration contracts
 
 Prava (verify exact signatures at build time): conceptually, intent → passkey → mandate
 → one-time credential. Pull the current PravaSDK class and session API reference from `prava-sdk-integration` in `Prava-Payments/prava-skills` — do not hardcode API paths from this
@@ -365,7 +385,7 @@ OAuth isn’t realistic in 48 hours regardless of sandbox access.
 OpenAI Agents SDK: standard tool-calling loop; verify current model pricing/latency at build
 time rather than assuming.
 
-### 16. Non-functional requirements
+### 17. Non-functional requirements
 
 | Requirement | Target |
 | --- | --- |
@@ -376,7 +396,7 @@ time rather than assuming.
 | Idempotent checkout | Every call keyed by `intent_id` |
 | Secrets handling | Environment variables only; never committed |
 
-### 17. Error handling and edge cases
+### 18. Error handling and edge cases
 
 | Scenario | Handling |
 | --- | --- |
@@ -387,7 +407,7 @@ time rather than assuming.
 | Merchant/billing API error or timeout | Retry with backoff (max 2), then notify user and log the failure |
 | Duplicate trigger while an Intent is pending | Suppress duplicate notification |
 
-### 18. Testing strategy
+### 19. Testing strategy
 
 - Unit tests: trigger math for both tracks (predicted-date recalibration; known-date comparison) against fixed fixtures; tool functions against mocked Prava/merchant responses.
 - Integration test: one full sandbox run of the happy path for each track, plus one
@@ -397,7 +417,7 @@ rejected-mandate path, before demo day.
 
 ## Part III — Trust & Operations
 
-### 19. Privacy and data handling
+### 20. Privacy and data handling
 
 Two distinct privacy problems, not one.
 
@@ -424,7 +444,7 @@ Design commitments:
 - Retention limits: a rolling window (e.g., 12 months) on the audit log rather than indefinite retention.
 - Age-gated to 18+: DPDP’s strict minors’ provisions are out of scope for a 48-hour build.
 
-### 20. Risks and mitigations
+### 21. Risks and mitigations
 
 | Risk | Mitigation |
 | --- | --- |
@@ -435,13 +455,13 @@ Design commitments:
 | Teams track reads as “not really using Prava” since billing is mocked | State plainly: the trigger, the Prava mandate, and the passkey approval are real; only the SaaS billing call is simulated |
 
 
-### 21. Deployment for the hackathon
+### 22. Deployment for the hackathon
 
 Single lightweight backend (FastAPI or equivalent) plus the orchestrator process. Sandbox credentials only — nothing touches a real card until the full flow is verified end-to-end in sandbox
 at least once. Cheap hosting (Render/Railway, or a tunneled local instance for the live demo)
 is entirely sufficient.
 
-### 22. Observability
+### 23. Observability
 
 A structured log line at every state transition (Intent created/approved/rejected, Transaction
 completed/failed). logs/audit_log.json doubles as both the user-facing savings log and the
@@ -450,7 +470,7 @@ engineering debug trail for the hackathon — no separate dashboard needed.
 
 ## Part IV — Business & Execution
 
-### 23. Success metrics for the demo
+### 24. Success metrics for the demo
 
 - One real (or sandboxed) end-to-end Prava transaction per track, agent-initiated, with no
 user-typed purchase request.
@@ -459,7 +479,7 @@ plus the one Teams subscription renewal proposal.
 - A visible, believable savings number in the audit log for both tracks.
 - Judges can articulate, unprompted, how this differs from “just another shopping bot.”
 
-### 24. Judging-criteria alignment
+### 25. Judging-criteria alignment
 
 | Criterion | How Restock addresses it |
 | --- | --- |
@@ -474,14 +494,14 @@ plus the one Teams subscription renewal proposal.
 | B2B value | Restock Teams — directly answers the brief’s own “manage a subscription” / “procure software” examples |
 | Startup potential | Real recurring-revenue and affiliate paths, see below |
 
-### 25. Business model
+### 26. Business model
 
 Restock Home: small monthly subscription per household (₹99–199), or a cut of avoided-stockout savings, or affiliate revenue from quick-commerce partners on autonomous reorders.
 Restock Teams: a cut of savings actually found (e.g., 20% of first-year savings from a caught
 price increase or right-sized seat count), or a flat per-seat monthly fee once a team tracks more
 than a handful of subscriptions.
 
-### 26. Roadmap beyond the hackathon
+### 27. Roadmap beyond the hackathon
 
 Each v1 limitation has a specific resolution path, not just a “later” label — sequenced by impact
 vs. effort rather than by how they’re listed in Appendix A.
@@ -520,7 +540,7 @@ Also on the roadmap: expand merchant coverage beyond Zepto/Swiggy as Prava adds 
 skills; combine the predicted and known-date triggers on the same item where relevant (buy
 on whichever fires first) — directly one-ups Amazon AutoBuy’s single-signal model.
 
-### 27. Team and suggested roles for the 48 hours
+### 28. Team and suggested roles for the 48 hours
 
 - Payments/Prava integration lead — owns the intent → passkey → mandate → credential flow end-to-end against sandbox; first thing to get working, for both tracks.
 - Agent/orchestration lead — OpenAI Agents SDK loop, tool definitions, both trigger-source implementations.
@@ -529,7 +549,7 @@ both mock fallbacks.
 - Product/demo lead — UI, demo script, video, submission write-up, Discord/office-hours
 liaison for the Zepto/Swiggy access question.
 
-### 28. Immediate action items
+### 29. Immediate action items
 
 1. Apply on Devfolio today if not already done — rolling review, 3-day RSVP window.
 2. Confirm Zepto/Swiggy sandbox access in Prava’s Discord before hour 8.
@@ -539,7 +559,7 @@ liaison for the Zepto/Swiggy access question.
 
 ### A. Known limitations and non-goals (v1)
 
-Resolution paths for each of these are in §26 (Roadmap) — this list is deliberately just the “not
+Resolution paths for each of these are in §27 (Roadmap) — this list is deliberately just the “not
 done yet” inventory, not the plan to close it.
 
 - No real ML forecasting model — deterministic exponential smoothing only, for the
@@ -553,7 +573,7 @@ mock; the renewal date and Prava mandate flow around it are real.
 ### B. Open questions — verify before/during build
 
 - RESOLVED — Model selection for the orchestrator: gpt-5.4-mini for the routine triggercheck loop, gpt-5.6-sol for notification copy and the Teams plan-comparison judgment
-call. See §13.
+call. See §14.
 - Exact PravaSDK method signatures for intent creation and mandate webhook payload
 shape.
 - Zepto/Swiggy MCP skill’s exact tool names and required auth scopes.
@@ -562,7 +582,7 @@ shape.
 Intent creation, or whether it’s fixed by Prava.
 - Whether Prava supports a standing/recurring mandate (scoped to one merchant, capped,
 valid for repeat charges) — would let Restock Teams move off the disclosed billing mock
-onto real vendor-initiated renewal charges (Path A in §26). Ask directly in Discord/office
+onto real vendor-initiated renewal charges (Path A in §27). Ask directly in Discord/office
 hours rather than assuming either way.
 
 ### C. Glossary
