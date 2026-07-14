@@ -2,6 +2,7 @@ import json
 
 from fastapi.testclient import TestClient
 
+from common import notification_store
 from ui import api
 
 
@@ -28,11 +29,19 @@ def test_audit_log_endpoint_reads_json_file(tmp_path, monkeypatch) -> None:
     ]
 
 
-def test_pending_notifications_endpoint_returns_only_pending_store() -> None:
-    api.PENDING_NOTIFICATIONS[:] = [
-        {"item": "Coffee", "status": "pending", "actions": ["approve", "adjust", "skip"]}
-    ]
-    try:
-        assert client.get("/notifications/pending").json() == api.PENDING_NOTIFICATIONS
-    finally:
-        api.PENDING_NOTIFICATIONS.clear()
+def test_pending_notifications_endpoint_returns_only_pending_store(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        notification_store, "NOTIFICATION_STORE_PATH", tmp_path / "notifications.json"
+    )
+    notification_store.reset()
+    created = notification_store.create(
+        {
+            "item_id": "coffee-500g",
+            "message": "Coffee will run out soon.",
+            "actions": ["approve", "adjust", "skip"],
+        }
+    )
+
+    assert client.get("/notifications/pending").json() == [created]

@@ -6,10 +6,11 @@ from typing import Any
 
 from fastapi import FastAPI
 
+from common import notification_store
+
 
 ROOT = Path(__file__).resolve().parents[1]
 AUDIT_LOG_PATH = ROOT / "logs" / "audit_log.json"
-PENDING_NOTIFICATIONS: list[dict[str, Any]] = []
 
 app = FastAPI(
     title="Restock API",
@@ -48,4 +49,4 @@ def audit_log() -> list[dict[str, Any]]:
 
 @app.get("/notifications/pending")
 def pending_notifications() -> list[dict[str, Any]]:
-    return list(PENDING_NOTIFICATIONS)
+    return notification_store.get_pending()

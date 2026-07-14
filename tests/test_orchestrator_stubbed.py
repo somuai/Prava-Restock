@@ -22,11 +22,20 @@ from agent.orchestrator import (
     request_prava_intent,
     spend_cap_guardrail,
 )
+from common import notification_store
 from payments import prava_client
 from payments.models import TrackedItem, User
 
 
 USER_ID = UUID("00000000-0000-0000-0000-000000000001")
+
+
+@pytest.fixture(autouse=True)
+def isolated_notification_store(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        notification_store, "NOTIFICATION_STORE_PATH", tmp_path / "notifications.json"
+    )
+    notification_store.reset()
 
 
 def build_user(*, per_item_cap: str = "1000", monthly_cap: str = "5000") -> User:
@@ -68,7 +77,7 @@ def test_full_stubbed_cycle_notifies_and_logs_transaction(tmp_path) -> None:
     trace = RestockOrchestrator(context).run_cycle(item)
 
     assert trace["status"] == "completed"
-    assert context.notifications[0]["status"] == "pending"
+    assert notification_store.get_pending()[0]["status"] == "pending"
     assert context.transactions[0].amount == Decimal("450")
     assert context.audit_entries[-1].event_type.value == "transaction_completed"
     persisted = json.loads(context.audit_log_path.read_text())
@@ -105,7 +114,7 @@ def test_over_cap_rejected_before_stub_client(
 
     assert called is False
     assert context.intents == {}
-    assert context.notifications == []
+    assert notification_store.get_pending() == []
 
 
 def test_sdk_guardrail_is_attached_and_trips_on_over_cap(tmp_path) -> None:

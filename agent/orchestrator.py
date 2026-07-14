@@ -23,6 +23,7 @@ from agents import (
 )
 from pydantic import BaseModel
 
+from common import notification_store
 from merchant import mock_subscription_checkout, zepto_checkout
 from payments import prava_client
 from payments.models import (
@@ -82,7 +83,6 @@ class OrchestratorContext:
     prava_intent_refs: dict[UUID, str] = field(default_factory=dict)
     mandates: dict[str, Mandate] = field(default_factory=dict)
     transactions: list[Transaction] = field(default_factory=list)
-    notifications: list[dict[str, Any]] = field(default_factory=list)
     audit_entries: list[AuditLogEntry] = field(default_factory=list)
 
     def item(self, item_id: UUID) -> TrackedItem:
@@ -216,13 +216,13 @@ def _notify_user(
     message: str,
     actions: list[str],
 ) -> None:
-    notification = {
-        "item_id": str(item_id),
-        "message": message,
-        "actions": list(actions),
-        "status": "pending",
-    }
-    context.notifications.append(notification)
+    notification_store.create(
+        {
+            "item_id": str(item_id),
+            "message": message,
+            "actions": list(actions),
+        }
+    )
     _log_event(
         context,
         AuditEventType.NOTIFICATION_SENT.value,

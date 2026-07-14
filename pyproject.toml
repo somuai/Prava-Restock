@@ -21,4 +21,4 @@ dependencies = [
 testpaths = ["tests"]
 
 [tool.setuptools.packages.find]
-include = ["agent*", "triggers*", "payments*", "merchant*", "ui*", "demo*"]
+include = ["agent*", "common*", "triggers*", "payments*", "merchant*", "ui*", "demo*"]

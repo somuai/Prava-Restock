@@ -4,6 +4,7 @@ from datetime import date, timedelta
 import json
 from pathlib import Path
 
+from common import notification_store
 from payments.models import TrackedItem, TriggerType
 
 
@@ -29,6 +30,7 @@ def load_seed_items(today: date | None = None) -> list[TrackedItem]:
 
 def reset_demo_state(today: date | None = None) -> list[TrackedItem]:
     AUDIT_LOG_PATH.write_text("[]\n")
+    notification_store.reset()
     return load_seed_items(today)
 
 
