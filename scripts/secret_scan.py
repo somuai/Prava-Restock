@@ -13,7 +13,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 OPENAI_KEY = re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b")
 PRAVA_KEY = re.compile(
-    r"PRAVA_API_KEY\s*=\s*[\"']?([A-Za-z0-9_-]{8,})[\"']?"
+    r"(?m)^[+-]?(?:export[ \t]+)?PRAVA_API_KEY[ \t]*=[ \t]*"
+    r"[\"']?([A-Za-z0-9_-]{8,})[\"']?[ \t]*$"
 )
 
 
