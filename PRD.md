@@ -449,7 +449,8 @@ Design commitments:
 
 | Risk | Mitigation |
 | --- | --- |
-| Prava markets “US & SEA” coverage, but its skill repo ships Zepto/Swiggy (India) integrations — unclear if live for hackathon sandbox use | Confirm in Prava’s Discord/office hours on day 1; fall back to a disclosed mock by hour 8 |
+| **RESOLVED** — Prava markets “US & SEA” coverage, but its skill repo ships Zepto/Swiggy (India) integrations — previously unclear if live for hackathon sandbox use | Merchant flows are confirmed buildable per Prava’s team directly, not just the docs. Shubham Kukreti confirmed via Discord on 17 July 2026: "Merchants aren't restricted, so you can build flows for things like Zepto or Swiggy." |
+| Real-card testing (sandbox or production) requires a Visa card issued in US/Canada/Hong Kong/Singapore, which the team does not currently hold | Use Prava's own documented sandbox test cards for all hackathon build and demo work — confirmed to complete a full simulated flow with no geography restriction. Defer the real-card question to post-hackathon production planning; Prava has offered to help source a compatible card at that stage. |
 | Forecasting looks like a science project and eats the clock | Ship the day-counter first; add smoothing only if time remains after the payment flow works end-to-end |
 | Passkey/biometric approval doesn’t demo well on a shared screen | Scripted, clearly-labeled fallback ready for the recorded demo |
 | Judges read “proactive” as unsafe or spammy | Make spend caps and the approve/adjust/skip step visually central — control is the pitch, not autonomy for its own sake |

@@ -260,10 +260,14 @@ receipt trail, not just a chat transcript.
 
 ---
 
-## 8. Fallback plan if Zepto/Swiggy sandbox access isn't confirmed
+## 8. Fallback plan if a real payment step fails during testing
 
-Check this in Prava's Discord / office hours in the first few hours of the
-hackathon. If sandbox merchant access isn't confirmed by roughly hour 8:
+Zepto/Swiggy sandbox merchant access is confirmed: Prava's Shubham Kukreti
+stated via Discord on 17 July 2026, "Merchants aren't restricted, so you can
+build flows for things like Zepto or Swiggy." Fall back to the disclosed mock
+only if a real payment step fails during testing for a reason unrelated to this
+confirmed merchant access, such as card constraints or an unexpected sandbox
+error:
 
 - Build `merchant/mock_checkout.py`: a clearly-labeled simulated merchant endpoint
   that still receives and validates the real Prava one-time credential (so the

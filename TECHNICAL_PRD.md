@@ -223,6 +223,8 @@ create_intent(merchant, amount, item_description, constraints) -> intent_ref
 await_mandate(intent_ref) -> { mandate_id, credential_reference, scope, approved_at } | rejected | expired
 ```
 
+**Known platform fact for production planning:** Prava requires a Visa card issued in the US, Canada, Hong Kong, or Singapore for any real card used in the flow, whether in sandbox or production. Prava's own documented sandbox test cards are unaffected and complete a full simulated flow with no geography restriction; use those for all hackathon build and demo work. See the resolved merchant-access and real-card-testing entries in `PRD.md` §21, "Risks and mitigations."
+
 ### 9.2 Merchant / billing checkout (Zepto / Swiggy for Home; mocked billing for Teams)
 
 Reuse Prava's own published checkout skills (`prava-merchants-checkout/` in the same repo) for Restock Home rather than hand-rolling merchant integration. Contract every implementation must satisfy — same interface regardless of what's behind it:
@@ -293,10 +295,11 @@ Structured log line at every state transition (`Intent` created/approved/rejecte
 
 - [x] **RESOLVED** — Model selection for the orchestrator: one verified-reliable model, `gpt-5.4-mini`, for the full loop including notification copy and the Teams plan-comparison decision. This removes a constrained-quota live-demo dependency; hard constraints stay in code-level Guardrails. See §7.
 - [ ] Exact `PravaSDK` method signatures for intent creation and mandate webhook payload shape.
-- [ ] Zepto/Swiggy MCP skill's exact tool names and required auth scopes.
+- [ ] Zepto/Swiggy MCP skill's exact tool names and required auth scopes. Merchant-level access itself is confirmed: Shubham Kukreti stated via Discord on 17 July 2026, "Merchants aren't restricted, so you can build flows for things like Zepto or Swiggy." Only the exact tool names and auth scopes remain to pull from the skill repo.
 - [ ] Location of Prava's sandbox test-card/test-data reference in `prava-skills`.
 - [ ] Whether Prava mandates expose a configurable TTL/expiry we should set explicitly on `Intent` creation, or whether it's fixed by Prava.
-- [ ] Whether Prava supports a standing/recurring mandate (scoped to one merchant, capped, valid for repeat charges) — this would let Restock Teams move off the disclosed billing mock onto real vendor-initiated renewal charges (Path A in the roadmap, §15). Ask directly in Discord/office hours rather than assuming either way.
+- [x] **RESOLVED — platform fact:** Prava requires a Visa card issued in the US, Canada, Hong Kong, or Singapore for any real card used in the flow, whether in sandbox or production. Prava's own documented sandbox test cards are unaffected and complete a full simulated flow with no geography restriction; use those for the hackathon. For production, Prava has offered: "reach out to us and we'll sort you out with a compatible card".
+- [ ] Whether Prava supports a standing/recurring mandate (scoped to one merchant, capped, valid for repeat charges) — this would let Restock Teams move off the disclosed billing mock onto real vendor-initiated renewal charges (Path A in the roadmap, §15). Follow-up question sent via Discord 17 July 2026 — awaiting response. Do not assume either answer; this still gates whether Restock Teams' billing can move off the disclosed mock.
 
 ## 18. Glossary
 
