@@ -516,7 +516,7 @@ vs. effort rather than by how they’re listed in Appendix A.
 
 **Built pre-hackathon:** Restock Home now fires on predicted depletion or a user-set price threshold, whichever condition is met first, and combines both reasons into one notification when they coincide. Price-checking is wired to a stub only; real merchant price-querying is Phase 8/9 scope and is not built here.
 
-1. Notification delivery (highest priority — this is the product’s core value prop, not
+1. **Built foundation:** Notification delivery (highest priority — this is the product’s core value prop, not
    a nice-to-have). A web dashboard nobody has open defeats the entire “reaches you before
    you ask” thesis. Skip a native app first; go straight to WhatsApp Business API (fits an India-first, Zepto/Swiggy userbase that already lives in WhatsApp — approve/adjust/skip map directly
 onto WhatsApp’s interactive buttons) or an installable PWA with web push (no app-store
@@ -533,7 +533,7 @@ Present” mode both point toward — worth a direct question to Prava’s team 
 an assumption (see Appendix B).
    - Path B (buildable now, no new dependency): keep the existing agent-initiated, one-time-credential flow exactly as built, and have Restock pay the vendor’s hosted
 invoice/payment link directly two days before the known renewal date — same architecture, different merchant_sku_id target. This is the one to actually build first.
-3. Real forecasting model. The constraint is data volume, not modeling difficulty — a
+3. **Data foundation built; production ML still gated:** Real forecasting model. The constraint is data volume, not modeling difficulty — a
 single household doesn’t generate enough history to train anything meaningful per-user for
 months. Sequence: keep logging (item, actual_interval, predicted_interval) from
 day one even while running on plain exponential smoothing, so training data exists when it’s
@@ -542,7 +542,7 @@ items, paper-type items — where the volume actually is) with a small per-user 
 personalization, rather than per-user models that will always be data-starved. Keep the EWMA
 as a permanent cold-start fallback for any new item regardless of how mature the overall
 system gets — every new item starts cold no matter what.
-4. Multi-user/household mandates. The hard part isn’t the schema (a Household entity
+4. **Tenant controls built; shared-mandate semantics still gated:** Multi-user/household mandates. The hard part isn’t the schema (a Household entity
 with member sub-limits is straightforward) — it’s an unresolved product-policy question: who’s
 allowed to approve what, and what happens when two members disagree? Deliberately holding this until a single-user version is validated in the real world, rather than guessing at an
 approval policy nobody’s tested against actual usage.

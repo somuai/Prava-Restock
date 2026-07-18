@@ -59,6 +59,10 @@ Phase 11 adds Household and Organization tenants, owner/admin/approver/member ro
 
 The same PWA is wrapped by Capacitor 8 under `ui/web/android` and `ui/web/ios`. Both native projects support the `restock://approval` callback, OS push registration, and device-bound secure session storage; payment credentials never enter local storage. Local Android and iOS Simulator builds are verified. Physical-device testing and store enrollment remain launch gates, and no store fee has been paid.
 
+## Forecasting
+
+EWMA remains the production baseline. Phase 13 adds consent-gated forecast observations, category priors for cold start, export/deletion, and a dependency-free offline benchmark reporting MAE, trigger precision, missed-depletion rate, and action rate. `forecasting/datasets.json` blocks data whose training license is not authoritative; UCI Online Retail II is permitted only as a weak pipeline benchmark, not as a household-behavior model.
+
 ## Project specifications
 
 - [Product requirements](PRD.md)

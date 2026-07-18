@@ -33,7 +33,7 @@ User <──approve/adjust/skip──> Restock Backend <──intent/mandate─�
 | **Prava client** | Thin wrapper around Prava's SDK — intent creation, mandate status polling/webhook, credential retrieval | Isolate all Prava-specific code behind this interface so a real SDK-signature mismatch only requires changing one file |
 | **Merchant client** | Wraps the Zepto/Swiggy MCP checkout skill (Home) and a disclosed mock subscription-billing checkout (Teams) | Same isolation principle as the Prava client; both implement the same `complete_checkout(...)` contract — see §9.2 |
 | **Audit/notification store** | Persists Intents, Mandates (references only, never raw credentials), Transactions, and the user-facing audit log | See §5 for schemas |
-| **UI (chat surface)** | Displays proactive notifications, approve/adjust/skip controls, and the audit/savings log | For the hackathon: a disclosed mocked WhatsApp-style conversational surface for Restock Home and a disclosed mocked Slack-style notification/approval surface for Restock Teams. Real WhatsApp Business API access (including its 1–2 week business-verification lead time) and a real Slack app are post-hackathon roadmap items. |
+| **UI (chat surface)** | Displays proactive notifications, approve/adjust/skip controls, and the audit/savings log | The guaranteed surface is the disclosed WhatsApp-style/Slack-style PWA. A real single-workspace Slack Bolt adapter and a Meta test-number webhook/template adapter are implemented; whether the external accounts are configured is exposed at runtime. Meta publishes template review guidance of up to 24 hours, but no fixed business-verification SLA is claimed. |
 
 See `PRD.md` §10, "Distribution and surface," for why these user-facing surfaces remain independent of the merchant apps that Restock calls at the backend.
 
@@ -137,11 +137,11 @@ typical_cadence_days_new = ALPHA * observed_interval_days
                           + (1 - ALPHA) * typical_cadence_days_old       # ALPHA default 0.3
 ```
 
-**First-time items** seed `typical_cadence_days` from a user-provided estimate at onboarding — there's no cold-start model, just an honest starting guess that gets corrected by real recalibration within 2-3 cycles.
+**First-time items** seed `typical_cadence_days` from a transparent category prior or a user-provided estimate at onboarding. Personal EWMA observations replace the prior as completed purchases accumulate.
 
 If depletion and price conditions become true in the same check, `propose(item)` emits one notification containing both reasons. The price-check contract is built pre-hackathon and wired only to a deterministic merchant stub; real merchant price-querying remains Phase 8/9 scope and is not live here.
 
-**Explicitly deferred to post-hackathon:** a real regression/time-series model using purchase-history features (day-of-week effects, seasonal consumption changes, household-size inference). Do not attempt this for the 48-hour build — see `PRD.md` §7 scope boundaries.
+**Production baseline:** EWMA remains authoritative. Consent-gated observations, deletion, category priors, and an offline comparison harness are built. A regression/time-series candidate remains feature-flagged until it materially beats EWMA on MAE, trigger precision, missed depletion, and action rate without weakening explainability.
 
 ### 6.2 Known-date trigger (Restock Teams — subscription renewal)
 
@@ -291,11 +291,11 @@ Every durable state transition writes a sanitized domain-audit entry with run, u
 
 *Resolution paths for each of these live in `PRD.md` §15 (Roadmap) — this list is deliberately just the "not done yet" inventory, not the plan to close it.*
 
-- No real ML forecasting model — deterministic exponential smoothing only, for the predicted-trigger track.
+- No production ML forecasting model — deterministic EWMA remains the production baseline while consented observation logging and offline benchmarking collect evidence.
 - No real SaaS billing-portal integration — the known-date track's checkout is a disclosed mock; the renewal date and Prava mandate flow around it are real.
-- No multi-user/shared household or team mandates.
-- No native mobile app.
-- The guaranteed submission surface remains a disclosed WhatsApp-style mock. A Meta test-number integration and a single-workspace Slack app may be shown only when their external setup succeeds, and must be labeled separately from production-ready channel access.
+- Multi-user Household/Organization membership, roles, invitations, consent, and multi-approver policy are implemented; shared Prava mandate semantics remain gated on Prava's standing-mandate answer.
+- Capacitor Android/iOS wrappers are implemented and simulator-built; store enrollment, physical-device push validation, and publication remain external launch gates.
+- The guaranteed submission surface remains the disclosed PWA. The real Slack adapter and Meta test-number adapter must still disclose whether external credentials/setup are active.
 - Merchant coverage limited to Zepto/Swiggy (or the disclosed mock fallback) for Home; one disclosed mock subscription for Teams.
 
 ## 17. Open questions — verify before/during build

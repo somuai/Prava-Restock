@@ -346,7 +346,20 @@ class WorkflowService:
         )
         if item.trigger_type is TriggerType.PREDICTED:
             assert item.last_purchased_at is not None
+            predicted_date = consumption_model.predicted_depletion_date(item)
             observed = max(1, (date.today() - item.last_purchased_at).days)
+            tenant_id = str(item.tenant_id) if item.tenant_id else self.repository.personal_tenant_id(str(item.user_id))
+            self.repository.log_forecast_observation(
+                tenant_id=tenant_id,
+                user_id=str(item.user_id),
+                item_id=str(item.item_id),
+                predicted_depletion_date=predicted_date.isoformat(),
+                actual_reorder_date=date.today().isoformat(),
+                category=item.category.value,
+                trigger_cause=run["trigger_reason"],
+                notification_action="approved",
+                forecast_error_days=float((date.today() - predicted_date).days),
+            )
             consumption_model.recalibrate(item, observed)
             item.last_purchased_at = date.today()
             item.last_purchase_amount = Decimal(str(transaction["amount"]))

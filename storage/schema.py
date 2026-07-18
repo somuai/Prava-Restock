@@ -196,3 +196,22 @@ class SchedulerLeaseRow(Base):
     lease_name: Mapped[str] = mapped_column(String(100), primary_key=True)
     owner_id: Mapped[str] = mapped_column(String(100))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ForecastObservationRow(Base):
+    __tablename__ = "forecast_observations"
+
+    observation_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.tenant_id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id"), index=True)
+    item_id: Mapped[str] = mapped_column(ForeignKey("tracked_items.item_id"), index=True)
+    predicted_depletion_date: Mapped[str] = mapped_column(String(10))
+    actual_reorder_date: Mapped[str] = mapped_column(String(10))
+    category: Mapped[str] = mapped_column(String(40))
+    quantity: Mapped[float | None] = mapped_column(Numeric(18, 3), nullable=True)
+    household_size: Mapped[int | None] = mapped_column(nullable=True)
+    trigger_cause: Mapped[str] = mapped_column(String(80))
+    notification_action: Mapped[str] = mapped_column(String(40))
+    forecast_error_days: Mapped[float] = mapped_column(Numeric(18, 3))
+    model_version: Mapped[str] = mapped_column(String(40), default="ewma-v1")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

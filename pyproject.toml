@@ -30,4 +30,4 @@ markers = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["agent*", "channels*", "common*", "triggers*", "payments*", "merchant*", "ui*", "demo*", "storage*", "workflow*"]
+include = ["agent*", "channels*", "common*", "forecasting*", "triggers*", "payments*", "merchant*", "ui*", "demo*", "storage*", "workflow*"]

@@ -17,6 +17,7 @@ from storage.schema import (
     ApprovalDecisionRow,
     ApprovalPolicyRow,
     ConsentRow,
+    ForecastObservationRow,
     InvitationRow,
     MembershipRow,
     NotificationActionRow,
@@ -285,6 +286,73 @@ class RestockRepository:
             session.add(row)
             session.flush()
             return _row_dict(row)
+
+    def has_consent(self, *, tenant_id: str, user_id: str, kind: str) -> bool:
+        with self.database.session() as session:
+            row = session.scalar(select(ConsentRow).where(
+                ConsentRow.tenant_id == tenant_id,
+                ConsentRow.user_id == user_id,
+                ConsentRow.kind == kind,
+                ConsentRow.granted.is_(True),
+            ))
+            return row is not None
+
+    def log_forecast_observation(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        item_id: str,
+        predicted_depletion_date: str,
+        actual_reorder_date: str,
+        category: str,
+        trigger_cause: str,
+        notification_action: str,
+        forecast_error_days: float,
+        quantity: Decimal | None = None,
+        household_size: int | None = None,
+        model_version: str = "ewma-v1",
+    ) -> dict[str, Any] | None:
+        if not self.has_consent(tenant_id=tenant_id, user_id=user_id, kind="forecasting"):
+            return None
+        row = ForecastObservationRow(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            item_id=item_id,
+            predicted_depletion_date=predicted_depletion_date,
+            actual_reorder_date=actual_reorder_date,
+            category=category,
+            quantity=quantity,
+            household_size=household_size,
+            trigger_cause=trigger_cause,
+            notification_action=notification_action,
+            forecast_error_days=forecast_error_days,
+            model_version=model_version,
+        )
+        with self.database.session() as session:
+            session.add(row)
+            session.flush()
+            return _row_dict(row)
+
+    def list_forecast_observations(self, *, tenant_id: str, user_id: str) -> list[dict[str, Any]]:
+        self.require_membership(tenant_id, user_id)
+        with self.database.session() as session:
+            rows = session.scalars(select(ForecastObservationRow).where(
+                ForecastObservationRow.tenant_id == tenant_id,
+                ForecastObservationRow.user_id == user_id,
+            )).all()
+            return [_row_dict(row) for row in rows]
+
+    def delete_forecast_observations(self, *, tenant_id: str, user_id: str) -> int:
+        self.require_membership(tenant_id, user_id)
+        with self.database.session() as session:
+            rows = session.scalars(select(ForecastObservationRow).where(
+                ForecastObservationRow.tenant_id == tenant_id,
+                ForecastObservationRow.user_id == user_id,
+            )).all()
+            for row in rows:
+                session.delete(row)
+            return len(rows)
 
     def create_approval_policy(
         self,

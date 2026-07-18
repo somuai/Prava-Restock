@@ -1,0 +1,23 @@
+[
+  {
+    "name": "UCI Online Retail II",
+    "url": "https://archive.ics.uci.edu/dataset/502/online+retail+ii",
+    "license": "CC BY 4.0",
+    "status": "allowed_pipeline_benchmark_only",
+    "reason": "UK giftware transactions include wholesalers and are a weak household-replenishment match."
+  },
+  {
+    "name": "dunnhumby The Complete Journey",
+    "url": "https://www.dunnhumby.com/source-files/",
+    "license": "not verified for Restock training",
+    "status": "blocked_pending_license_review",
+    "reason": "Household grocery behavior is relevant, but the source page does not grant an explicit training/redistribution license."
+  },
+  {
+    "name": "Instacart 2017 reorder data",
+    "url": "https://www.instacart.com/datasets/grocery-shopping-2017",
+    "license": "authoritative current training/redistribution license not located",
+    "status": "blocked",
+    "reason": "Feature-relevant data must not be used without authoritative permission."
+  }
+]

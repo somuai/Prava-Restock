@@ -354,6 +354,30 @@ def privacy_delete(
     repository.delete_user_data(user_id)
 
 
+@app.get("/api/v1/tenants/{tenant_id}/forecasting/observations")
+def forecast_observations(
+    tenant_id: str,
+    user_id: str = Depends(require_user),
+    repository: RestockRepository = Depends(get_repository),
+) -> list[dict[str, Any]]:
+    try:
+        return repository.list_forecast_observations(tenant_id=tenant_id, user_id=user_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@app.delete("/api/v1/tenants/{tenant_id}/forecasting/observations")
+def delete_forecast_observations(
+    tenant_id: str,
+    user_id: str = Depends(require_user),
+    repository: RestockRepository = Depends(get_repository),
+) -> dict[str, int]:
+    try:
+        return {"deleted": repository.delete_forecast_observations(tenant_id=tenant_id, user_id=user_id)}
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
 @app.get("/api/v1/workflows")
 def workflows(
     user_id: str = Depends(require_user),
