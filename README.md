@@ -67,6 +67,10 @@ EWMA remains the production baseline. Phase 13 adds consent-gated forecast obser
 
 Phase 14 adds the official Swiggy MCP endpoints for catalog/cart work through the same quote/checkout/reconciliation contract. Swiggy's MCP can expose COD, but Restock never treats COD as a substitute for an approved Prava card payment; card checkout stays an explicit browser boundary and defaults to a disclosed simulation. Restock Teams also supports HTTPS hosted-invoice quotes and idempotent one-time disclosed checkout. Recurring Teams charging remains disabled pending Prava's standing-mandate answer.
 
+## Operations and recovery
+
+Every API response carries an `X-Correlation-ID`; `/metrics` reports aggregate request, error, and latency counters without user/payment fields. JSON request logs contain path/status/latency only. `scripts/retention_cleanup.py` applies `RESTOCK_RETENTION_DAYS` to old audit and resolved notification data while retaining transaction proof. `scripts/backup_restore.py` performs verified SQLite backups locally and uses `pg_dump`/`pg_restore` for operator-controlled Postgres recovery. CI runs Python tests, PWA tests/build, and a production-container build.
+
 ## Project specifications
 
 - [Product requirements](PRD.md)

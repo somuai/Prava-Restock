@@ -28,3 +28,5 @@ jobs:
       - name: Test and build PWA
         working-directory: ui/web
         run: npm ci && npm test && npm run build
+      - name: Build production container
+        run: docker build -t restock-ci .

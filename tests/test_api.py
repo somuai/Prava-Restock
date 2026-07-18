@@ -25,6 +25,9 @@ def test_hello_world_and_health_endpoints(monkeypatch) -> None:
     assert payload["capabilities"]["real_money_enabled"] is False
     assert client.get("/health").json() == {"status": "healthy"}
     assert client.get("/capabilities").json()["real_money_enabled"] is False
+    correlated = client.get("/health", headers={"X-Correlation-ID": "test-correlation"})
+    assert correlated.headers["x-correlation-id"] == "test-correlation"
+    assert client.get("/metrics").json()["http_requests_total"] >= 1
 
 
 def test_audit_log_endpoint_reads_json_file(tmp_path, monkeypatch) -> None:

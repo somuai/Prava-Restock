@@ -5,8 +5,11 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import json
 import os
+import logging
 from pathlib import Path
+import time
 from typing import Any
+from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,6 +30,8 @@ DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000001"
 LOCAL_DEMO_TOKEN = "restock-local-demo-token"
 REPOSITORY: RestockRepository | None = None
 _REQUESTS: dict[str, deque[datetime]] = defaultdict(deque)
+_METRICS: dict[str, float] = defaultdict(float)
+LOGGER = logging.getLogger("restock.api")
 
 app = FastAPI(
     title="Restock API",
@@ -48,7 +53,33 @@ app.add_middleware(
 
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
-    response = await call_next(request)
+    correlation_id = request.headers.get("X-Correlation-ID") or str(uuid4())
+    started = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        _METRICS["http_errors_total"] += 1
+        LOGGER.exception(json.dumps({
+            "event": "request_failed",
+            "correlation_id": correlation_id,
+            "method": request.method,
+            "path": request.url.path,
+        }))
+        raise
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    _METRICS["http_requests_total"] += 1
+    _METRICS["http_latency_ms_sum"] += elapsed_ms
+    if response.status_code >= 500:
+        _METRICS["http_errors_total"] += 1
+    LOGGER.info(json.dumps({
+        "event": "request_completed",
+        "correlation_id": correlation_id,
+        "method": request.method,
+        "path": request.url.path,
+        "status": response.status_code,
+        "latency_ms": round(elapsed_ms, 2),
+    }))
+    response.headers["X-Correlation-ID"] = correlation_id
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
@@ -181,6 +212,16 @@ def readiness() -> dict[str, Any]:
 @app.get("/capabilities")
 def capabilities() -> dict[str, str | bool]:
     return runtime_modes()
+
+
+@app.get("/metrics")
+def metrics() -> dict[str, float]:
+    count = _METRICS["http_requests_total"]
+    return {
+        "http_requests_total": count,
+        "http_errors_total": _METRICS["http_errors_total"],
+        "http_latency_ms_average": _METRICS["http_latency_ms_sum"] / count if count else 0.0,
+    }
 
 
 @app.get("/audit-log")

@@ -7,7 +7,7 @@ import secrets
 from typing import Any
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 
 from payments.models import TrackedItem, User
@@ -691,3 +691,16 @@ class RestockRepository:
                 .order_by(AuditRow.created_at.desc())
             ).all()
             return [_row_dict(row) for row in rows]
+
+    def enforce_retention(self, *, before: datetime) -> dict[str, int]:
+        """Delete old audit and resolved notification records; payment proof is retained."""
+        with self.database.session() as session:
+            audit_result = session.execute(delete(AuditRow).where(AuditRow.created_at < before))
+            notification_result = session.execute(delete(NotificationRow).where(
+                NotificationRow.created_at < before,
+                NotificationRow.status != "pending",
+            ))
+            return {
+                "audit_entries": int(audit_result.rowcount or 0),
+                "notifications": int(notification_result.rowcount or 0),
+            }
