@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from common import notification_store
 from common import session_auth
 from channels import whatsapp
-from merchant import zepto_checkout
+from merchant import swiggy_checkout, zepto_checkout
 from storage import Database, RestockRepository
 from workflow import WorkflowService
 
@@ -69,6 +69,7 @@ def runtime_modes() -> dict[str, str | bool]:
     return {
         "prava_mode": "sandbox_configured" if prava_configured else "sandbox_unconfigured",
         "home_merchant_mode": zepto_checkout.merchant_mode().value,
+        "swiggy_payment_mode": swiggy_checkout.payment_mode().value,
         "teams_billing_mode": "disclosed_mock",
         "real_money_enabled": (
             zepto_checkout.merchant_mode().value == "real"

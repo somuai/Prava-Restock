@@ -63,6 +63,10 @@ The same PWA is wrapped by Capacitor 8 under `ui/web/android` and `ui/web/ios`. 
 
 EWMA remains the production baseline. Phase 13 adds consent-gated forecast observations, category priors for cold start, export/deletion, and a dependency-free offline benchmark reporting MAE, trigger precision, missed-depletion rate, and action rate. `forecasting/datasets.json` blocks data whose training license is not authoritative; UCI Online Retail II is permitted only as a weak pipeline benchmark, not as a household-behavior model.
 
+## Additional merchant adapters
+
+Phase 14 adds the official Swiggy MCP endpoints for catalog/cart work through the same quote/checkout/reconciliation contract. Swiggy's MCP can expose COD, but Restock never treats COD as a substitute for an approved Prava card payment; card checkout stays an explicit browser boundary and defaults to a disclosed simulation. Restock Teams also supports HTTPS hosted-invoice quotes and idempotent one-time disclosed checkout. Recurring Teams charging remains disabled pending Prava's standing-mandate answer.
+
 ## Project specifications
 
 - [Product requirements](PRD.md)

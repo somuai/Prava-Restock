@@ -523,7 +523,7 @@ onto WhatsApp’s interactive buttons) or an installable PWA with web push (no a
 review cycle, works immediately). Native app only becomes justified once retention data on
 one of those two shows people actually act on the notifications — building app-store presence
 before that risks being wasted effort.
-2. Real SaaS billing integration. The mock exists because a subscription renewal is
+2. **One-time invoice path built; recurring remains gated:** Real SaaS billing integration. The mock exists because a subscription renewal is
 merchant-initiated (recurring), not agent-initiated (one-time) like a grocery reorder — a genuinely different transaction shape from what’s built. Two paths:
    - Path A (elegant, unconfirmed): if Prava supports a standing/recurring mandate scoped
 to one merchant with a cap, the vendor’s own billing system charges it directly, and

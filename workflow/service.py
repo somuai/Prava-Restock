@@ -6,7 +6,7 @@ from enum import Enum
 from typing import Any, Protocol
 from uuid import uuid4
 
-from merchant import mock_subscription_checkout, zepto_checkout
+from merchant import saas_invoice_checkout, swiggy_checkout, zepto_checkout
 from merchant.models import MerchantQuote, StockStatus
 from payments import prava_client
 from payments.models import TrackedItem, TriggerType, User
@@ -46,8 +46,8 @@ class WorkflowService:
         repository: RestockRepository,
         *,
         prava: PravaBoundary = prava_client,
-        home_checkout: CheckoutBoundary = zepto_checkout,
-        teams_checkout: CheckoutBoundary = mock_subscription_checkout,
+        home_checkout: CheckoutBoundary | None = None,
+        teams_checkout: CheckoutBoundary = saas_invoice_checkout,
         quote_provider: Any | None = None,
     ) -> None:
         self.repository = repository
@@ -92,9 +92,15 @@ class WorkflowService:
         proposal = self._proposal(item)
         amount = quote.amount if quote is not None else Decimal(str(proposal["proposed_amount"]))
         self._enforce_caps(user, amount)
+        home_payment_mode = (
+            zepto_checkout.merchant_mode().value
+            if item.preferred_merchant.value == "zepto"
+            else swiggy_checkout.payment_mode().value
+        )
         modes = {
             "prava": "sandbox",
-            "home_merchant": zepto_checkout.merchant_mode().value,
+            "home_merchant": item.preferred_merchant.value,
+            "home_payment": home_payment_mode,
             "teams_billing": "disclosed_mock",
         }
         self.repository.upsert_user(user)
@@ -312,11 +318,14 @@ class WorkflowService:
             user_id=run["user_id"], run_id=run_id, item_id=run["item_id"],
             event_type="quote_revalidated", payload={"amount": str(run["proposed_amount"])}, modes=run["modes"]
         )
-        checkout = (
-            self.teams_checkout
-            if item.trigger_type is TriggerType.KNOWN_DATE
-            else self.home_checkout
-        )
+        if item.trigger_type is TriggerType.KNOWN_DATE:
+            checkout = self.teams_checkout
+        elif self.home_checkout is not None:
+            checkout = self.home_checkout
+        elif item.preferred_merchant.value == "swiggy":
+            checkout = swiggy_checkout
+        else:
+            checkout = zepto_checkout
         response = checkout.complete_checkout(
             result["credential_reference"],
             item.merchant_sku_id,

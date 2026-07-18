@@ -85,7 +85,9 @@ def complete_checkout(credential_reference, merchant_sku_id, amount, idempotency
     result = MerchantCheckoutResult(
         status=status,
         merchant_order_id=(
-            None if status is CheckoutStatus.OUT_OF_STOCK else f"mock_zepto_{uuid4().hex}"
+            None
+            if status is CheckoutStatus.OUT_OF_STOCK
+            else f"mock_{'swiggy' if str(merchant_sku_id).startswith('swiggy:') else 'zepto'}_{uuid4().hex}"
         ),
         charged_amount=(parsed_amount if status is CheckoutStatus.COMPLETED else None),
         currency="INR",

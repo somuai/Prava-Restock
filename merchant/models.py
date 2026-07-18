@@ -3,6 +3,7 @@
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
+from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -52,3 +53,16 @@ class MerchantCheckoutResult(MerchantModel):
     execution_mode: ExecutionMode
     error_code: str | None = None
 
+
+class MerchantAdapter(Protocol):
+    """Merchant-independent quote/checkout/reconciliation contract."""
+
+    def quote(self, **context: Any) -> MerchantQuote: ...
+    def checkout(
+        self,
+        credential_reference: str,
+        merchant_sku_id: str,
+        amount: Decimal,
+        idempotency_key: str,
+    ) -> MerchantCheckoutResult: ...
+    def reconcile(self, merchant_order_id: str) -> MerchantCheckoutResult: ...

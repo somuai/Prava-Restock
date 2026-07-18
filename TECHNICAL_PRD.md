@@ -292,11 +292,11 @@ Every durable state transition writes a sanitized domain-audit entry with run, u
 *Resolution paths for each of these live in `PRD.md` §15 (Roadmap) — this list is deliberately just the "not done yet" inventory, not the plan to close it.*
 
 - No production ML forecasting model — deterministic EWMA remains the production baseline while consented observation logging and offline benchmarking collect evidence.
-- No real SaaS billing-portal integration — the known-date track's checkout is a disclosed mock; the renewal date and Prava mandate flow around it are real.
+- One-time hosted SaaS invoice quoting is implemented; its unattended final payment remains a disclosed mock. Recurring Teams charging is disabled until Prava confirms standing-mandate semantics.
 - Multi-user Household/Organization membership, roles, invitations, consent, and multi-approver policy are implemented; shared Prava mandate semantics remain gated on Prava's standing-mandate answer.
 - Capacitor Android/iOS wrappers are implemented and simulator-built; store enrollment, physical-device push validation, and publication remain external launch gates.
 - The guaranteed submission surface remains the disclosed PWA. The real Slack adapter and Meta test-number adapter must still disclose whether external credentials/setup are active.
-- Merchant coverage limited to Zepto/Swiggy (or the disclosed mock fallback) for Home; one disclosed mock subscription for Teams.
+- Home adapters cover real Zepto and Swiggy catalog/cart quoting. Zepto's unattended final payment remains disclosed-mock by default; Swiggy card payment remains an explicit browser boundary and is never silently replaced by COD.
 
 ## 17. Open questions — verify before/during build
 
