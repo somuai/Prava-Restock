@@ -9,3 +9,4 @@ __pycache__/
 build/
 dist/
 logs/notifications.json
+logs/merchant_checkouts.json

@@ -80,7 +80,9 @@ def test_predicted_item_fires_on_price_only() -> None:
         last_observed_price=observed_price,
     )
     assert consumption_model.should_fire(item) is True
-    message = consumption_model.propose(item)["message"]
+    proposal = consumption_model.propose(item)
+    message = proposal["message"]
+    assert proposal["proposed_amount"] == observed_price
     assert f"Coffee dropped to ₹{observed_display}" in message
     assert f"below your ₹{observed_display} threshold" in message
     assert "run out" not in message
@@ -97,6 +99,7 @@ def test_predicted_item_fires_once_when_both_signals_match() -> None:
     assert consumption_model.should_fire(item) is True
     proposals = [consumption_model.propose(item)]
     assert len(proposals) == 1
+    assert proposals[0]["proposed_amount"] == observed_price
     assert "You'll run out of Coffee in 2 days" in proposals[0]["message"]
     assert f"Coffee dropped to ₹{observed_display}" in proposals[0]["message"]
 

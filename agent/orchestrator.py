@@ -55,7 +55,11 @@ class ApprovalRequired(ValueError):
 
 
 class MerchantCheckoutFailed(RuntimeError):
-    """Raised when the fake merchant cannot complete an order."""
+    """Raised when the merchant cannot complete an order."""
+
+
+class PriceReapprovalRequired(RuntimeError):
+    """Raised when a fresh merchant quote exceeds the approved tolerance."""
 
 
 @dataclass(frozen=True)
@@ -279,6 +283,30 @@ def _complete_merchant_checkout(
     if mandate is None:
         raise ApprovalRequired("an approved mandate is required before checkout")
     item = context.item(item_id)
+    if (
+        item.trigger_type is TriggerType.PREDICTED
+        and item.last_observed_price is not None
+    ):
+        fresh_amount = zepto_checkout.check_current_price(item.item_id)
+        approved_amount = mandate.scope_max_amount
+        deviation = abs(fresh_amount - approved_amount) / approved_amount
+        item.last_observed_price = fresh_amount
+        if deviation > Decimal("0.15"):
+            _log_event(
+                context,
+                AuditEventType.TRANSACTION_FAILED.value,
+                {
+                    "item": item.name,
+                    "merchant": item.preferred_merchant.value,
+                    "reason": "price_reapproval_required",
+                    "approved_amount": str(approved_amount),
+                    "fresh_amount": str(fresh_amount),
+                },
+            )
+            raise PriceReapprovalRequired(
+                f"fresh amount {fresh_amount} differs from approved amount "
+                f"{approved_amount} by more than 15%"
+            )
     checkout_client = (
         mock_subscription_checkout
         if item.preferred_merchant.value == "mock_subscription_billing"

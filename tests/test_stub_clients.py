@@ -1,6 +1,8 @@
 import json
 from inspect import signature
 
+import pytest
+
 from merchant import zepto_checkout
 from payments import prava_client
 
@@ -131,7 +133,9 @@ def test_stub_merchant_out_of_stock() -> None:
     response = zepto_checkout.complete_checkout(
         "stub_credential", "out-of-stock-coffee", 450, "intent-oos"
     )
-    assert response == {"merchant_order_id": None, "status": "out_of_stock"}
+    assert response["merchant_order_id"] is None
+    assert response["status"] == "out_of_stock"
+    assert response["execution_mode"] == "disclosed_mock"
 
 
 def test_stub_merchant_checkout_is_idempotent() -> None:
@@ -143,3 +147,25 @@ def test_stub_merchant_checkout_is_idempotent() -> None:
     )
     assert first == second
     assert first["status"] == "completed"
+
+
+def test_prava_credential_can_be_consumed_only_once(monkeypatch) -> None:
+    from datetime import datetime, timezone
+
+    reference = "prava_credential_consume_once"
+    prava_client._CREDENTIALS[reference] = {
+        "token": "one-time-token",
+        "dynamic_cvv": "123",
+        "expiry_month": "12",
+        "expiry_year": "2099",
+        "session_id": "session",
+        "txn_ref_id": "txn",
+        "created_at": datetime.now(timezone.utc),
+    }
+
+    consumed = prava_client.consume_credential(reference)
+
+    assert consumed["token"] == "one-time-token"
+    assert reference not in prava_client._CREDENTIALS
+    with pytest.raises(ValueError, match="already-consumed"):
+        prava_client.consume_credential(reference)

@@ -111,10 +111,15 @@ def propose(item: TrackedItem) -> dict:
     else:
         reason = f"{item.name} has not reached a reorder trigger yet."
 
+    proposed_amount = (
+        item.last_observed_price
+        if price_fired and item.last_observed_price is not None
+        else item.last_purchase_amount
+    )
     return {
-        "proposed_amount": item.last_purchase_amount,
+        "proposed_amount": proposed_amount,
         "merchant": merchant,
         "message": (
-            f"{reason} Reorder from {merchant} for {item.last_purchase_amount}?"
+            f"{reason} Reorder from {merchant} for {proposed_amount}?"
         ),
     }

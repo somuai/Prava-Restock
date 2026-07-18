@@ -269,10 +269,9 @@ only if a real payment step fails during testing for a reason unrelated to this
 confirmed merchant access, such as card constraints or an unexpected sandbox
 error:
 
-- Build `merchant/mock_checkout.py`: a clearly-labeled simulated merchant endpoint
-  that still receives and validates the real Prava one-time credential (so the
-  *payment* half of the demo is 100% real — only the merchant fulfillment step
-  is mocked).
+- Use the implemented `merchant/mock_checkout.py` boundary: a clearly labeled,
+  durable and idempotent simulation for only the final live-money merchant step.
+  Prava sandbox approval and Zepto catalog/cart/quote operations remain real.
 - State this explicitly in the submission write-up. The hackathon rules ask you
   to disclose what's simulated — do this rather than let a judge discover it.
 - This does not weaken the "meaningful agent action" or "handles payment

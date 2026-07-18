@@ -237,10 +237,10 @@ await_mandate(intent_ref) -> { mandate_id, credential_reference, scope, approved
 Reuse Prava's own published checkout skills (`prava-merchants-checkout/` in the same repo) for Restock Home rather than hand-rolling merchant integration. Contract every implementation must satisfy — same interface regardless of what's behind it:
 
 ```
-complete_checkout(credential_reference, merchant_sku_id, amount, idempotency_key) -> { merchant_order_id, status }
+complete_checkout(credential_reference, merchant_sku_id, amount, idempotency_key) -> { status, merchant_order_id, charged_amount, currency, retryable, execution_mode }
 ```
 
-**Restock Home fallback:** if Zepto/Swiggy sandbox access isn't confirmed early in the build window, implement `merchant/mock_checkout.py` against this same contract — the Prava payment half stays real; only fulfillment is simulated, and this must be disclosed in the submission.
+**Restock Home implementation:** the official Zepto MCP integration now covers OAuth, saved-address selection, product/cart tools, exact-price preview, and payment-status reconciliation. Zepto publishes no dedicated merchant payment sandbox, so the final live-money payment-link execution defaults to `disclosed_mock`. Real execution is a separate operator-controlled mode requiring a compatible card and controllable browser; it is never silently enabled. The Prava sandbox approval and Zepto merchant integration are real, while the final charge boundary is disclosed.
 
 **Restock Teams:** real OAuth into a SaaS vendor's billing portal (Stripe Billing, Chargebee, etc.) isn't realistic in 48 hours regardless of sandbox access, so `merchant/mock_subscription_checkout.py` is the intended implementation from the start, not a fallback — implement it against the same `complete_checkout(...)` contract so the orchestrator and Prava mandate flow genuinely don't know or care which track they're serving. Disclose this plainly in the submission: the renewal date and the Prava mandate are real, the billing-portal call is simulated.
 
@@ -302,7 +302,7 @@ Structured log line at every state transition (`Intent` created/approved/rejecte
 
 - [x] **RESOLVED** — Model selection for the orchestrator: one verified-reliable model, `gpt-5.4-mini`, for the full loop including notification copy and the Teams plan-comparison decision. This removes a constrained-quota live-demo dependency; hard constraints stay in code-level Guardrails. See §7.
 - [ ] Exact `PravaSDK` method signatures for intent creation and mandate webhook payload shape.
-- [ ] Zepto/Swiggy MCP skill's exact tool names and required auth scopes. Merchant-level access itself is confirmed: Shubham Kukreti stated via Discord on 17 July 2026, "Merchants aren't restricted, so you can build flows for things like Zepto or Swiggy." Only the exact tool names and auth scopes remain to pull from the skill repo.
+- [x] **RESOLVED — Zepto merchant contract:** the official skill uses `mcp-remote https://mcp.zepto.co.in/mcp` with OAuth/mobile OTP and publishes tools for saved addresses, product search, cart mutation/view, payment methods, online-order preview/creation, payment status, and order history. Final payment-link execution is operator-controlled because no merchant sandbox is documented.
 - [ ] Location of Prava's sandbox test-card/test-data reference in `prava-skills`.
 - [ ] Whether Prava mandates expose a configurable TTL/expiry we should set explicitly on `Intent` creation, or whether it's fixed by Prava.
 - [x] **RESOLVED — platform fact:** Prava requires a Visa card issued in the US, Canada, Hong Kong, or Singapore for any real card used in the flow, whether in sandbox or production. Prava's own documented sandbox test cards are unaffected and complete a full simulated flow with no geography restriction; use those for the hackathon. For production, Prava has offered: "reach out to us and we'll sort you out with a compatible card".

@@ -1,0 +1,124 @@
+"""Minimal typed client for Zepto's published remote MCP server.
+
+OAuth and mobile OTP are owned by ``mcp-remote``. This module deliberately
+contains no Zepto credentials and never creates a payment link unless its
+explicit method is called.
+"""
+
+import asyncio
+import json
+from collections.abc import Mapping
+from typing import Any
+
+from mcp import ClientSession
+from mcp.client.stdio import StdioServerParameters, stdio_client
+
+
+ZEPTO_MCP_URL = "https://mcp.zepto.co.in/mcp"
+
+
+class ZeptoMCPError(RuntimeError):
+    pass
+
+
+def _content_to_payload(result: Any) -> dict[str, Any]:
+    structured = getattr(result, "structuredContent", None)
+    if isinstance(structured, Mapping):
+        return dict(structured)
+
+    texts = [
+        block.text
+        for block in getattr(result, "content", [])
+        if getattr(block, "type", None) == "text" and hasattr(block, "text")
+    ]
+    if not texts:
+        return {}
+    combined = "\n".join(texts)
+    try:
+        parsed = json.loads(combined)
+    except json.JSONDecodeError:
+        return {"text": combined}
+    return parsed if isinstance(parsed, dict) else {"data": parsed}
+
+
+class ZeptoMCPClient:
+    """Call Zepto tools through the official ``mcp-remote`` OAuth bridge."""
+
+    def __init__(self, *, timeout_seconds: float = 45) -> None:
+        self.timeout_seconds = timeout_seconds
+
+    async def _call_async(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        server = StdioServerParameters(
+            command="npx",
+            args=["--yes", "mcp-remote", ZEPTO_MCP_URL],
+        )
+        try:
+            async with stdio_client(server) as (read_stream, write_stream):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    result = await session.call_tool(name, arguments)
+        except (OSError, TimeoutError) as exc:
+            raise ZeptoMCPError(f"Zepto MCP call failed: {name}") from exc
+        if getattr(result, "isError", False):
+            payload = _content_to_payload(result)
+            raise ZeptoMCPError(f"Zepto tool {name} returned an error: {payload}")
+        return _content_to_payload(result)
+
+    def call(self, name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(
+                asyncio.wait_for(
+                    self._call_async(name, arguments or {}),
+                    timeout=self.timeout_seconds,
+                )
+            )
+        raise ZeptoMCPError("synchronous Zepto calls must run outside an event loop")
+
+    def list_saved_addresses(self) -> dict[str, Any]:
+        return self.call("list_saved_addresses")
+
+    def select_saved_address(self, address_id: str) -> dict[str, Any]:
+        return self.call("select_saved_address", {"addressId": address_id})
+
+    def search_products(self, query: str) -> dict[str, Any]:
+        return self.call("search_products", {"query": query, "pageNumber": 0})
+
+    def update_cart(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self.call("update_cart", arguments)
+
+    def view_cart(self) -> dict[str, Any]:
+        return self.call("view_cart")
+
+    def get_payment_methods(self) -> dict[str, Any]:
+        return self.call("get_payment_methods")
+
+    def preview_order(self, address_id: str) -> dict[str, Any]:
+        return self.call(
+            "create_online_payment_order",
+            {
+                "confirmOrder": False,
+                "riderTip": 0,
+                "userAddressId": address_id,
+                "useZeptoCash": False,
+            },
+        )
+
+    def create_payment_link(self, address_id: str) -> dict[str, Any]:
+        return self.call(
+            "create_online_payment_order",
+            {
+                "confirmOrder": True,
+                "riderTip": 0,
+                "userAddressId": address_id,
+                "useZeptoCash": False,
+            },
+        )
+
+    def check_payment_status(self, order_id: str, *, poll: bool = False) -> dict[str, Any]:
+        return self.call("check_payment_status", {"orderId": order_id, "poll": poll})
+
+    def list_order_history(self) -> dict[str, Any]:
+        return self.call("list_order_history")
+

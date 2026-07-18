@@ -17,6 +17,7 @@ from agent.orchestrator import (
     OrchestratorContext,
     RestockOrchestrator,
     SpendCapExceeded,
+    PriceReapprovalRequired,
     await_passkey_approval,
     request_prava_intent,
     spend_cap_guardrail,
@@ -196,3 +197,42 @@ def test_checkout_without_approved_mandate_is_rejected(tmp_path) -> None:
     )
     with pytest.raises(ApprovalRequired):
         _complete_merchant_checkout(context, "missing", context.items[0].item_id)
+
+
+def test_price_deviation_requires_reapproval_before_merchant(
+    monkeypatch, tmp_path
+) -> None:
+    from agent.orchestrator import _complete_merchant_checkout
+    from merchant import zepto_checkout
+    from payments.models import Mandate
+
+    item = build_item()
+    item.last_observed_price = Decimal("450")
+    context = OrchestratorContext(
+        user=build_user(), items=[item], audit_log_path=tmp_path / "audit.json"
+    )
+    intent_id = UUID("00000000-0000-0000-0000-000000000099")
+    context.mandates["mandate-price"] = Mandate(
+        mandate_id="mandate-price",
+        intent_id=intent_id,
+        credential_reference="offline-price-credential",
+        scope_merchant="zepto",
+        scope_max_amount="450",
+        scope_expiry=datetime.now(timezone.utc) + timedelta(minutes=15),
+        passkey_approved_at=datetime.now(timezone.utc),
+    )
+    merchant_called = False
+
+    def fail_checkout(*args, **kwargs):
+        nonlocal merchant_called
+        merchant_called = True
+        raise AssertionError("checkout must not run before reapproval")
+
+    monkeypatch.setattr(zepto_checkout, "check_current_price", lambda _: Decimal("520"))
+    monkeypatch.setattr(zepto_checkout, "complete_checkout", fail_checkout)
+
+    with pytest.raises(PriceReapprovalRequired):
+        _complete_merchant_checkout(context, "mandate-price", item.item_id)
+
+    assert merchant_called is False
+    assert context.transactions == []

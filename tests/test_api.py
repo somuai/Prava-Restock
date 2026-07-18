@@ -9,15 +9,24 @@ from ui import api
 client = TestClient(api.app)
 
 
-def test_hello_world_and_health_endpoints() -> None:
+def test_hello_world_and_health_endpoints(monkeypatch) -> None:
+    monkeypatch.delenv("PRAVA_API_KEY", raising=False)
+    monkeypatch.setenv("HOME_MERCHANT_MODE", "disclosed_mock")
     response = client.get("/")
     assert response.status_code == 200
     assert response.json() == {
         "service": "Restock",
         "status": "ok",
-        "mode": "offline-stubs",
+        "mode": "mixed",
+        "capabilities": {
+            "prava_mode": "sandbox_unconfigured",
+            "home_merchant_mode": "disclosed_mock",
+            "teams_billing_mode": "disclosed_mock",
+            "real_money_enabled": False,
+        },
     }
     assert client.get("/health").json() == {"status": "healthy"}
+    assert client.get("/capabilities").json()["real_money_enabled"] is False
 
 
 def test_audit_log_endpoint_reads_json_file(tmp_path, monkeypatch) -> None:
