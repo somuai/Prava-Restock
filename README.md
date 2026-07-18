@@ -43,7 +43,7 @@ Run `.venv/bin/python demo/dry_run.py --mode offline` for all five deterministic
 
 ## Demo PWA and channels
 
-The React/TypeScript PWA lives in `ui/web` and is served from `/app` in the production Docker image. Run `npm ci && npm run dev` there for local frontend development, or `npm run build` for the deployable bundle. It presents a WhatsApp-style Home surface and Slack-style Teams surface with explicit preview/sandbox/simulation badges.
+The React/TypeScript PWA lives in `ui/web` and is served from `/app` in the production Docker image. Run `npm ci && npm run dev` there for local frontend development, or `npm run build` for the deployable bundle. Its Restock-owned decision inbox uses a conversational Home hierarchy and a denser Teams approval hierarchy, with explicit preview/sandbox/simulation disclosure at the affected step. Typography, color, logo usage, and interaction rules are documented in the [design system](docs/design-system.md).
 
 - **Slack:** `channels/slack_manifest.yaml` and the Bolt Socket Mode adapter are ready for one-workspace installation. Configure `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_SIGNING_SECRET`, and `SLACK_CHANNEL_ID`; no Marketplace submission is needed for the private demo workspace.
 - **WhatsApp:** the Cloud API adapter sends the three-button proactive template only after recorded opt-in. The webhook verifies Meta's HMAC signature and maps Approve/Skip actions to workflows; Adjust opens the amount UI. Configure the `WHATSAPP_*` values only in local/platform secrets.
@@ -76,3 +76,4 @@ Every API response carries an `X-Correlation-ID`; `/metrics` reports aggregate r
 - [Product requirements](PRD.md)
 - [Technical requirements](TECHNICAL_PRD.md)
 - [Build skill and canonical structure](SKILL.md)
+- [Visual design system](docs/design-system.md)

@@ -1,6 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
+import {
+  ArrowDown,
+  CaretDown,
+  CaretUp,
+  Check,
+  CheckCircle,
+  Clock,
+  ClockCounterClockwise,
+  House,
+  Info,
+  LockKey,
+  Package,
+  Receipt,
+  ShieldCheck,
+  UsersThree,
+  WarningCircle,
+} from "@phosphor-icons/react";
 import { api, type AuditEntry, type Capabilities, type Notification } from "./api";
 import { initializeNative } from "./native";
+
+type Track = "home" | "teams";
+type View = Track | "activity";
 
 const previews: Notification[] = [
   {
@@ -22,30 +42,324 @@ const previews: Notification[] = [
 ];
 
 const labels: Record<string, string> = {
-  approve: "Approve",
+  approve: "Approve ₹380",
   adjust: "Adjust",
   skip: "Skip",
   renew_as_is: "Renew as-is",
   switch_plan: "Switch plan",
 };
 
+const humanize = (value: string) => value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+
+function ModeBadge({ mode, label }: { mode: string; label?: string }) {
+  const isSimulated = mode.includes("mock") || mode.includes("unconfigured") || mode.includes("sandbox");
+  return (
+    <span className={`mode-badge ${isSimulated ? "mode-badge--sandbox" : "mode-badge--real"}`}>
+      {isSimulated ? <ShieldCheck size={16} weight="regular" /> : <CheckCircle size={16} weight="fill" />}
+      <span>{label || humanize(mode)}</span>
+    </span>
+  );
+}
+
+function AppHeader({ capabilities }: { capabilities: Capabilities | null }) {
+  const mode = capabilities?.prava_mode || "sandbox_unconfigured";
+  return (
+    <header className="app-header">
+      <a className="brand-lockup" href="#decisions" aria-label="Restock home">
+        <img src="/app/assets/restock-mark.png" alt="" className="brand-mark" />
+        <span>Restock</span>
+      </a>
+      <div className="header-context">
+        <ModeBadge mode={mode} label={mode.includes("sandbox") ? "Sandbox" : undefined} />
+        <span className="header-mode-copy">Final payment simulated</span>
+        <button className="profile-button" type="button" aria-label="Open account menu">
+          <span className="profile-avatar" aria-hidden="true">SG</span>
+          <span className="profile-name">Soumyajit</span>
+          <CaretDown size={15} />
+        </button>
+      </div>
+    </header>
+  );
+}
+
+function Sidebar({ view, setView, capabilities }: { view: View; setView: (view: View) => void; capabilities: Capabilities | null }) {
+  const navItems: { id: View; label: string; icon: typeof House }[] = [
+    { id: "home", label: "Home", icon: House },
+    { id: "teams", label: "Teams", icon: UsersThree },
+    { id: "activity", label: "Activity", icon: ClockCounterClockwise },
+  ];
+  return (
+    <aside className="sidebar" aria-label="Primary navigation">
+      <nav className="sidebar-nav">
+        {navItems.map(({ id, label, icon: Icon }) => (
+          <button
+            className={`nav-item ${view === id ? "nav-item--active" : ""}`}
+            key={id}
+            type="button"
+            onClick={() => setView(id)}
+            aria-current={view === id ? "page" : undefined}
+          >
+            <Icon size={21} weight={view === id ? "fill" : "regular"} />
+            <span>{label}</span>
+          </button>
+        ))}
+      </nav>
+      <div className="sidebar-mode">
+        <ModeBadge mode={capabilities?.home_merchant_mode || "disclosed_mock"} label="Sandbox mode" />
+        <p>Approvals are safe to test. No real merchant payment is made.</p>
+      </div>
+    </aside>
+  );
+}
+
+function DecisionHeader({ track, status }: { track: Track; status: string }) {
+  return (
+    <div className="page-heading" id="decisions">
+      <div>
+        <p className="section-kicker">{track === "home" ? "Household restocks" : "Team renewals"}</p>
+        <h1>Decisions</h1>
+        <p>Review and act before Restock places anything.</p>
+      </div>
+      <div className="sync-status" role="status" aria-live="polite">
+        <span className="sync-dot" aria-hidden="true" />
+        <span>{status}</span>
+      </div>
+    </div>
+  );
+}
+
+function AdjustAmount({ onCancel, onSubmit }: { onCancel: () => void; onSubmit: (amount: string) => void }) {
+  const [value, setValue] = useState("380");
+  const valid = Number(value) > 0;
+  return (
+    <form
+      className="adjust-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (valid) onSubmit(value);
+      }}
+    >
+      <label htmlFor="adjust-amount">Set a new maximum amount</label>
+      <div className="amount-field">
+        <span aria-hidden="true">₹</span>
+        <input id="adjust-amount" inputMode="decimal" value={value} onChange={(event) => setValue(event.target.value)} autoFocus />
+      </div>
+      <div className="adjust-actions">
+        <button className="button button--secondary" type="button" onClick={onCancel}>Cancel</button>
+        <button className="button button--primary" type="submit" disabled={!valid}>Save amount</button>
+      </div>
+    </form>
+  );
+}
+
+function HomeDecision({
+  notification,
+  onAction,
+}: {
+  notification: Notification;
+  onAction: (notification: Notification, action: string, adjustedAmount?: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const [adjusting, setAdjusting] = useState(false);
+  const actionable = notification.status === "pending" || notification.status === "preview";
+  return (
+    <article className="decision decision--active">
+      <header className="decision-summary">
+        <img src="/app/assets/coffee-pouch.png" alt="Navy coffee pouch" className="product-image" />
+        <div className="decision-title-block">
+          <div className="reason-row">
+            <span className="attention-label"><WarningCircle size={15} weight="fill" /> Action needed</span>
+            <span className="reason-copy">Likely to run out in 2 days</span>
+          </div>
+          <h2>Arabica coffee beans · 500 g</h2>
+          <div className="price-line">
+            <strong>₹380</strong>
+            <span>from Zepto</span>
+            <span className="price-signal"><ArrowDown size={15} weight="bold" /> ₹20 below your alert threshold</span>
+          </div>
+          <ModeBadge mode="disclosed_mock" label="Sandbox approval · Final payment simulated" />
+        </div>
+        <div className="decision-time">
+          <span>Today</span>
+          <small>10:24 AM</small>
+          <button type="button" className="icon-button" aria-label={expanded ? "Collapse coffee details" : "Expand coffee details"} onClick={() => setExpanded((value) => !value)}>
+            {expanded ? <CaretUp size={18} /> : <CaretDown size={18} />}
+          </button>
+        </div>
+      </header>
+
+      {expanded && (
+        <>
+          <dl className="decision-facts">
+            <div><dt>Category</dt><dd>Groceries · Coffee</dd></div>
+            <div><dt>Coverage</dt><dd>~2 days</dd></div>
+            <div><dt>Merchant</dt><dd>Zepto</dd></div>
+            <div><dt>Alert threshold</dt><dd>₹400.00</dd></div>
+            <div><dt>Quantity</dt><dd>1 pouch</dd></div>
+            <div><dt>Household cap</dt><dd>₹450.00</dd></div>
+            <div><dt>Estimated delivery</dt><dd>Jul 20, 2026</dd></div>
+            <div><dt>Requested by</dt><dd>Restock automation</dd></div>
+          </dl>
+
+          {adjusting ? (
+            <AdjustAmount onCancel={() => setAdjusting(false)} onSubmit={(amount) => { setAdjusting(false); onAction(notification, "adjust", amount); }} />
+          ) : (
+            <div className="decision-actions" aria-label="Coffee purchase actions">
+              {notification.actions.map((action) => (
+                <button
+                  key={action}
+                  type="button"
+                  className={`button ${action === "approve" ? "button--primary" : action === "skip" ? "button--quiet-danger" : "button--secondary"}`}
+                  onClick={() => action === "adjust" ? setAdjusting(true) : onAction(notification, action)}
+                  disabled={!actionable}
+                >
+                  {labels[action] || humanize(action)}
+                </button>
+              ))}
+            </div>
+          )}
+          <p className="charge-note"><LockKey size={15} /> Approval creates a scoped Prava mandate. No real merchant charge occurs in this demo.</p>
+        </>
+      )}
+    </article>
+  );
+}
+
+function TeamsDecision({
+  notification,
+  onAction,
+}: {
+  notification: Notification;
+  onAction: (notification: Notification, action: string) => void;
+}) {
+  const actionable = notification.status === "pending" || notification.status === "preview";
+  return (
+    <article className="decision decision--active decision--teams">
+      <header className="decision-summary">
+        <img src="/app/assets/teamtool-icon.png" alt="TeamTool collaboration icon" className="product-image" />
+        <div className="decision-title-block">
+          <div className="reason-row">
+            <span className="attention-label attention-label--teams"><Clock size={15} weight="fill" /> Renewal due</span>
+            <span className="reason-copy">Renews in 2 days</span>
+          </div>
+          <h2>TeamTool Pro · 1 seat</h2>
+          <p className="teams-summary">Choose the current monthly plan or explicitly switch. Restock never switches plans from a generic approval.</p>
+          <ModeBadge mode="disclosed_mock" label="Billing simulation · Explicit approval required" />
+        </div>
+        <div className="decision-time"><span>Jul 21</span><small>Renewal</small></div>
+      </header>
+      <div className="plan-comparison" role="group" aria-label="TeamTool renewal choices">
+        <div className="plan-option plan-option--current"><span>Renew as-is</span><strong>$29</strong><small>Monthly · current plan</small></div>
+        <div className="plan-option"><span>Switch plan</span><strong>$24</strong><small>Annual billing · saves $60/year</small></div>
+      </div>
+      <div className="decision-actions decision-actions--teams">
+        {notification.actions.map((action) => (
+          <button
+            key={action}
+            type="button"
+            className={`button ${action === "renew_as_is" ? "button--teams" : action === "skip" ? "button--quiet-danger" : "button--secondary"}`}
+            onClick={() => onAction(notification, action)}
+            disabled={!actionable}
+          >
+            {labels[action] || humanize(action)}
+          </button>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function SecondaryDecision({ kind }: { kind: "filter" | "paper" }) {
+  const data = kind === "filter"
+    ? { image: "/app/assets/water-filter.png", title: "RO water filter · due in 5 days", detail: "Replacement cartridge · 1 unit", price: "₹799 from Zepto" }
+    : { image: "/app/assets/coffee-pouch.png", title: "Printer paper · monitored", detail: "A4 · 500 sheets", price: "₹650 last observed" };
+  return (
+    <article className="decision-row">
+      <img src={data.image} alt="" className="row-image" />
+      <div><h3>{data.title}</h3><p>{data.detail}</p><small>{data.price}</small></div>
+      <span className="row-state">Watching</span>
+      <button className="icon-button" type="button" aria-label={`Open ${data.title}`}><CaretDown size={18} /></button>
+    </article>
+  );
+}
+
+function ActivityView({ audit }: { audit: AuditEntry[] }) {
+  return (
+    <section className="activity-view" aria-labelledby="activity-title">
+      <div className="page-heading">
+        <div><p className="section-kicker">System record</p><h1 id="activity-title">Activity</h1><p>Every decision and payment boundary, in order.</p></div>
+      </div>
+      <div className="activity-table">
+        {audit.length === 0 ? (
+          <div className="empty-state"><Receipt size={28} /><h2>No live activity yet</h2><p>The audit trail will appear after the first workflow runs.</p></div>
+        ) : audit.map((entry) => (
+          <div className="activity-entry" key={entry.audit_id}>
+            <CheckCircle size={19} weight="fill" />
+            <div><strong>{humanize(entry.event_type)}</strong><small>{new Date(entry.created_at).toLocaleString()}</small></div>
+            <ModeBadge mode={Object.values(entry.modes)[0] || "sandbox"} />
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function WorkflowRail({ notification, audit }: { notification?: Notification; audit: AuditEntry[] }) {
+  const status = notification?.status || "preview";
+  const completed = !["preview", "pending"].includes(status);
+  const steps = [
+    { label: "Detected", detail: "Inventory signal crossed", state: "done" },
+    { label: "Decision requested", detail: "Approval needed", state: completed ? "done" : "current" },
+    { label: "Approved", detail: completed ? humanize(status) : "Waiting", state: completed ? "current" : "waiting" },
+    { label: "Order placed (simulated)", detail: "Waiting", state: "waiting" },
+    { label: "Closed", detail: "Waiting", state: "waiting" },
+  ];
+  return (
+    <aside className="workflow-rail" aria-label="Workflow and audit detail">
+      <section className="rail-section">
+        <div className="rail-heading"><div><h2>Workflow</h2><p>Decision timeline</p></div><Info size={18} /></div>
+        <ol className="workflow-steps">
+          {steps.map((step) => (
+            <li className={`workflow-step workflow-step--${step.state}`} key={step.label}>
+              <span className="step-marker" aria-hidden="true">{step.state === "done" ? <Check size={12} weight="bold" /> : ""}</span>
+              <div><strong>{step.label}</strong><small>{step.detail}</small></div>
+            </li>
+          ))}
+        </ol>
+      </section>
+      <section className="rail-section audit-section">
+        <h2>Audit history</h2>
+        <div className="rail-audit-list">
+          {audit.length === 0 ? (
+            <>
+              <div><span className="audit-dot" /><p><strong>Decision requested</strong><small>Today, 10:24 AM · Restock</small></p></div>
+              <div><span className="audit-dot" /><p><strong>Trigger detected</strong><small>Today, 10:24 AM · Automation</small></p></div>
+            </>
+          ) : audit.slice(0, 4).map((entry) => (
+            <div key={entry.audit_id}><span className="audit-dot" /><p><strong>{humanize(entry.event_type)}</strong><small>{new Date(entry.created_at).toLocaleString()}</small></p></div>
+          ))}
+        </div>
+      </section>
+    </aside>
+  );
+}
+
 export default function App() {
-  const [track, setTrack] = useState<"home" | "teams">("home");
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [view, setView] = useState<View>("home");
+  const [notifications, setNotifications] = useState<Notification[]>(previews);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
-  const [status, setStatus] = useState("Checking for proactive triggers…");
+  const [status, setStatus] = useState("Preview ready");
 
   const refresh = async () => {
     try {
       const [caps, pending, events] = await Promise.all([api.capabilities(), api.notifications(), api.audit()]);
       setCapabilities(caps);
-      setNotifications(pending.length ? pending : previews);
+      if (pending.length) setNotifications(pending);
       setAudit(events);
-      setStatus(pending.length ? `${pending.length} decision${pending.length === 1 ? "" : "s"} waiting` : "Preview mode — connect the worker to receive live triggers");
+      setStatus(pending.length ? `${pending.length} decision${pending.length === 1 ? "" : "s"} waiting` : "Preview ready");
     } catch {
-      setNotifications(previews);
-      setStatus("Preview mode — API is unavailable");
+      setStatus("Preview mode · API unavailable");
     }
   };
 
@@ -54,7 +368,7 @@ export default function App() {
     const timer = window.setInterval(() => void refresh(), 5000);
     let cleanupNative: () => void = () => {};
     void initializeNative(async (runId) => {
-      setStatus("Approval return received — safely resuming workflow");
+      setStatus("Approval returned · Resuming workflow");
       await api.resume(runId);
       await refresh();
     }).then((cleanup) => { cleanupNative = cleanup; });
@@ -64,26 +378,27 @@ export default function App() {
     };
   }, []);
 
+  const track: Track = view === "teams" ? "teams" : "home";
   const visible = useMemo(
     () => notifications.filter((notification) => (notification.track || (notification.actions.includes("switch_plan") ? "teams" : "home")) === track),
     [notifications, track],
   );
+  const selected = visible[0];
 
-  const act = async (notification: Notification, action: string) => {
+  const act = async (notification: Notification, action: string, adjustedAmount?: string) => {
     if (notification.status === "preview") {
       setNotifications((items) => items.map((item) => item.notification_id === notification.notification_id ? { ...item, status: action } : item));
-      setStatus(`Preview action recorded: ${labels[action]}`);
+      setStatus(`Preview recorded · ${humanize(action)}`);
       return;
     }
     try {
-      const adjusted = action === "adjust" ? window.prompt("New maximum amount") || undefined : undefined;
-      const run = await api.action(notification.run_id, action, adjusted);
+      const run = await api.action(notification.run_id, action, adjustedAmount);
       if (run.state === "passkey_pending") {
         const { approval_url } = await api.approvalUrl(notification.run_id);
         window.open(approval_url, "_blank", "noopener,noreferrer");
-        setStatus("Passkey approval opened — return here after approving");
+        setStatus("Passkey opened · Return after approval");
       } else {
-        setStatus(`Workflow is now ${run.state.replaceAll("_", " ")}`);
+        setStatus(`Workflow · ${humanize(run.state)}`);
       }
       await refresh();
     } catch (error) {
@@ -92,54 +407,25 @@ export default function App() {
   };
 
   return (
-    <main className="shell">
-      <header className="topbar">
-        <div className="brand"><span className="mark">R</span><div><strong>Restock</strong><small>Proactive commerce, bounded by you</small></div></div>
-        <div className="badges">
-          <span>{capabilities?.prava_mode || "sandbox"}</span>
-          <span>{capabilities?.home_merchant_mode || "disclosed_mock"}</span>
-        </div>
-      </header>
-
-      <section className="hero">
-        <p className="eyebrow">Restock caught it first</p>
-        <h1>Nothing to remember.<br />Nothing charged silently.</h1>
-        <p>{status}</p>
-      </section>
-
-      <nav className="track-tabs" aria-label="Restock track">
-        <button className={track === "home" ? "active" : ""} onClick={() => setTrack("home")}><span>Home</span><small>WhatsApp-style</small></button>
-        <button className={track === "teams" ? "active" : ""} onClick={() => setTrack("teams")}><span>Teams</span><small>Slack-style</small></button>
-      </nav>
-
-      <section className={`conversation ${track}`} aria-live="polite">
-        <div className="channel-label">{track === "home" ? "WhatsApp interaction preview" : "Slack approval surface"}<span>disclosed surface</span></div>
-        {visible.map((notification) => (
-          <article className="message" key={notification.notification_id}>
-            <div className="avatar">R</div>
-            <div className="bubble">
-              <p>{notification.message}</p>
-              <div className="actions">
-                {notification.actions.map((action) => (
-                  <button key={action} onClick={() => void act(notification, action)} disabled={notification.status !== "pending" && notification.status !== "preview"}>
-                    {labels[action] || action}
-                  </button>
-                ))}
-              </div>
-              <small>{notification.status === "preview" ? "Preview data" : notification.status}</small>
-            </div>
-          </article>
-        ))}
-      </section>
-
-      <aside className="audit-panel">
-        <div><p className="eyebrow">Proof, not promises</p><h2>Audit & savings</h2></div>
-        <div className="audit-list">
-          {audit.length === 0 ? <p>No completed live workflows yet. The trace appears here after approval.</p> : audit.slice(0, 5).map((entry) => (
-            <div key={entry.audit_id}><strong>{entry.event_type.replaceAll("_", " ")}</strong><small>{new Date(entry.created_at).toLocaleString()}</small></div>
-          ))}
-        </div>
-      </aside>
-    </main>
+    <div className="app-frame">
+      <AppHeader capabilities={capabilities} />
+      <Sidebar view={view} setView={setView} capabilities={capabilities} />
+      <main className="main-content">
+        {view === "activity" ? (
+          <ActivityView audit={audit} />
+        ) : (
+          <>
+            <DecisionHeader track={track} status={status} />
+            <section className="decision-list" aria-label={`${track} decisions`}>
+              {selected && track === "home" && <HomeDecision notification={selected} onAction={(notification, action, amount) => void act(notification, action, amount)} />}
+              {selected && track === "teams" && <TeamsDecision notification={selected} onAction={(notification, action) => void act(notification, action)} />}
+              {track === "home" && <><SecondaryDecision kind="filter" /><SecondaryDecision kind="paper" /></>}
+            </section>
+            <footer className="list-footer"><span>All times in Asia/Kolkata (IST)</span><span>Updated automatically</span></footer>
+          </>
+        )}
+      </main>
+      <WorkflowRail notification={selected} audit={audit} />
+    </div>
   );
 }

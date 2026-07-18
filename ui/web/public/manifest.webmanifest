@@ -3,7 +3,20 @@
   "short_name": "Restock",
   "start_url": "/app/",
   "display": "standalone",
-  "background_color": "#f4f1e8",
-  "theme_color": "#112f2b",
-  "icons": []
+  "background_color": "#f6faf8",
+  "theme_color": "#006c67",
+  "icons": [
+    {
+      "src": "/app/assets/restock-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/app/assets/restock-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
 }
