@@ -82,7 +82,14 @@ def test_user_rejects_non_positive_caps(field: str, value: int) -> None:
 
 
 def test_valid_tracked_items_cover_both_trigger_tracks() -> None:
-    assert TrackedItem(**predicted_item_data()).renewal_date is None
+    predicted = TrackedItem(
+        **(
+            predicted_item_data()
+            | {"price_threshold": "400.00", "last_observed_price": "380.00"}
+        )
+    )
+    assert predicted.price_threshold == Decimal("400.00")
+    assert predicted.renewal_date is None
     assert TrackedItem(**known_date_item_data()).typical_cadence_days is None
 
 
@@ -98,6 +105,11 @@ def test_known_date_item_requires_its_trigger_fields() -> None:
     data.pop("renewal_date")
     with pytest.raises(ValidationError):
         TrackedItem(**data)
+
+
+def test_known_date_item_rejects_predicted_price_fields() -> None:
+    with pytest.raises(ValidationError):
+        TrackedItem(**(known_date_item_data() | {"price_threshold": "400.00"}))
 
 
 def test_valid_intent() -> None:

@@ -154,13 +154,20 @@ def _check_trigger_status(context: OrchestratorContext) -> list[TrackedItem]:
         for intent in context.intents.values()
         if intent.status is IntentStatus.PENDING_APPROVAL
     }
-    return [
-        item
-        for item in context.items
-        if item.status is ItemStatus.ACTIVE
-        and item.item_id not in pending_item_ids
-        and _is_triggered(item)
-    ]
+    triggered_items = []
+    for item in context.items:
+        if item.status is not ItemStatus.ACTIVE or item.item_id in pending_item_ids:
+            continue
+        if (
+            item.trigger_type is TriggerType.PREDICTED
+            and item.price_threshold is not None
+        ):
+            item.last_observed_price = zepto_checkout.check_current_price(
+                item.item_id
+            )
+        if _is_triggered(item):
+            triggered_items.append(item)
+    return triggered_items
 
 
 def _request_prava_intent(

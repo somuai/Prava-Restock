@@ -225,6 +225,8 @@ TrackedItem                         # base entity — both tracks share this sha
   typical_cadence_days  float
   last_purchased_at     date
   last_purchase_amount  decimal
+  price_threshold       decimal | null  # user-set price signal
+  last_observed_price   decimal | null  # latest merchant price check
 
   # known-date trigger only (Restock Teams)
   renewal_date          date
@@ -279,7 +281,10 @@ this abstraction is what lets Teams exist as a data variant instead of a second 
 ```text
 predicted_depletion_date = last_purchased_at + typical_cadence_days
 days_until_depletion = predicted_depletion_date - today
-trigger_condition = days_until_depletion <= TRIGGER_WINDOW_DAYS # default 2
+depletion_condition = days_until_depletion <= TRIGGER_WINDOW_DAYS # default 2
+price_condition = price_threshold is set
+                  and last_observed_price <= price_threshold
+trigger_condition = depletion_condition or price_condition
 typical_cadence_days_new = ALPHA * observed_interval_days
                          + (1 - ALPHA) * typical_cadence_days_old
 
@@ -288,6 +293,8 @@ typical_cadence_days_new = ALPHA * observed_interval_days
 
 First-time items seed typical_cadence_days from a user-provided estimate; there’s no cold-start model, just an honest guess corrected within 2–3 real cycles. A real regression/time-series
 model is explicitly deferred to post-hackathon.
+
+When depletion and price conditions fire together, Restock sends one proposal explaining both reasons rather than two notifications for the same item.
 
 #### 13.2 Known-date trigger (Restock Teams)
 
@@ -507,6 +514,8 @@ than a handful of subscriptions.
 
 Each v1 limitation has a specific resolution path, not just a “later” label — sequenced by impact
 vs. effort rather than by how they’re listed in Appendix A.
+
+**Built pre-hackathon:** Restock Home now fires on predicted depletion or a user-set price threshold, whichever condition is met first, and combines both reasons into one notification when they coincide. Price-checking is wired to a stub only; real merchant price-querying is Phase 8/9 scope and is not built here.
 
 1. Notification delivery (highest priority — this is the product’s core value prop, not
    a nice-to-have). A web dashboard nobody has open defeats the entire “reaches you before

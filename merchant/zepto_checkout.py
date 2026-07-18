@@ -7,6 +7,29 @@ from uuid import uuid4
 STUB_MODE = True
 
 _CHECKOUTS_BY_IDEMPOTENCY_KEY: dict[str, dict] = {}
+_PRICE_CHECK_COUNTS: dict[str, int] = {}
+_STUB_BASE_PRICES = {
+    "00000000-0000-0000-0000-000000000101": Decimal("380.00"),
+}
+_STUB_PRICE_OFFSETS = (
+    Decimal("0.00"),
+    Decimal("-12.00"),
+    Decimal("8.00"),
+)
+
+
+def check_current_price(item_id) -> Decimal:
+    """Return a deterministic sequence of fake fluctuating merchant prices."""
+    if not item_id:
+        raise ValueError("item_id is required")
+
+    # STUB ONLY: replace with a real merchant price query in Phase 8/9.
+    item_key = str(item_id)
+    check_count = _PRICE_CHECK_COUNTS.get(item_key, 0)
+    _PRICE_CHECK_COUNTS[item_key] = check_count + 1
+    base_price = _STUB_BASE_PRICES.get(item_key, Decimal("399.00"))
+    offset = _STUB_PRICE_OFFSETS[check_count % len(_STUB_PRICE_OFFSETS)]
+    return base_price + offset
 
 
 def complete_checkout(credential_reference, merchant_sku_id, amount, idempotency_key):

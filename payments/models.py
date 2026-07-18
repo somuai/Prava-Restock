@@ -7,7 +7,7 @@ the opaque credential reference supplied by Prava.
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Any
+from typing import Any, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -108,6 +108,8 @@ class TrackedItem(RestockModel):
     typical_cadence_days: float | None = Field(default=None, gt=0)
     last_purchased_at: date | None = None
     last_purchase_amount: Decimal | None = Field(default=None, gt=Decimal("0"))
+    price_threshold: Optional[Decimal] = Field(default=None, gt=Decimal("0"))
+    last_observed_price: Optional[Decimal] = Field(default=None, gt=Decimal("0"))
 
     renewal_date: date | None = None
     current_plan_amount: Decimal | None = Field(default=None, gt=Decimal("0"))
@@ -120,6 +122,10 @@ class TrackedItem(RestockModel):
             self.typical_cadence_days,
             self.last_purchased_at,
             self.last_purchase_amount,
+        )
+        optional_predicted_fields = (
+            self.price_threshold,
+            self.last_observed_price,
         )
         known_date_fields = (
             self.renewal_date,
@@ -135,7 +141,10 @@ class TrackedItem(RestockModel):
         else:
             if any(value is None for value in known_date_fields):
                 raise ValueError("known-date items require all known-date fields")
-            if any(value is not None for value in predicted_fields):
+            if any(
+                value is not None
+                for value in predicted_fields + optional_predicted_fields
+            ):
                 raise ValueError("known-date items cannot set predicted-trigger fields")
         return self
 

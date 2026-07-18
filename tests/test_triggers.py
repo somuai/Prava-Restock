@@ -5,13 +5,20 @@ from uuid import UUID
 import pytest
 
 from payments.models import TrackedItem
+from merchant import zepto_checkout
 from triggers import consumption_model, renewal_model
 
 
 USER_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 
-def home_item(*, days_until_depletion: int, cadence: float = 14.0) -> TrackedItem:
+def home_item(
+    *,
+    days_until_depletion: int,
+    cadence: float = 14.0,
+    price_threshold: Decimal | None = None,
+    last_observed_price: Decimal | None = None,
+) -> TrackedItem:
     return TrackedItem(
         item_id=UUID("00000000-0000-0000-0000-000000000010"),
         user_id=USER_ID,
@@ -26,6 +33,8 @@ def home_item(*, days_until_depletion: int, cadence: float = 14.0) -> TrackedIte
         typical_cadence_days=cadence,
         last_purchased_at=date.today() - timedelta(days=cadence - days_until_depletion),
         last_purchase_amount="450.00",
+        price_threshold=price_threshold,
+        last_observed_price=last_observed_price,
     )
 
 
@@ -48,14 +57,58 @@ def teams_item(*, days_until_renewal: int, current: str, alternate: str) -> Trac
     )
 
 
-def test_predicted_item_inside_window_fires() -> None:
-    item = home_item(days_until_depletion=2)
+def test_predicted_item_fires_on_depletion_only() -> None:
+    observed_price = zepto_checkout.check_current_price("depletion-only-coffee")
+    item = home_item(
+        days_until_depletion=2,
+        price_threshold=observed_price - Decimal("1"),
+        last_observed_price=observed_price,
+    )
     assert consumption_model.should_fire(item) is True
-    assert consumption_model.propose(item)["proposed_amount"] == Decimal("450.00")
+    proposal = consumption_model.propose(item)
+    assert proposal["proposed_amount"] == Decimal("450.00")
+    assert "You'll run out of Coffee in 2 days" in proposal["message"]
+    assert "dropped to" not in proposal["message"]
 
 
-def test_predicted_item_outside_window_does_not_fire() -> None:
-    assert consumption_model.should_fire(home_item(days_until_depletion=3)) is False
+def test_predicted_item_fires_on_price_only() -> None:
+    observed_price = zepto_checkout.check_current_price("price-only-coffee")
+    observed_display = format(observed_price, "f").rstrip("0").rstrip(".")
+    item = home_item(
+        days_until_depletion=3,
+        price_threshold=observed_price,
+        last_observed_price=observed_price,
+    )
+    assert consumption_model.should_fire(item) is True
+    message = consumption_model.propose(item)["message"]
+    assert f"Coffee dropped to ₹{observed_display}" in message
+    assert f"below your ₹{observed_display} threshold" in message
+    assert "run out" not in message
+
+
+def test_predicted_item_fires_once_when_both_signals_match() -> None:
+    observed_price = zepto_checkout.check_current_price("both-signals-coffee")
+    observed_display = format(observed_price, "f").rstrip("0").rstrip(".")
+    item = home_item(
+        days_until_depletion=2,
+        price_threshold=observed_price,
+        last_observed_price=observed_price,
+    )
+    assert consumption_model.should_fire(item) is True
+    proposals = [consumption_model.propose(item)]
+    assert len(proposals) == 1
+    assert "You'll run out of Coffee in 2 days" in proposals[0]["message"]
+    assert f"Coffee dropped to ₹{observed_display}" in proposals[0]["message"]
+
+
+def test_predicted_item_fires_on_neither_signal() -> None:
+    observed_price = zepto_checkout.check_current_price("neither-signal-coffee")
+    item = home_item(
+        days_until_depletion=3,
+        price_threshold=observed_price - Decimal("1"),
+        last_observed_price=observed_price,
+    )
+    assert consumption_model.should_fire(item) is False
 
 
 def test_predicted_depletion_helpers_follow_the_spec() -> None:

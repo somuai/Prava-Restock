@@ -72,6 +72,8 @@ TrackedItem                     # base entity — both tracks share this shape
   typical_cadence_days float
   last_purchased_at    date
   last_purchase_amount decimal
+  price_threshold      decimal | null  # user-set; fire when observed price is at/below this
+  last_observed_price  decimal | null  # latest price returned by the merchant price check
 
   # populated only when trigger_type = known_date (Restock Teams)
   renewal_date          date          # the actual, known billing date — not predicted
@@ -124,7 +126,10 @@ Both trigger sources answer one question — `should_fire(item) -> bool` — and
 ```
 predicted_depletion_date = last_purchased_at + typical_cadence_days
 days_until_depletion     = predicted_depletion_date - today
-trigger_condition        = days_until_depletion <= TRIGGER_WINDOW_DAYS   # default 2
+depletion_condition      = days_until_depletion <= TRIGGER_WINDOW_DAYS   # default 2
+price_condition          = price_threshold is set
+                           and last_observed_price <= price_threshold
+trigger_condition        = depletion_condition or price_condition
 
 # recalibration, applied every time an item is actually reordered
 # (autonomous or manual), exponential smoothing:
@@ -133,6 +138,8 @@ typical_cadence_days_new = ALPHA * observed_interval_days
 ```
 
 **First-time items** seed `typical_cadence_days` from a user-provided estimate at onboarding — there's no cold-start model, just an honest starting guess that gets corrected by real recalibration within 2-3 cycles.
+
+If depletion and price conditions become true in the same check, `propose(item)` emits one notification containing both reasons. The price-check contract is built pre-hackathon and wired only to a deterministic merchant stub; real merchant price-querying remains Phase 8/9 scope and is not live here.
 
 **Explicitly deferred to post-hackathon:** a real regression/time-series model using purchase-history features (day-of-week effects, seasonal consumption changes, household-size inference). Do not attempt this for the 48-hour build — see `PRD.md` §7 scope boundaries.
 
@@ -264,7 +271,7 @@ Standard tool-calling loop; no fine-tuning required for the hackathon scope. Mod
 
 ## 12. Testing strategy
 
-- **Unit tests:** forecasting math (predicted date, recalibration formula) against fixed fixtures; tool functions against mocked Prava/merchant responses.
+- **Unit tests:** forecasting math (predicted date, recalibration formula), depletion-only/price-only/both/neither trigger behavior, and tool functions against mocked Prava/merchant responses. The price-checking cases use the pre-hackathon merchant stub; real merchant price-querying is Phase 8/9 integration scope.
 - **Integration test:** at least one full sandbox run of the happy path (steps 1–8 above) and one rejected-mandate path, before demo day.
 - **Demo rehearsal:** a timed, scripted run-through matching `demo/script.md` (see `SKILL.md`), fitting inside the 5-minute submission video window.
 
