@@ -25,11 +25,19 @@ export type AuditEntry = {
   created_at: string;
 };
 
-const TOKEN = import.meta.env.VITE_RESTOCK_API_TOKEN || "restock-local-demo-token";
-const headers = { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" };
+import { loadSessionToken } from "./native";
+
+const API_BASE = String(import.meta.env.VITE_RESTOCK_API_BASE_URL || "").replace(/\/$/, "");
+
+async function requestHeaders(): Promise<Record<string, string>> {
+  const token = await loadSessionToken() || import.meta.env.VITE_RESTOCK_API_TOKEN || "restock-local-demo-token";
+  return { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+}
+
+const endpoint = (path: string) => `${API_BASE}${path}`;
 
 async function read<T>(path: string): Promise<T> {
-  const response = await fetch(path, { headers });
+  const response = await fetch(endpoint(path), { headers: await requestHeaders() });
   if (!response.ok) throw new Error(`${path} returned ${response.status}`);
   return response.json() as Promise<T>;
 }
@@ -39,9 +47,9 @@ export const api = {
   notifications: () => read<Notification[]>("/api/v1/notifications/pending"),
   audit: () => read<AuditEntry[]>("/api/v1/audit"),
   action: async (runId: string, action: string, adjustedAmount?: string) => {
-    const response = await fetch(`/api/v1/workflows/${runId}/actions`, {
+    const response = await fetch(endpoint(`/api/v1/workflows/${runId}/actions`), {
       method: "POST",
-      headers,
+      headers: await requestHeaders(),
       body: JSON.stringify({ action, adjusted_amount: adjustedAmount }),
     });
     if (!response.ok) throw new Error((await response.json()).detail || "Action failed");
@@ -49,7 +57,7 @@ export const api = {
   },
   approvalUrl: (runId: string) => read<{ approval_url: string }>(`/api/v1/workflows/${runId}/approval-url`),
   resume: async (runId: string) => {
-    const response = await fetch(`/api/v1/workflows/${runId}/resume`, { method: "POST", headers });
+    const response = await fetch(endpoint(`/api/v1/workflows/${runId}/resume`), { method: "POST", headers: await requestHeaders() });
     if (!response.ok) throw new Error((await response.json()).detail || "Resume failed");
     return response.json();
   },

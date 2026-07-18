@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, type AuditEntry, type Capabilities, type Notification } from "./api";
+import { initializeNative } from "./native";
 
 const previews: Notification[] = [
   {
@@ -51,7 +52,16 @@ export default function App() {
   useEffect(() => {
     void refresh();
     const timer = window.setInterval(() => void refresh(), 5000);
-    return () => window.clearInterval(timer);
+    let cleanupNative: () => void = () => {};
+    void initializeNative(async (runId) => {
+      setStatus("Approval return received — safely resuming workflow");
+      await api.resume(runId);
+      await refresh();
+    }).then((cleanup) => { cleanupNative = cleanup; });
+    return () => {
+      window.clearInterval(timer);
+      cleanupNative();
+    };
   }, []);
 
   const visible = useMemo(

@@ -25,6 +25,6 @@ jobs:
           node-version: "24"
           cache: npm
           cache-dependency-path: ui/web/package-lock.json
-      - name: Build PWA
+      - name: Test and build PWA
         working-directory: ui/web
-        run: npm ci && npm run build
+        run: npm ci && npm test && npm run build

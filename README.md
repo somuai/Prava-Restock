@@ -55,6 +55,10 @@ No paid channel, store enrollment, hosting upgrade, or real Zepto payment is act
 
 Phase 11 adds Household and Organization tenants, owner/admin/approver/member roles, expiring one-use invitations, tenant-scoped items, multi-approver policies, consent records, privacy export, and deletion/pseudonymization. An explicit skip vetoes a pending multi-approver purchase; otherwise all positive decisions must agree and meet the configured threshold. Production rejects the development user header and requires an HMAC-signed, expiring bearer session using `RESTOCK_SESSION_SECRET`.
 
+## Native wrappers
+
+The same PWA is wrapped by Capacitor 8 under `ui/web/android` and `ui/web/ios`. Both native projects support the `restock://approval` callback, OS push registration, and device-bound secure session storage; payment credentials never enter local storage. Local Android and iOS Simulator builds are verified. Physical-device testing and store enrollment remain launch gates, and no store fee has been paid.
+
 ## Project specifications
 
 - [Product requirements](PRD.md)
