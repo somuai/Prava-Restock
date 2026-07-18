@@ -1,53 +1,112 @@
-"""Run every seeded Restock item through the fully offline stub pipeline."""
+"""Run deterministic or explicitly interactive Restock workflow demos."""
 
+import argparse
 from datetime import datetime, timezone
-from uuid import UUID
+from decimal import Decimal
+import sys
+import webbrowser
 
-from agent.orchestrator import OrchestratorContext, RestockOrchestrator
-from demo.seed_reset import AUDIT_LOG_PATH, reset_demo_state
-from payments.models import User
-
-
-def demo_user() -> User:
-    return User(
-        user_id=UUID("00000000-0000-0000-0000-000000000001"),
-        display_name="Restock Demo User",
-        prava_account_ref="stub_prava_demo_account",
-        monthly_cap="20000.00",
-        per_item_cap="3000.00",
-        per_transaction_cap="3000.00",
-        created_at=datetime.now(timezone.utc),
-    )
+from demo.seed_reset import demo_user, load_seed_items
+from payments import prava_client
+from storage import Database, RestockRepository
+from workflow import WorkflowService
 
 
-def main() -> int:
-    items = reset_demo_state()
-    context = OrchestratorContext(
-        user=demo_user(), items=items, audit_log_path=AUDIT_LOG_PATH
-    )
-    orchestrator = RestockOrchestrator(context)
+class OfflinePrava:
+    def __init__(self) -> None:
+        self.intents: dict[str, dict] = {}
+        self._INTENTS: dict[str, dict] = {}
 
-    print("Restock dry run — OFFLINE STUBS ONLY")
+    def create_intent(self, merchant, amount, item_description, constraints):
+        reference = f"offline-intent-{len(self.intents) + 1}"
+        self.intents[reference] = {"merchant": merchant, "amount": str(amount)}
+        self._INTENTS[reference] = {"iframe_url": f"https://offline.invalid/{reference}"}
+        return reference
+
+    def await_mandate(self, intent_ref):
+        intent = self.intents[intent_ref]
+        return {
+            "status": "approved",
+            "mandate_id": f"offline-mandate-{intent_ref}",
+            "credential_reference": f"offline-credential-{intent_ref}",
+            "scope": {"merchant": intent["merchant"], "max_amount": intent["amount"]},
+            "approved_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+
+class OfflineCheckout:
+    def __init__(self) -> None:
+        self.results: dict[str, dict] = {}
+
+    def complete_checkout(self, credential_reference, merchant_sku_id, amount, idempotency_key):
+        self.results.setdefault(
+            idempotency_key,
+            {
+                "status": "completed",
+                "merchant_order_id": f"offline-order-{len(self.results) + 1}",
+                "charged_amount": str(Decimal(str(amount))),
+                "execution_mode": "disclosed_mock",
+            },
+        )
+        return self.results[idempotency_key]
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=("offline", "integration"), default="offline")
+    parser.add_argument("--item", help="Item name fragment for an interactive integration run")
+    parser.add_argument("--all", action="store_true", help="Run every item interactively")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parser().parse_args(argv or [])
+    items = load_seed_items()
+    if args.item:
+        items = [item for item in items if args.item.lower() in item.name.lower()]
+        if not items:
+            print(f"No seeded item matched {args.item!r}.")
+            return 2
+    if args.mode == "integration" and not args.all and not args.item:
+        items = items[:1]
+
+    repository = RestockRepository(Database("sqlite:///:memory:"))
+    repository.create_schema()
+    if args.mode == "offline":
+        boundary = OfflineCheckout()
+        service = WorkflowService(
+            repository,
+            prava=OfflinePrava(),
+            home_checkout=boundary,
+            teams_checkout=boundary,
+        )
+    else:
+        service = WorkflowService(repository, prava=prava_client)
+
+    print(f"Restock dry run — {args.mode.upper()}")
     print("=" * 42)
     completed = 0
     for index, item in enumerate(items, start=1):
-        print(
-            f"\n[{index}/{len(items)}] {item.name} "
-            f"({item.track.value}, {item.trigger_type.value})"
-        )
-        trace = orchestrator.run_cycle(item)
-        for step_number, step in enumerate(trace["steps"], start=1):
-            print(f"  {step_number}. {step.replace('_', ' ')}")
-        print(f"  result: {trace['status']}")
-        if trace["status"] == "completed":
+        print(f"\n[{index}/{len(items)}] {item.name} ({item.track.value})")
+        run = service.begin(demo_user(), item)
+        print("  1. triggered and intent created")
+        print("  2. proactive notification persisted")
+        action = "switch_plan" if run.get("proposed_action") == "switch_to_alternate" else "approve"
+        service.act(run["run_id"], user_id=str(item.user_id), action=action)
+        print(f"  3. user action: {action}")
+        if args.mode == "integration":
+            approval_url = service.approval_url(run["run_id"])
+            print("  4. opening the short-lived Prava approval page")
+            webbrowser.open(approval_url)
+        final = service.resume_after_passkey(run["run_id"])
+        print(f"  5. result: {final['state']}")
+        if final["state"] == "completed":
             completed += 1
-            print(f"  checkout: {trace['merchant']} · {trace['amount']}")
 
     print("\n" + "=" * 42)
-    print(f"Summary: {completed}/{len(items)} items completed against fakes.")
-    print(f"Audit log: {AUDIT_LOG_PATH}")
+    print(f"Summary: {completed}/{len(items)} items completed.")
     return 0 if completed == len(items) else 1
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

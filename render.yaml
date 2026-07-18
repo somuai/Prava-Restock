@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: restock-offline-stub
+    name: restock-api
     runtime: docker
     plan: free
     region: singapore

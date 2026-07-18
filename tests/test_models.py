@@ -44,6 +44,7 @@ def predicted_item_data() -> dict:
         "sensitive_flag": False,
         "preferred_merchant": "zepto",
         "merchant_sku_id": "coffee-500g",
+        "currency": "INR",
         "status": "active",
         "typical_cadence_days": 14.0,
         "last_purchased_at": date(2026, 7, 2),
@@ -62,6 +63,7 @@ def known_date_item_data() -> dict:
         "sensitive_flag": False,
         "preferred_merchant": "mock_subscription_billing",
         "merchant_sku_id": "teamtool-pro-monthly",
+        "currency": "USD",
         "status": "active",
         "renewal_date": date(2026, 7, 16),
         "current_plan_amount": "2400.00",
@@ -118,6 +120,7 @@ def test_valid_intent() -> None:
         item_id=ITEM_ID,
         proposed_amount="450.00",
         proposed_merchant="zepto",
+        currency="INR",
         status="pending_approval",
         created_at=NOW,
     )
@@ -131,6 +134,7 @@ def test_invalid_intent(field: str, value: object) -> None:
         "item_id": ITEM_ID,
         "proposed_amount": "450.00",
         "proposed_merchant": "zepto",
+        "currency": "INR",
         "status": "pending_approval",
         "created_at": NOW,
     } | {field: value}
@@ -167,6 +171,7 @@ def transaction_data() -> dict:
         "item_id": ITEM_ID,
         "merchant_order_id": "order_demo_1",
         "amount": "450.00",
+        "currency": "INR",
         "status": "completed",
         "completed_at": NOW,
     }

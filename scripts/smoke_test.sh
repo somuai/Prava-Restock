@@ -10,8 +10,11 @@ fi
 base_url="${1%/}"
 failed=0
 
-for path in / /health /audit-log /notifications/pending; do
+auth_token="${RESTOCK_API_TOKEN:-restock-local-demo-token}"
+
+for path in / /health /ready /capabilities /audit-log /notifications/pending; do
   if curl --fail --silent --show-error --max-time 15 \
+    --header "Authorization: Bearer ${auth_token}" \
     --output /dev/null "${base_url}${path}"; then
     echo "PASS ${path}"
   else

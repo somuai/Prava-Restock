@@ -103,6 +103,7 @@ class TrackedItem(RestockModel):
     sensitive_flag: bool
     preferred_merchant: PreferredMerchant
     merchant_sku_id: str
+    currency: str = Field(min_length=3, max_length=3)
     status: ItemStatus
 
     typical_cadence_days: float | None = Field(default=None, gt=0)
@@ -154,6 +155,7 @@ class Intent(RestockModel):
     item_id: UUID
     proposed_amount: Decimal = PositiveDecimal
     proposed_merchant: str
+    currency: str = Field(min_length=3, max_length=3)
     status: IntentStatus
     created_at: datetime
 
@@ -174,6 +176,7 @@ class Transaction(RestockModel):
     item_id: UUID
     merchant_order_id: str
     amount: Decimal = PositiveDecimal
+    currency: str = Field(min_length=3, max_length=3)
     status: TransactionStatus
     completed_at: datetime
 

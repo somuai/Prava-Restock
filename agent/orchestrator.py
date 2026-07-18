@@ -188,6 +188,7 @@ def _request_prava_intent(
         item_id=item_id,
         proposed_amount=amount,
         proposed_merchant=merchant,
+        currency=item.currency,
         status=IntentStatus.PENDING_APPROVAL,
         created_at=datetime.now(timezone.utc),
     )
@@ -332,6 +333,7 @@ def _complete_merchant_checkout(
         item_id=item_id,
         merchant_order_id=response["merchant_order_id"],
         amount=mandate.scope_max_amount,
+        currency=item.currency,
         status=TransactionStatus.COMPLETED,
         completed_at=datetime.now(timezone.utc),
     )

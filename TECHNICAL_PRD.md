@@ -281,11 +281,11 @@ Full detail in `PRD.md` §14 — summary: payment data privacy is structural (Pr
 
 ## 14. Deployment for the hackathon
 
-Single lightweight backend (FastAPI or equivalent) plus the orchestrator process — no need for production-grade infra in 48 hours. Sandbox credentials only; nothing touches a real card until the full flow has been verified end-to-end in sandbox at least once. Cheap hosting (Render/Railway, or a tunneled local instance for the live demo) is entirely sufficient — don't spend build hours on infrastructure this project doesn't need yet.
+The implementation now separates the FastAPI web process from a leased scheduler worker and persists the resumable workflow through a Postgres-compatible SQLAlchemy repository with Alembic migrations. SQLite remains the zero-cost local/demo default. Sandbox credentials only; the real-money Zepto path is disabled unless an operator explicitly enables it. Railway/Render configuration must keep the worker separate from web replicas and store all secrets in platform configuration.
 
 ## 15. Observability
 
-Structured log line at every state transition (`Intent` created/approved/rejected, `Transaction` completed/failed). For the hackathon, `logs/audit_log.json` doubles as both the user-facing savings log and the engineering debug trail — no separate dashboard needed.
+Every durable state transition writes a sanitized domain-audit entry with run, user, item, trigger reason, and real/simulated mode tags. Raw credentials, approval URLs, payment links, and card fields are structurally rejected. Engineering logs remain separate from the user-facing audit/savings feed.
 
 ## 16. Known limitations and non-goals (v1)
 

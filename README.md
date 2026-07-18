@@ -10,7 +10,9 @@ After installing the project, run `.venv/bin/python demo/dry_run.py` to exercise
 
 ## Local API
 
-Run `.venv/bin/uvicorn ui.api:app --reload` and open `/`, `/health`, `/audit-log`, or `/notifications/pending`. The included Dockerfile, `render.yaml`, and `railway.json` can deploy the API without committing credentials.
+Run `.venv/bin/alembic upgrade head`, then `.venv/bin/uvicorn ui.api:app --reload`. Public liveness and capability endpoints are `/health`, `/ready`, and `/capabilities`; behavioral endpoints under `/api/v1` require `Authorization: Bearer $RESTOCK_API_TOKEN`. Development falls back to the documented local demo token, but production refuses behavioral requests until a real token is configured.
+
+Run the scheduler as a separate process with `.venv/bin/python -m workflow.worker`. The `Procfile` keeps web and worker commands separate so multiple web replicas cannot duplicate trigger scans.
 
 ## Deployment
 
@@ -32,6 +34,12 @@ The currently hosted URL is the credential-free Phase 6 offline deployment. The 
 - **Hosted URL:** still the Phase 6 offline build until the later deployment phase publishes the resumable workflow and UI.
 
 Runtime modes are returned by `/capabilities`. The default is `HOME_MERCHANT_MODE=disclosed_mock`; `ZEPTO_REAL_PAYMENT_ENABLED=1` is an additional operator gate and is never enabled in CI.
+
+## Workflow and persistence
+
+Phase 9 adds a resumable database-backed state machine, Postgres-compatible SQLAlchemy repositories, an initial Alembic migration, unique active-workflow and idempotency constraints, authenticated action/resume endpoints, scheduler leases, sanitized mode-tagged audit entries, and cadence recalibration after completed Home purchases. SQLite is the zero-cost local/demo default; set `DATABASE_URL` to Postgres for a durable deployment.
+
+Run `.venv/bin/python demo/dry_run.py --mode offline` for all five deterministic seeded workflows. Use `--mode integration --item coffee` for the explicitly interactive Prava path; it opens the short-lived approval page and never makes the live Zepto payment path automatic.
 
 ## Project specifications
 

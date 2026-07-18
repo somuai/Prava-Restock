@@ -1,16 +1,30 @@
 """Load stable demo fixtures and reset mutable demo state."""
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 import json
 from pathlib import Path
+from uuid import UUID
 
 from common import notification_store
-from payments.models import TrackedItem, TriggerType
+from payments.models import TrackedItem, TriggerType, User
+from storage import Database, RestockRepository
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SEED_PATH = ROOT / "triggers" / "seed_data.json"
 AUDIT_LOG_PATH = ROOT / "logs" / "audit_log.json"
+
+
+def demo_user() -> User:
+    return User(
+        user_id=UUID("00000000-0000-0000-0000-000000000001"),
+        display_name="Restock Demo User",
+        prava_account_ref="prava_demo_account",
+        monthly_cap="20000.00",
+        per_item_cap="3000.00",
+        per_transaction_cap="3000.00",
+        created_at=datetime.now(timezone.utc),
+    )
 
 
 def load_seed_items(today: date | None = None) -> list[TrackedItem]:
@@ -34,6 +48,17 @@ def reset_demo_state(today: date | None = None) -> list[TrackedItem]:
     return load_seed_items(today)
 
 
+def reset_database(today: date | None = None) -> list[TrackedItem]:
+    items = reset_demo_state(today)
+    database = Database()
+    database.reset_schema()
+    repository = RestockRepository(database)
+    repository.upsert_user(demo_user())
+    for item in items:
+        repository.upsert_item(item)
+    return items
+
+
 if __name__ == "__main__":
-    items = reset_demo_state()
-    print(f"Reset Restock demo state with {len(items)} seeded items.")
+    items = reset_database()
+    print(f"Reset Restock demo database with {len(items)} seeded items.")

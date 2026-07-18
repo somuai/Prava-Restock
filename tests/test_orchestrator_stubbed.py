@@ -94,6 +94,7 @@ def build_item() -> TrackedItem:
         sensitive_flag=False,
         preferred_merchant="zepto",
         merchant_sku_id="coffee-500g",
+        currency="INR",
         status="active",
         typical_cadence_days=14,
         last_purchased_at=date.today() - timedelta(days=12),
