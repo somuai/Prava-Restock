@@ -41,6 +41,16 @@ Phase 9 adds a resumable database-backed state machine, Postgres-compatible SQLA
 
 Run `.venv/bin/python demo/dry_run.py --mode offline` for all five deterministic seeded workflows. Use `--mode integration --item coffee` for the explicitly interactive Prava path; it opens the short-lived approval page and never makes the live Zepto payment path automatic.
 
+## Demo PWA and channels
+
+The React/TypeScript PWA lives in `ui/web` and is served from `/app` in the production Docker image. Run `npm ci && npm run dev` there for local frontend development, or `npm run build` for the deployable bundle. It presents a WhatsApp-style Home surface and Slack-style Teams surface with explicit preview/sandbox/simulation badges.
+
+- **Slack:** `channels/slack_manifest.yaml` and the Bolt Socket Mode adapter are ready for one-workspace installation. Configure `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_SIGNING_SECRET`, and `SLACK_CHANNEL_ID`; no Marketplace submission is needed for the private demo workspace.
+- **WhatsApp:** the Cloud API adapter sends the three-button proactive template only after recorded opt-in. The webhook verifies Meta's HMAC signature and maps Approve/Skip actions to workflows; Adjust opens the amount UI. Configure the `WHATSAPP_*` values only in local/platform secrets.
+- **Guaranteed submission path:** the PWA remains functional and visibly disclosed if Slack or Meta setup is still awaiting external approval.
+
+No paid channel, store enrollment, hosting upgrade, or real Zepto payment is activated by repository code.
+
 ## Project specifications
 
 - [Product requirements](PRD.md)

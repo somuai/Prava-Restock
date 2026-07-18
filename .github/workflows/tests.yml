@@ -20,3 +20,11 @@ jobs:
         run: python -m pip install -e .
       - name: Run tests
         run: python -m pytest -q
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: ui/web/package-lock.json
+      - name: Build PWA
+        working-directory: ui/web
+        run: npm ci && npm run build

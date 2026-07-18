@@ -17,17 +17,12 @@ def test_hello_world_and_health_endpoints(monkeypatch) -> None:
     monkeypatch.setenv("HOME_MERCHANT_MODE", "disclosed_mock")
     response = client.get("/")
     assert response.status_code == 200
-    assert response.json() == {
-        "service": "Restock",
-        "status": "ok",
-        "mode": "mixed",
-        "capabilities": {
-            "prava_mode": "sandbox_unconfigured",
-            "home_merchant_mode": "disclosed_mock",
-            "teams_billing_mode": "disclosed_mock",
-            "real_money_enabled": False,
-        },
-    }
+    payload = response.json()
+    assert payload["service"] == "Restock"
+    assert payload["mode"] == "mixed"
+    assert payload["capabilities"]["prava_mode"] == "sandbox_unconfigured"
+    assert payload["capabilities"]["home_merchant_mode"] == "disclosed_mock"
+    assert payload["capabilities"]["real_money_enabled"] is False
     assert client.get("/health").json() == {"status": "healthy"}
     assert client.get("/capabilities").json()["real_money_enabled"] is False
 

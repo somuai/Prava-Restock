@@ -1,0 +1,53 @@
+:root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; color: #15302c; background: #ede9dd; font-synthesis: none; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; background: radial-gradient(circle at 10% 0%, #f9f3df, transparent 38%), #ede9dd; }
+button { font: inherit; }
+.shell { width: min(1160px, calc(100% - 32px)); margin: 0 auto; padding-bottom: 72px; }
+.topbar { min-height: 82px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(21,48,44,.16); }
+.brand { display: flex; gap: 12px; align-items: center; }
+.brand div { display: grid; }
+.brand strong { font-family: Georgia, serif; font-size: 22px; }
+.brand small { color: #647570; }
+.mark { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 13px; color: #fff; background: #123d35; font-family: Georgia, serif; }
+.badges { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.badges span, .channel-label span { border: 1px solid #9aa8a2; border-radius: 999px; padding: 6px 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .07em; background: rgba(255,255,255,.5); }
+.hero { padding: 72px 0 44px; max-width: 760px; }
+.eyebrow { text-transform: uppercase; letter-spacing: .16em; font-weight: 700; font-size: 12px; color: #b15035; }
+h1 { font-family: Georgia, serif; font-size: clamp(44px, 7vw, 82px); line-height: .98; margin: 14px 0 24px; letter-spacing: -.04em; }
+.hero > p:last-child { font-size: 18px; color: #566b65; }
+.track-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+.track-tabs button { border: 1px solid #b8c0ba; background: rgba(255,255,255,.45); padding: 18px 22px; border-radius: 18px; color: #43605a; text-align: left; cursor: pointer; display: grid; }
+.track-tabs button.active { color: #fff; background: #153d36; border-color: #153d36; box-shadow: 0 12px 30px rgba(21,61,54,.18); }
+.track-tabs span { font-size: 18px; font-weight: 700; }
+.track-tabs small { opacity: .75; margin-top: 3px; }
+.conversation { background: #ddd4c0; border-radius: 26px; padding: 22px; min-height: 340px; border: 1px solid rgba(21,48,44,.14); }
+.conversation.teams { background: #e7e4ec; }
+.channel-label { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #60706b; margin-bottom: 34px; }
+.message { display: flex; gap: 12px; align-items: flex-start; max-width: 760px; }
+.avatar { flex: 0 0 38px; height: 38px; display: grid; place-items: center; border-radius: 12px; background: #153d36; color: #fff; font-family: Georgia, serif; }
+.bubble { background: #fffdf7; border-radius: 4px 18px 18px 18px; padding: 20px; box-shadow: 0 10px 30px rgba(28,46,41,.08); flex: 1; }
+.bubble p { line-height: 1.55; margin: 0 0 18px; }
+.bubble small { display: block; margin-top: 12px; color: #798681; text-transform: capitalize; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.actions button { border: 1px solid #8aa097; border-radius: 10px; padding: 10px 16px; background: transparent; color: #153d36; font-weight: 700; cursor: pointer; }
+.actions button:first-child { background: #153d36; color: white; border-color: #153d36; }
+.actions button:disabled { opacity: .45; cursor: default; }
+.audit-panel { margin-top: 22px; display: grid; grid-template-columns: .8fr 1.2fr; gap: 28px; padding: 30px; border-radius: 24px; background: #b7d4c2; }
+.audit-panel h2 { font-family: Georgia, serif; font-size: 32px; margin: 8px 0; }
+.audit-list { display: grid; gap: 10px; }
+.audit-list > div { display: flex; justify-content: space-between; gap: 20px; padding: 12px 0; border-bottom: 1px solid rgba(21,48,44,.18); text-transform: capitalize; }
+.audit-list small { color: #526861; }
+@media (max-width: 700px) {
+  .shell { width: min(100% - 20px, 1160px); }
+  .topbar { align-items: flex-start; padding: 18px 0; gap: 12px; }
+  .brand small { display: none; }
+  .hero { padding: 48px 4px 30px; }
+  .track-tabs { gap: 8px; }
+  .conversation { padding: 15px; }
+  .channel-label { align-items: flex-start; gap: 12px; }
+  .message { gap: 8px; }
+  .bubble { padding: 16px; }
+  .actions button { flex: 1; min-width: 88px; }
+  .audit-panel { grid-template-columns: 1fr; padding: 22px; }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }

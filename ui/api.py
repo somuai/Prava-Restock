@@ -8,11 +8,13 @@ import os
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from common import notification_store
+from channels import whatsapp
 from merchant import zepto_checkout
 from storage import Database, RestockRepository
 from workflow import WorkflowService
@@ -71,6 +73,11 @@ def runtime_modes() -> dict[str, str | bool]:
             zepto_checkout.merchant_mode().value == "real"
             and os.getenv("ZEPTO_REAL_PAYMENT_ENABLED") == "1"
         ),
+        "slack_configured": bool(os.getenv("SLACK_BOT_TOKEN") and os.getenv("SLACK_APP_TOKEN")),
+        "whatsapp_configured": bool(
+            os.getenv("WHATSAPP_ACCESS_TOKEN") and os.getenv("WHATSAPP_PHONE_NUMBER_ID")
+        ),
+        "demo_mode": os.getenv("RESTOCK_DEMO_MODE", "1") == "1",
     }
 
 
@@ -235,3 +242,45 @@ def resume_workflow(
         return WorkflowService(repository).resume_after_passkey(run_id)
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get("/webhooks/whatsapp")
+def verify_whatsapp_webhook(
+    mode: str = Query(alias="hub.mode"),
+    verify_token: str = Query(alias="hub.verify_token"),
+    challenge: str = Query(alias="hub.challenge"),
+) -> str:
+    expected = os.getenv("WHATSAPP_VERIFY_TOKEN", "")
+    if mode != "subscribe" or not expected or verify_token != expected:
+        raise HTTPException(status_code=403, detail="WhatsApp verification failed")
+    return challenge
+
+
+@app.post("/webhooks/whatsapp")
+async def whatsapp_webhook(
+    request: Request,
+    x_hub_signature_256: str | None = Header(default=None),
+    repository: RestockRepository = Depends(get_repository),
+) -> dict[str, Any]:
+    raw = await request.body()
+    if not whatsapp.verify_signature(raw, x_hub_signature_256):
+        raise HTTPException(status_code=401, detail="invalid WhatsApp signature")
+    payload = json.loads(raw)
+    processed = []
+    for action in whatsapp.extract_actions(payload):
+        if action["action"] == "adjust":
+            processed.append({"run_id": action["run_id"], "status": "open_adjust_ui"})
+            continue
+        run = repository.get_workflow(action["run_id"])
+        WorkflowService(repository).act(
+            action["run_id"],
+            user_id=run["user_id"],
+            action=action["action"],
+        )
+        processed.append({"run_id": action["run_id"], "status": "accepted"})
+    return {"processed": processed}
+
+
+WEB_DIST = ROOT / "ui" / "web" / "dist"
+if WEB_DIST.exists():
+    app.mount("/app", StaticFiles(directory=WEB_DIST, html=True), name="web")

@@ -19,6 +19,7 @@ dependencies = [
     "SQLAlchemy==2.0.51",
     "alembic==1.18.5",
     "psycopg[binary]==3.3.4",
+    "slack-bolt==1.30.0",
 ]
 
 [tool.pytest.ini_options]
@@ -29,4 +30,4 @@ markers = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["agent*", "common*", "triggers*", "payments*", "merchant*", "ui*", "demo*", "storage*", "workflow*"]
+include = ["agent*", "channels*", "common*", "triggers*", "payments*", "merchant*", "ui*", "demo*", "storage*", "workflow*"]

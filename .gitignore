@@ -8,6 +8,8 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+node_modules/
+ui/web/dist/
 logs/notifications.json
 logs/merchant_checkouts.json
 logs/restock.db*

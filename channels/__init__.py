@@ -1,0 +1,1 @@
+"""External notification channel adapters."""

@@ -1,0 +1,9 @@
+{
+  "name": "Restock — proactive replenishment",
+  "short_name": "Restock",
+  "start_url": "/app/",
+  "display": "standalone",
+  "background_color": "#f4f1e8",
+  "theme_color": "#112f2b",
+  "icons": []
+}

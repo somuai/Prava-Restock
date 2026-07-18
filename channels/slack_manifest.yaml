@@ -1,0 +1,15 @@
+display_information:
+  name: Restock Teams
+features:
+  bot_user:
+    display_name: Restock Teams
+    always_online: true
+oauth_config:
+  scopes:
+    bot:
+      - chat:write
+settings:
+  interactivity:
+    is_enabled: true
+  socket_mode_enabled: true
+  token_rotation_enabled: false

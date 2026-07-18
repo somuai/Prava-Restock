@@ -28,4 +28,16 @@ def test_example_environment_contains_placeholders_only() -> None:
     assert "PRAVA_SANDBOX_URL=" in lines
     assert "HOME_MERCHANT_MODE=disclosed_mock" in lines
     assert "ZEPTO_REAL_PAYMENT_ENABLED=0" in lines
-    assert all("sk_" not in line and "secret" not in line.lower() for line in lines)
+    values = dict(line.split("=", 1) for line in lines if "=" in line)
+    for key in (
+        "OPENAI_API_KEY",
+        "PRAVA_API_KEY",
+        "RESTOCK_API_TOKEN",
+        "SLACK_BOT_TOKEN",
+        "SLACK_APP_TOKEN",
+        "SLACK_SIGNING_SECRET",
+        "WHATSAPP_ACCESS_TOKEN",
+        "WHATSAPP_APP_SECRET",
+        "WHATSAPP_VERIFY_TOKEN",
+    ):
+        assert values[key] == ""
