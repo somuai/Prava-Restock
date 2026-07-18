@@ -295,7 +295,7 @@ Structured log line at every state transition (`Intent` created/approved/rejecte
 - No real SaaS billing-portal integration — the known-date track's checkout is a disclosed mock; the renewal date and Prava mandate flow around it are real.
 - No multi-user/shared household or team mandates.
 - No native mobile app.
-- No real WhatsApp Business API or Slack app integration in this submission — both are disclosed mocked surfaces matching each platform's interaction pattern.
+- The guaranteed submission surface remains a disclosed WhatsApp-style mock. A Meta test-number integration and a single-workspace Slack app may be shown only when their external setup succeeds, and must be labeled separately from production-ready channel access.
 - Merchant coverage limited to Zepto/Swiggy (or the disclosed mock fallback) for Home; one disclosed mock subscription for Teams.
 
 ## 17. Open questions — verify before/during build

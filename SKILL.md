@@ -289,10 +289,11 @@ Build two disclosed mocked surfaces matching the primary channels defined in
   interactive approve/adjust/skip controls.
 - **Restock Teams:** a Slack-style billing notification and approval surface.
 
-Do not attempt real WhatsApp Business API or real Slack app integration during
-the hackathon window. WhatsApp Business verification takes 1–2 weeks, outside
-the 48-hour build, and both mocked surfaces must be disclosed in the demo and
-submission. The implementation may use ChatKit or a minimal web dashboard, but
+Keep both mocked surfaces available as the guaranteed demo path. Meta's test-number
+flow and a single-workspace Slack app may be added when their external setup succeeds,
+but neither may be presented as production channel approval. Meta documents template
+review as taking up to 24 hours and does not publish a guaranteed 1–2 week business-
+verification SLA. The implementation may use ChatKit or a minimal web dashboard, but
 it must **push** a message to the user unprompted (the proactive notification is
 the entire differentiator; if the demo looks like the user asked first, you've
 built the thing you were trying not to build). Show, front and center:

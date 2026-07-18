@@ -185,12 +185,11 @@ The user-facing surface is track-specific:
 - **Restock Teams — Slack.** Small teams and founders already handle billing alerts and approvals where they work. Restock Teams meets that audience in Slack, not WhatsApp.
 - **Native mobile app — deferred, not planned for launch.** Building and maintaining an App Store presence before there is evidence that people act on these notifications is premature investment. Native becomes justified only after usage data from WhatsApp and Slack demonstrates retention and action rates that warrant it.
 
-**Hackathon scope:** real WhatsApp Business Platform access requires Meta business verification, which takes 1–2 weeks and is not available inside a 48-hour hackathon window. The hackathon demo therefore uses a mocked chat surface that reproduces the intended WhatsApp interaction pattern — a proactive message followed by Approve, Adjust, and Skip controls — rather than claiming a live WhatsApp Business API integration. This mock must be disclosed alongside the other hackathon-day simulations in this document.
+**Hackathon scope:** Meta's test-number path can be exercised before full production verification, while a production-branded WhatsApp number still requires the relevant Meta onboarding, number, billing, opt-in, and template approvals. Meta documents template review as taking up to 24 hours; it does not publish a guaranteed 1–2 week business-verification SLA. The guaranteed demo surface therefore remains a mocked chat experience reproducing the proactive message and Approve, Adjust, and Skip controls. Any test-number integration is labeled separately and must not be presented as a verified production WhatsApp deployment.
 
 ### 11. Design principles
 
-1. Payment data never touches our storage. Every persisted field is a reference (mandate ID, credential reference, transaction ID) — never a card number, never raw passkey
-material.
+1. Raw card and passkey data never touches our storage. Prava's one-time token and dynamic CVV are confined to the server-side payment boundary, held only long enough to complete one checkout, and never logged or persisted. Every durable field is a reference (mandate ID, credential reference, transaction ID).
 2. Every autonomous action is bounded. Spend caps are hard limits enforced before a
 Prava intent is even created.
 3. The orchestrator proposes; it never silently substitutes. Price/availability changes
