@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, JSON, DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -27,11 +27,83 @@ class UserRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class TenantRow(Base):
+    __tablename__ = "tenants"
+
+    tenant_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    kind: Mapped[str] = mapped_column(String(20))
+    created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MembershipRow(Base):
+    __tablename__ = "memberships"
+    __table_args__ = (UniqueConstraint("tenant_id", "user_id", name="uq_tenant_member"),)
+
+    membership_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.tenant_id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id"), index=True)
+    role: Mapped[str] = mapped_column(String(20))
+    status: Mapped[str] = mapped_column(String(20), default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class InvitationRow(Base):
+    __tablename__ = "invitations"
+
+    invitation_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.tenant_id"), index=True)
+    email: Mapped[str] = mapped_column(String(320))
+    role: Mapped[str] = mapped_column(String(20))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    invited_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id"))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ConsentRow(Base):
+    __tablename__ = "consents"
+    __table_args__ = (UniqueConstraint("tenant_id", "user_id", "kind", name="uq_user_consent"),)
+
+    consent_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.tenant_id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id"), index=True)
+    kind: Mapped[str] = mapped_column(String(40))
+    granted: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ApprovalPolicyRow(Base):
+    __tablename__ = "approval_policies"
+
+    policy_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.tenant_id"), index=True)
+    scope: Mapped[str] = mapped_column(String(30), default="tenant")
+    max_amount: Mapped[float] = mapped_column(Numeric(18, 2))
+    currency: Mapped[str] = mapped_column(String(3))
+    required_approvals: Mapped[int] = mapped_column(default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ApprovalDecisionRow(Base):
+    __tablename__ = "approval_decisions"
+    __table_args__ = (UniqueConstraint("run_id", "user_id", name="uq_workflow_approver"),)
+
+    decision_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.tenant_id"), index=True)
+    run_id: Mapped[str] = mapped_column(String(36), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id"), index=True)
+    decision: Mapped[str] = mapped_column(String(30))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class TrackedItemRow(Base):
     __tablename__ = "tracked_items"
 
     item_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id"), index=True)
+    tenant_id: Mapped[str | None] = mapped_column(ForeignKey("tenants.tenant_id"), nullable=True, index=True)
     payload: Mapped[dict] = mapped_column(JSON)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -42,6 +114,7 @@ class WorkflowRunRow(Base):
 
     run_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id"), index=True)
+    tenant_id: Mapped[str | None] = mapped_column(ForeignKey("tenants.tenant_id"), nullable=True, index=True)
     item_id: Mapped[str] = mapped_column(ForeignKey("tracked_items.item_id"), index=True)
     state: Mapped[str] = mapped_column(String(40), index=True)
     active_item_key: Mapped[str | None] = mapped_column(String(36), nullable=True)
@@ -67,6 +140,7 @@ class NotificationRow(Base):
     notification_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     run_id: Mapped[str] = mapped_column(ForeignKey("workflow_runs.run_id"), index=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id"), index=True)
+    tenant_id: Mapped[str | None] = mapped_column(ForeignKey("tenants.tenant_id"), nullable=True, index=True)
     message: Mapped[str] = mapped_column(Text)
     actions: Mapped[list] = mapped_column(JSON)
     status: Mapped[str] = mapped_column(String(30), default="pending", index=True)
@@ -80,6 +154,7 @@ class NotificationActionRow(Base):
     action_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     run_id: Mapped[str] = mapped_column(ForeignKey("workflow_runs.run_id"), index=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id"), index=True)
+    tenant_id: Mapped[str | None] = mapped_column(ForeignKey("tenants.tenant_id"), nullable=True, index=True)
     action: Mapped[str] = mapped_column(String(40))
     adjusted_amount: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -91,6 +166,7 @@ class TransactionRow(Base):
     transaction_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     run_id: Mapped[str] = mapped_column(ForeignKey("workflow_runs.run_id"), unique=True)
     item_id: Mapped[str] = mapped_column(ForeignKey("tracked_items.item_id"), index=True)
+    tenant_id: Mapped[str | None] = mapped_column(ForeignKey("tenants.tenant_id"), nullable=True, index=True)
     mandate_ref: Mapped[str] = mapped_column(String(255))
     merchant_order_id: Mapped[str] = mapped_column(String(255))
     amount: Mapped[float] = mapped_column(Numeric(18, 2))
@@ -106,6 +182,7 @@ class AuditRow(Base):
     audit_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     run_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id"), index=True)
+    tenant_id: Mapped[str | None] = mapped_column(ForeignKey("tenants.tenant_id"), nullable=True, index=True)
     item_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     event_type: Mapped[str] = mapped_column(String(80), index=True)
     payload: Mapped[dict] = mapped_column(JSON)
@@ -119,4 +196,3 @@ class SchedulerLeaseRow(Base):
     lease_name: Mapped[str] = mapped_column(String(100), primary_key=True)
     owner_id: Mapped[str] = mapped_column(String(100))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-

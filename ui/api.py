@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from common import notification_store
+from common import session_auth
 from channels import whatsapp
 from merchant import zepto_checkout
 from storage import Database, RestockRepository
@@ -40,7 +41,7 @@ app.add_middleware(
         if origin.strip()
     ],
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Authorization", "Content-Type", "X-Restock-User"],
 )
 
@@ -85,14 +86,24 @@ def require_user(
     authorization: str | None = Header(default=None),
     x_restock_user: str = Header(default=DEFAULT_USER_ID),
 ) -> str:
-    configured = os.getenv("RESTOCK_API_TOKEN")
-    if not configured and os.getenv("RESTOCK_ENV") == "production":
-        raise HTTPException(status_code=503, detail="RESTOCK_API_TOKEN is not configured")
-    expected = configured or LOCAL_DEMO_TOKEN
-    if not authorization or authorization != f"Bearer {expected}":
+    if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid API token")
+    token = authorization.removeprefix("Bearer ")
+    environment = os.getenv("RESTOCK_ENV", "development")
+    configured = os.getenv("RESTOCK_API_TOKEN")
+    legacy_expected = configured or LOCAL_DEMO_TOKEN
+    if environment != "production" and token == legacy_expected:
+        user_id = x_restock_user
+    else:
+        secret = os.getenv("RESTOCK_SESSION_SECRET", "")
+        if not secret:
+            raise HTTPException(status_code=503, detail="RESTOCK_SESSION_SECRET is not configured")
+        try:
+            user_id = session_auth.verify(token, secret)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
     now = datetime.now(timezone.utc)
-    window = _REQUESTS[x_restock_user]
+    window = _REQUESTS[user_id]
     cutoff = now - timedelta(minutes=1)
     while window and window[0] < cutoff:
         window.popleft()
@@ -100,12 +111,42 @@ def require_user(
     if len(window) >= limit:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="rate limit exceeded")
     window.append(now)
-    return x_restock_user
+    return user_id
 
 
 class WorkflowActionRequest(BaseModel):
     action: str
     adjusted_amount: Decimal | None = Field(default=None, gt=Decimal("0"))
+
+
+class TenantCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    kind: str
+
+
+class InvitationRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    role: str
+
+
+class InvitationAcceptRequest(BaseModel):
+    token: str = Field(min_length=20)
+
+
+class ConsentRequest(BaseModel):
+    kind: str = Field(min_length=1, max_length=40)
+    granted: bool
+
+
+class ApprovalPolicyRequest(BaseModel):
+    max_amount: Decimal = Field(gt=Decimal("0"))
+    currency: str = Field(min_length=3, max_length=3)
+    required_approvals: int = Field(ge=1, le=20)
+
+
+class ApprovalDecisionRequest(BaseModel):
+    decision: str
+    required_approvals: int = Field(default=1, ge=1, le=20)
 
 
 def _read_audit_log() -> list[dict[str, Any]]:
@@ -165,9 +206,152 @@ def me(
 @app.get("/api/v1/items")
 def items(
     user_id: str = Depends(require_user),
+    x_restock_tenant: str | None = Header(default=None),
     repository: RestockRepository = Depends(get_repository),
 ) -> list[dict[str, Any]]:
-    return repository.list_items(user_id)
+    try:
+        return repository.list_items(user_id, x_restock_tenant)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/tenants")
+def tenants(
+    user_id: str = Depends(require_user),
+    repository: RestockRepository = Depends(get_repository),
+) -> list[dict[str, Any]]:
+    return repository.list_tenants(user_id)
+
+
+@app.post("/api/v1/tenants", status_code=201)
+def create_tenant(
+    body: TenantCreateRequest,
+    user_id: str = Depends(require_user),
+    repository: RestockRepository = Depends(get_repository),
+) -> dict[str, Any]:
+    try:
+        return repository.create_tenant(name=body.name, kind=body.kind, owner_user_id=user_id)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/tenants/{tenant_id}/members")
+def tenant_members(
+    tenant_id: str,
+    user_id: str = Depends(require_user),
+    repository: RestockRepository = Depends(get_repository),
+) -> list[dict[str, Any]]:
+    try:
+        return repository.list_members(tenant_id, user_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/tenants/{tenant_id}/invitations", status_code=201)
+def invite_member(
+    tenant_id: str,
+    body: InvitationRequest,
+    user_id: str = Depends(require_user),
+    repository: RestockRepository = Depends(get_repository),
+) -> dict[str, Any]:
+    try:
+        return repository.invite_member(
+            tenant_id=tenant_id,
+            actor_user_id=user_id,
+            email=body.email,
+            role=body.role,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/invitations/accept")
+def accept_invitation(
+    body: InvitationAcceptRequest,
+    user_id: str = Depends(require_user),
+    repository: RestockRepository = Depends(get_repository),
+) -> dict[str, Any]:
+    try:
+        return repository.accept_invitation(token=body.token, user_id=user_id)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.put("/api/v1/tenants/{tenant_id}/consents/me")
+def update_consent(
+    tenant_id: str,
+    body: ConsentRequest,
+    user_id: str = Depends(require_user),
+    repository: RestockRepository = Depends(get_repository),
+) -> dict[str, Any]:
+    try:
+        return repository.set_consent(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            kind=body.kind,
+            granted=body.granted,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/tenants/{tenant_id}/approval-policies", status_code=201)
+def create_approval_policy(
+    tenant_id: str,
+    body: ApprovalPolicyRequest,
+    user_id: str = Depends(require_user),
+    repository: RestockRepository = Depends(get_repository),
+) -> dict[str, Any]:
+    try:
+        return repository.create_approval_policy(
+            tenant_id=tenant_id,
+            actor_user_id=user_id,
+            max_amount=body.max_amount,
+            currency=body.currency,
+            required_approvals=body.required_approvals,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/tenants/{tenant_id}/workflows/{run_id}/decisions")
+def decide_workflow(
+    tenant_id: str,
+    run_id: str,
+    body: ApprovalDecisionRequest,
+    user_id: str = Depends(require_user),
+    repository: RestockRepository = Depends(get_repository),
+) -> dict[str, Any]:
+    try:
+        return repository.record_approval_decision(
+            tenant_id=tenant_id,
+            run_id=run_id,
+            user_id=user_id,
+            decision=body.decision,
+            required_approvals=body.required_approvals,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/privacy/export")
+def privacy_export(
+    user_id: str = Depends(require_user),
+    repository: RestockRepository = Depends(get_repository),
+) -> dict[str, Any]:
+    return repository.privacy_export(user_id)
+
+
+@app.delete("/api/v1/privacy/me", status_code=204)
+def privacy_delete(
+    user_id: str = Depends(require_user),
+    repository: RestockRepository = Depends(get_repository),
+) -> None:
+    repository.delete_user_data(user_id)
 
 
 @app.get("/api/v1/workflows")

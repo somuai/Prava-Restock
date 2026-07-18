@@ -51,6 +51,10 @@ The React/TypeScript PWA lives in `ui/web` and is served from `/app` in the prod
 
 No paid channel, store enrollment, hosting upgrade, or real Zepto payment is activated by repository code.
 
+## Tenants and privacy
+
+Phase 11 adds Household and Organization tenants, owner/admin/approver/member roles, expiring one-use invitations, tenant-scoped items, multi-approver policies, consent records, privacy export, and deletion/pseudonymization. An explicit skip vetoes a pending multi-approver purchase; otherwise all positive decisions must agree and meet the configured threshold. Production rejects the development user header and requires an HMAC-signed, expiring bearer session using `RESTOCK_SESSION_SECRET`.
+
 ## Project specifications
 
 - [Product requirements](PRD.md)

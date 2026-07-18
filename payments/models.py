@@ -96,6 +96,7 @@ class TrackedItem(RestockModel):
 
     item_id: UUID
     user_id: UUID
+    tenant_id: UUID | None = None
     name: str
     track: Track
     trigger_type: TriggerType
