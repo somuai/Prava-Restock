@@ -37,6 +37,39 @@ def isolated_notification_store(tmp_path, monkeypatch) -> None:
     notification_store.reset()
 
 
+@pytest.fixture(autouse=True)
+def offline_prava_client(monkeypatch) -> None:
+    intents: dict[str, dict] = {}
+
+    def create_intent(merchant, amount, item_description, constraints):
+        intent_ref = f"offline_intent_{len(intents) + 1}"
+        intents[intent_ref] = {
+            "merchant": merchant,
+            "amount": str(amount),
+            "constraints": dict(constraints),
+        }
+        return intent_ref
+
+    def await_mandate(intent_ref):
+        intent = intents[intent_ref]
+        outcome = intent["constraints"].get("simulate_mandate", "approved")
+        if outcome != "approved":
+            return {"status": outcome, "intent_ref": intent_ref}
+        return {
+            "status": "approved",
+            "mandate_id": f"offline_mandate_{intent_ref}",
+            "credential_reference": f"offline_credential_{intent_ref}",
+            "scope": {
+                "merchant": intent["merchant"],
+                "max_amount": intent["amount"],
+            },
+            "approved_at": "2026-07-14T09:00:00+00:00",
+        }
+
+    monkeypatch.setattr(prava_client, "create_intent", create_intent)
+    monkeypatch.setattr(prava_client, "await_mandate", await_mandate)
+
+
 def build_user(*, per_item_cap: str = "1000", monthly_cap: str = "5000") -> User:
     return User(
         user_id=USER_ID,
@@ -90,7 +123,7 @@ def test_full_stubbed_cycle_notifies_and_logs_transaction(tmp_path) -> None:
         ("1000", "400", "monthly cap"),
     ],
 )
-def test_over_cap_rejected_before_stub_client(
+def test_over_cap_rejected_before_real_client_boundary(
     monkeypatch, tmp_path, per_item_cap: str, monthly_cap: str, message: str
 ) -> None:
     called = False
@@ -98,7 +131,7 @@ def test_over_cap_rejected_before_stub_client(
     def fail_if_called(*args, **kwargs):
         nonlocal called
         called = True
-        raise AssertionError("Prava stub must not be reached")
+        raise AssertionError("The real Prava client boundary must not be reached")
 
     monkeypatch.setattr(prava_client, "create_intent", fail_if_called)
     item = build_item()

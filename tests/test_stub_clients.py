@@ -1,7 +1,22 @@
+import json
 from inspect import signature
 
 from merchant import zepto_checkout
 from payments import prava_client
+
+
+class FakeResponse:
+    def __init__(self, payload: dict):
+        self._body = json.dumps(payload).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+    def read(self) -> bytes:
+        return self._body
 
 
 def test_prava_contract_signatures_are_exact() -> None:
@@ -17,19 +32,94 @@ def test_merchant_contract_signature_is_exact() -> None:
     )
 
 
-def test_stub_prava_happy_path() -> None:
+def test_prava_client_normalizes_approved_result_without_exposing_tokens(
+    monkeypatch,
+) -> None:
+    responses = iter(
+        [
+            {
+                "session_id": "sess_unit_approved",
+                "iframe_url": "https://sandbox.collect.prava.space/unit",
+                "order_id": "ord_unit",
+                "expires_at": "2099-12-31T23:59:59Z",
+            },
+            {
+                "session_id": "sess_unit_approved",
+                "order_id": "ord_unit",
+                "status": "awaiting_result",
+                "transactions": [
+                    {
+                        "txn_id": "txn_unit",
+                        "line_items": [
+                            {
+                                "txn_ref_id": "txn_ref_unit",
+                                "token": "virtual-network-token",
+                                "dynamic_cvv": "unit-cvv",
+                                "expiry_month": "12",
+                                "expiry_year": "2099",
+                            }
+                        ],
+                    }
+                ],
+            },
+        ]
+    )
+    monkeypatch.setenv("PRAVA_API_KEY", "sk_test_unit_key")
+    monkeypatch.setenv("PRAVA_SANDBOX_URL", "https://sandbox.api.prava.space")
+    monkeypatch.setattr(
+        prava_client,
+        "urlopen",
+        lambda *args, **kwargs: FakeResponse(next(responses)),
+    )
+
     intent_ref = prava_client.create_intent(
-        "zepto", "450.00", "Coffee", {"simulate_mandate": "approved"}
+        "zepto", "450.00", "Coffee", {"poll_interval_seconds": 0}
     )
     mandate = prava_client.await_mandate(intent_ref)
-    assert intent_ref.startswith("stub_intent_")
+    assert intent_ref == "sess_unit_approved"
     assert mandate["status"] == "approved"
-    assert mandate["scope"] == {"merchant": "zepto", "max_amount": "450.00"}
+    assert mandate["scope"] == {"merchant": "Zepto", "max_amount": "450.00"}
+    assert mandate["credential_reference"].startswith("prava_credential_")
+    serialized = json.dumps(mandate)
+    assert "virtual-network-token" not in serialized
+    assert "unit-cvv" not in serialized
 
 
-def test_stub_prava_rejected_mandate() -> None:
+def test_prava_client_normalizes_failed_session_as_rejected(monkeypatch) -> None:
+    responses = iter(
+        [
+            {
+                "session_id": "sess_unit_rejected",
+                "iframe_url": "https://sandbox.collect.prava.space/unit",
+                "order_id": "ord_unit",
+                "expires_at": "2099-12-31T23:59:59Z",
+            },
+            {
+                "session_id": "sess_unit_rejected",
+                "status": "failed",
+                "transactions": [
+                    {
+                        "txn_id": "txn_unit",
+                        "line_items": [],
+                        "error": {
+                            "code": "PASSKEY_REJECTED",
+                            "message": "User rejected passkey approval",
+                        },
+                    }
+                ],
+            },
+        ]
+    )
+    monkeypatch.setenv("PRAVA_API_KEY", "sk_test_unit_key")
+    monkeypatch.setenv("PRAVA_SANDBOX_URL", "https://sandbox.api.prava.space")
+    monkeypatch.setattr(
+        prava_client,
+        "urlopen",
+        lambda *args, **kwargs: FakeResponse(next(responses)),
+    )
+
     intent_ref = prava_client.create_intent(
-        "zepto", 450, "Coffee", {"simulate_mandate": "rejected"}
+        "zepto", 450, "Coffee", {"poll_interval_seconds": 0}
     )
     assert prava_client.await_mandate(intent_ref) == {
         "status": "rejected",
