@@ -229,7 +229,11 @@ def test_price_deviation_requires_reapproval_before_merchant(
         merchant_called = True
         raise AssertionError("checkout must not run before reapproval")
 
-    monkeypatch.setattr(zepto_checkout, "check_current_price", lambda _: Decimal("520"))
+    monkeypatch.setattr(
+        zepto_checkout,
+        "check_current_price",
+        lambda _item_id, **_context: Decimal("520"),
+    )
     monkeypatch.setattr(zepto_checkout, "complete_checkout", fail_checkout)
 
     with pytest.raises(PriceReapprovalRequired):

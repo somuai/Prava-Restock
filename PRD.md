@@ -514,7 +514,7 @@ than a handful of subscriptions.
 Each v1 limitation has a specific resolution path, not just a “later” label — sequenced by impact
 vs. effort rather than by how they’re listed in Appendix A.
 
-**Built pre-hackathon:** Restock Home now fires on predicted depletion or a user-set price threshold, whichever condition is met first, and combines both reasons into one notification when they coincide. Price-checking is wired to a stub only; real merchant price-querying is Phase 8/9 scope and is not built here.
+**Built and live-query capable:** Restock Home fires on predicted depletion or a user-set price threshold, whichever condition is met first, and combines both reasons into one notification when they coincide. The Phase 8 Zepto adapter now reads the current price for the exact product-variant ID through Zepto's live MCP search and refuses similar-product substitution. Seeded/offline demonstrations retain deterministic prices; production mode uses the live exact-SKU path.
 
 1. **Built foundation:** Notification delivery (highest priority — this is the product’s core value prop, not
    a nice-to-have). A web dashboard nobody has open defeats the entire “reaches you before

@@ -167,7 +167,9 @@ def _check_trigger_status(context: OrchestratorContext) -> list[TrackedItem]:
             and item.price_threshold is not None
         ):
             item.last_observed_price = zepto_checkout.check_current_price(
-                item.item_id
+                item.item_id,
+                merchant_sku_id=item.merchant_sku_id,
+                product_name=item.name,
             )
         if _is_triggered(item):
             triggered_items.append(item)
@@ -288,7 +290,11 @@ def _complete_merchant_checkout(
         item.trigger_type is TriggerType.PREDICTED
         and item.last_observed_price is not None
     ):
-        fresh_amount = zepto_checkout.check_current_price(item.item_id)
+        fresh_amount = zepto_checkout.check_current_price(
+            item.item_id,
+            merchant_sku_id=item.merchant_sku_id,
+            product_name=item.name,
+        )
         approved_amount = mandate.scope_max_amount
         deviation = abs(fresh_amount - approved_amount) / approved_amount
         item.last_observed_price = fresh_amount

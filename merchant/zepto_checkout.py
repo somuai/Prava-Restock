@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from merchant import mock_checkout
 from merchant.models import ExecutionMode, MerchantQuote, StockStatus
-from merchant.zepto_mcp import ZeptoMCPClient
+from merchant.zepto_mcp import ZeptoMCPClient, ZeptoMCPError
 from payments import prava_client
 
 
@@ -21,6 +21,14 @@ _STUB_BASE_PRICES = {
     "00000000-0000-0000-0000-000000000101": Decimal("380.00"),
 }
 _STUB_PRICE_OFFSETS = (Decimal("0.00"), Decimal("-12.00"), Decimal("8.00"))
+_ZEPTO_PRICE_MINOR_UNITS = Decimal("100")
+_ZEPTO_PRODUCT_ID_KEYS = (
+    "id",
+    "productVariantId",
+    "storeProductId",
+    "cartProductId",
+    "variantId",
+)
 
 
 def merchant_mode() -> ExecutionMode:
@@ -97,10 +105,101 @@ def fetch_real_quote(
     )
 
 
-def check_current_price(item_id) -> Decimal:
-    """Return a fake price unless a full real-quote context is supplied elsewhere."""
+def quote_from_search(
+    payload: dict[str, Any],
+    *,
+    merchant_sku_id: str,
+    product_name: str,
+) -> MerchantQuote:
+    """Normalize the exact Zepto SKU from a real search response.
+
+    Zepto search prices are integer minor units. Product selection remains exact:
+    a nearby result is never accepted when the requested SKU is absent.
+    """
+    products = payload.get("products")
+    if not isinstance(products, list):
+        raise ZeptoMCPError("Zepto search response did not contain products")
+
+    product = next(
+        (
+            candidate
+            for candidate in products
+            if isinstance(candidate, dict)
+            and merchant_sku_id
+            in {str(candidate.get(key)) for key in _ZEPTO_PRODUCT_ID_KEYS}
+        ),
+        None,
+    )
+    if product is None:
+        raise ZeptoMCPError(
+            f"exact Zepto SKU {merchant_sku_id!r} was not returned; refusing substitution"
+        )
+
+    raw_price = product.get("price")
+    if raw_price is None:
+        raise ZeptoMCPError("exact Zepto product did not contain a current price")
+    available_quantity = product.get("availableQuantity")
+    stock_status = (
+        StockStatus.OUT_OF_STOCK
+        if available_quantity is not None and Decimal(str(available_quantity)) <= 0
+        else StockStatus.IN_STOCK
+    )
+    observed_at = datetime.now(timezone.utc)
+    exact_id = str(product.get("productVariantId") or product.get("id"))
+    return MerchantQuote(
+        merchant="zepto",
+        merchant_sku_id=merchant_sku_id,
+        product_name=str(product.get("name") or product_name),
+        amount=Decimal(str(raw_price)) / _ZEPTO_PRICE_MINOR_UNITS,
+        currency="INR",
+        stock_status=stock_status,
+        quote_reference=f"zepto_search:{exact_id}:{observed_at.isoformat()}",
+        observed_at=observed_at,
+        execution_mode=ExecutionMode.REAL,
+    )
+
+
+def fetch_real_price_quote(
+    merchant_sku_id: str,
+    product_name: str,
+    *,
+    client: ZeptoMCPClient | None = None,
+) -> MerchantQuote:
+    """Read the current unit price for one exact SKU without mutating the cart."""
+    mcp_client = client or ZeptoMCPClient()
+    return quote_from_search(
+        mcp_client.search_products(product_name),
+        merchant_sku_id=merchant_sku_id,
+        product_name=product_name,
+    )
+
+
+def check_current_price(
+    item_id,
+    *,
+    merchant_sku_id: str | None = None,
+    product_name: str | None = None,
+    client: ZeptoMCPClient | None = None,
+) -> Decimal:
+    """Read a real exact-SKU price in real mode; otherwise use demo fluctuations."""
     if not item_id:
         raise ValueError("item_id is required")
+    if merchant_mode() is ExecutionMode.REAL:
+        if not merchant_sku_id or not product_name:
+            raise ValueError(
+                "real Zepto price checks require merchant_sku_id and product_name"
+            )
+        quote = fetch_real_price_quote(
+            merchant_sku_id,
+            product_name,
+            client=client,
+        )
+        if quote.stock_status is StockStatus.OUT_OF_STOCK:
+            raise ZeptoMCPError(
+                f"exact Zepto SKU {merchant_sku_id!r} is currently out of stock"
+            )
+        return quote.amount
+
     item_key = str(item_id)
     check_count = _PRICE_CHECK_COUNTS.get(item_key, 0)
     _PRICE_CHECK_COUNTS[item_key] = check_count + 1

@@ -139,7 +139,7 @@ typical_cadence_days_new = ALPHA * observed_interval_days
 
 **First-time items** seed `typical_cadence_days` from a transparent category prior or a user-provided estimate at onboarding. Personal EWMA observations replace the prior as completed purchases accumulate.
 
-If depletion and price conditions become true in the same check, `propose(item)` emits one notification containing both reasons. The price-check contract is built pre-hackathon and wired only to a deterministic merchant stub; real merchant price-querying remains Phase 8/9 scope and is not live here.
+If depletion and price conditions become true in the same check, `propose(item)` emits one notification containing both reasons. In `HOME_MERCHANT_MODE=real`, the Phase 8 Zepto adapter queries Zepto's live MCP search for the tracked product's exact product-variant ID, converts the returned minor-unit price to INR, and refuses a nearby result rather than silently substituting it. Seeded/offline tests retain the deterministic adapter.
 
 **Production baseline:** EWMA remains authoritative. Consent-gated observations, deletion, category priors, and an offline comparison harness are built. A regression/time-series candidate remains feature-flagged until it materially beats EWMA on MAE, trigger precision, missed depletion, and action rate without weakening explainability.
 
@@ -271,7 +271,7 @@ Standard tool-calling loop; no fine-tuning required for the hackathon scope. Mod
 
 ## 12. Testing strategy
 
-- **Unit tests:** forecasting math (predicted date, recalibration formula), depletion-only/price-only/both/neither trigger behavior, and tool functions against mocked Prava/merchant responses. The price-checking cases use the pre-hackathon merchant stub; real merchant price-querying is Phase 8/9 integration scope.
+- **Unit tests:** forecasting math (predicted date, recalibration formula), depletion-only/price-only/both/neither trigger behavior, exact-SKU Zepto price normalization, refusal of similar-product substitution, and tool functions against mocked Prava/merchant responses. A read-only integration check verifies the same price path against Zepto's live MCP server; CI uses deterministic responses and no merchant credentials.
 - **Integration test:** at least one full sandbox run of the happy path (steps 1–8 above) and one rejected-mandate path, before demo day.
 - **Demo rehearsal:** a timed, scripted run-through matching `demo/script.md` (see `SKILL.md`), fitting inside the 5-minute submission video window.
 

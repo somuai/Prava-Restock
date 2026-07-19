@@ -29,7 +29,7 @@ The currently hosted URL is the credential-free Phase 6 offline deployment. The 
 ## What is real and what is simulated
 
 - **Real:** deterministic trigger logic, code-owned spend caps, OpenAI Agents SDK tool surface, and Prava sandbox intent/passkey/mandate integration.
-- **Real merchant boundary:** Zepto OAuth/MCP client, address selection, cart preview, exact-price quote normalization, stock handling, and payment-status reconciliation interface.
+- **Real merchant boundary:** Zepto OAuth/MCP client, address selection, live exact-SKU price lookup, cart preview, exact-price quote normalization, stock handling, and payment-status reconciliation interface. Similar search results are rejected rather than substituted.
 - **Disclosed simulation:** final Zepto live-money charge and Restock Teams billing-portal fulfillment. Zepto publishes no merchant payment sandbox, so the final charge stays disabled unless an operator explicitly enables a compatible-card checkout.
 - **Hosted URL:** still the Phase 6 offline build until the later deployment phase publishes the resumable workflow and UI.
 
