@@ -16,7 +16,7 @@ import {
   UsersThree,
   WarningCircle,
 } from "@phosphor-icons/react";
-import { api, type AuditEntry, type Capabilities, type Notification } from "./api";
+import { ApiError, api, clearApiSessionToken, type AuditEntry, type Capabilities, type Notification } from "./api";
 import { initializeNative } from "./native";
 
 type Track = "home" | "teams";
@@ -344,21 +344,99 @@ function WorkflowRail({ notification, audit }: { notification?: Notification; au
   );
 }
 
+export function LoginScreen({ onLogin }: { onLogin: (password: string) => Promise<void> }) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await onLogin(password);
+      setPassword("");
+    } catch {
+      setPassword("");
+      setError("That password was not accepted. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <main className="login-shell">
+      <section className="login-card" aria-labelledby="login-title">
+        <a className="brand-lockup login-brand" href="/app" aria-label="Restock home">
+          <img src="/app/assets/restock-mark.png" alt="" className="brand-mark" />
+          <span>Restock</span>
+        </a>
+        <p className="section-kicker">Private workspace</p>
+        <h1 id="login-title">Welcome back</h1>
+        <p className="login-copy">Sign in to review replenishment and billing decisions.</p>
+        <form onSubmit={(event) => void submit(event)}>
+          <label htmlFor="solo-password">Password</label>
+          <input
+            id="solo-password"
+            name="password"
+            type="password"
+            autoComplete="current-password"
+            required
+            maxLength={1024}
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+          />
+          {error && <p className="login-error" role="alert">{error}</p>}
+          <button className="login-submit" type="submit" disabled={busy || !password}>
+            {busy ? "Signing in…" : "Sign in"}
+          </button>
+        </form>
+        <p className="login-security"><LockKey size={15} /> Short-lived session · Password never stored</p>
+      </section>
+    </main>
+  );
+}
+
+function AuthCheckingScreen() {
+  return (
+    <main className="login-shell" aria-busy="true">
+      <section className="login-card login-card--checking">
+        <a className="brand-lockup login-brand" href="/app" aria-label="Restock home">
+          <img src="/app/assets/restock-mark.png" alt="" className="brand-mark" />
+          <span>Restock</span>
+        </a>
+        <p className="login-copy">Checking your session…</p>
+      </section>
+    </main>
+  );
+}
+
 export default function App() {
   const [view, setView] = useState<View>("home");
   const [notifications, setNotifications] = useState<Notification[]>(previews);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [status, setStatus] = useState("Preview ready");
+  const [authState, setAuthState] = useState<"checking" | "required" | "ready">(
+    import.meta.env.DEV ? "ready" : "checking",
+  );
 
   const refresh = async () => {
     try {
-      const [caps, pending, events] = await Promise.all([api.capabilities(), api.notifications(), api.audit()]);
+      const caps = await api.capabilities();
       setCapabilities(caps);
+      const [pending, events] = await Promise.all([api.notifications(), api.audit()]);
       if (pending.length) setNotifications(pending);
       setAudit(events);
+      setAuthState("ready");
       setStatus(pending.length ? `${pending.length} decision${pending.length === 1 ? "" : "s"} waiting` : "Preview ready");
-    } catch {
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        await clearApiSessionToken();
+        setAuthState("required");
+        setStatus("Sign in required");
+        return;
+      }
       setStatus("Preview mode · API unavailable");
     }
   };
@@ -385,6 +463,16 @@ export default function App() {
   );
   const selected = visible[0];
 
+  if (authState === "checking") return <AuthCheckingScreen />;
+
+  if (authState === "required") {
+    return <LoginScreen onLogin={async (password) => {
+      await api.login(password);
+      setAuthState("checking");
+      await refresh();
+    }} />;
+  }
+
   const act = async (notification: Notification, action: string, adjustedAmount?: string) => {
     if (notification.status === "preview") {
       setNotifications((items) => items.map((item) => item.notification_id === notification.notification_id ? { ...item, status: action } : item));
@@ -402,6 +490,12 @@ export default function App() {
       }
       await refresh();
     } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        await clearApiSessionToken();
+        setAuthState("required");
+        setStatus("Sign in required");
+        return;
+      }
       setStatus(error instanceof Error ? error.message : "Action failed");
     }
   };

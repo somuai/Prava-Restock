@@ -1,11 +1,14 @@
 import json
+import os
 
 from fastapi.testclient import TestClient
 
-from common import notification_store
+from common import notification_store, password_auth
 from demo.seed_reset import demo_user, load_seed_items
+from merchant import zepto_checkout
 from storage import Database, RestockRepository
 from ui import api
+from scripts.validate_service_env import validate as validate_service_environment
 
 
 client = TestClient(api.app)
@@ -76,8 +79,28 @@ def test_runtime_modes_require_complete_slack_and_environment_bound_prava(monkey
     monkeypatch.setenv("PRAVA_PRODUCTION_ENABLED", "1")
     monkeypatch.setenv("HOME_MERCHANT_MODE", "real")
     monkeypatch.setenv("ZEPTO_REAL_PAYMENT_ENABLED", "1")
+    monkeypatch.delattr(zepto_checkout, "real_payment_runtime_ready", raising=False)
+    assert api.runtime_modes()["real_money_enabled"] is False
+    assert api.runtime_modes()["home_checkout_runtime_configured"] is False
+    monkeypatch.setattr(
+        zepto_checkout, "real_payment_runtime_ready", lambda: True, raising=False
+    )
     assert api.runtime_modes()["prava_mode"] == "production_configured"
     assert api.runtime_modes()["real_money_enabled"] is True
+    assert api.runtime_modes()["home_checkout_runtime_configured"] is True
+
+
+def test_production_readiness_fails_closed_without_real_checkout_runtime(monkeypatch) -> None:
+    monkeypatch.setenv("RESTOCK_ENV", "production")
+    monkeypatch.setenv("HOME_MERCHANT_MODE", "real")
+    monkeypatch.setenv("ZEPTO_REAL_PAYMENT_ENABLED", "1")
+    monkeypatch.delattr(zepto_checkout, "real_payment_runtime_ready", raising=False)
+    monkeypatch.setattr(api, "validate_service_environment", lambda service, env: [])
+
+    assert api.production_configuration_issues() == [
+        "ZEPTO_REAL_CHECKOUT_RUNTIME_UNAVAILABLE"
+    ]
+    assert client.get("/ready").status_code == 503
 
 
 def test_audit_log_endpoint_reads_json_file(tmp_path, monkeypatch) -> None:
@@ -122,18 +145,31 @@ def test_readiness_rejects_unsafe_production_configuration(monkeypatch) -> None:
 
     assert response.status_code == 503
     assert response.json() == {"detail": "production configuration incomplete"}
-    assert api.production_configuration_issues() == [
-        "DATABASE_URL_POSTGRES_REQUIRED",
-        "RESTOCK_SESSION_SECRET_TOO_SHORT",
-        "RESTOCK_DEMO_MODE_MUST_BE_DISABLED",
-    ]
+    assert api.production_configuration_issues() == validate_service_environment(
+        "api", os.environ
+    )
 
 
 def test_production_configuration_accepts_postgres_secret_and_no_demo(monkeypatch) -> None:
     monkeypatch.setenv("RESTOCK_ENV", "production")
     monkeypatch.setenv("DATABASE_URL", "postgresql://restock:secret@db/restock")
     monkeypatch.setenv("RESTOCK_SESSION_SECRET", "a-secure-random-session-secret-over-32-characters")
+    monkeypatch.setenv("RESTOCK_SOLO_USER_ID", "00000000-0000-0000-0000-000000000001")
+    monkeypatch.setenv(
+        "RESTOCK_SOLO_PASSWORD_HASH",
+        password_auth.hash_password("not-a-real-password", salt=b"api-test-salt-01"),
+    )
     monkeypatch.setenv("RESTOCK_DEMO_MODE", "0")
+    monkeypatch.setenv("PRAVA_API_KEY", "sk_test_placeholder")
+    monkeypatch.setenv("PRAVA_API_URL", "https://sandbox.api.prava.space")
+    monkeypatch.setenv(
+        "RESTOCK_SLACK_SERVICE_TOKEN",
+        "slack-service-placeholder-over-32-characters",
+    )
+    monkeypatch.setenv(
+        "RESTOCK_WORKER_SERVICE_TOKEN",
+        "worker-service-placeholder-over-32-characters",
+    )
 
     assert api.production_configuration_issues() == []
 

@@ -180,6 +180,43 @@ class SlackDeliveryRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class MerchantCheckoutAttemptRow(Base):
+    """Non-secret durable state around one mutating merchant checkout."""
+
+    __tablename__ = "merchant_checkout_attempts"
+
+    idempotency_key: Mapped[str] = mapped_column(String(255), primary_key=True)
+    merchant: Mapped[str] = mapped_column(String(80), index=True)
+    merchant_sku_id: Mapped[str] = mapped_column(String(255))
+    expected_amount: Mapped[float] = mapped_column(Numeric(18, 2))
+    currency: Mapped[str] = mapped_column(String(3))
+    state: Mapped[str] = mapped_column(String(40), index=True)
+    merchant_order_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    merchant_order_code: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    prava_session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    prava_txn_ref_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    credential_exposed: Mapped[bool] = mapped_column(Boolean, default=False)
+    credential_used: Mapped[bool] = mapped_column(Boolean, default=False)
+    report_status: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    report_state: Mapped[str] = mapped_column(String(30), default="not_required", index=True)
+    report_attempts: Mapped[int] = mapped_column(default=0)
+    prava_reported: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_error: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AuthLoginThrottleRow(Base):
+    """Durable, non-identifying login-attempt window shared by API replicas."""
+
+    __tablename__ = "auth_login_throttles"
+
+    source_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    window_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    attempts: Mapped[int] = mapped_column(default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class TransactionRow(Base):
     __tablename__ = "transactions"
 

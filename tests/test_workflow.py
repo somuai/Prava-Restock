@@ -54,6 +54,23 @@ class FakeCheckout:
         }
 
 
+class PendingThenCompletedCheckout(FakeCheckout):
+    def __init__(self) -> None:
+        super().__init__("pending")
+        self.reconcile_calls = 0
+
+    def reconcile_checkout(self, idempotency_key):
+        self.reconcile_calls += 1
+        return {
+            "status": "completed",
+            "merchant_order_id": "order-reconciled",
+            "charged_amount": "380.00",
+            "currency": "INR",
+            "retryable": False,
+            "execution_mode": "real",
+        }
+
+
 def build_user() -> User:
     return User(
         user_id=USER_ID,
@@ -179,6 +196,48 @@ def test_price_change_requires_reapproval_before_checkout(repository) -> None:
     assert result["state"] == "reapproval_required"
     assert checkout.calls == 0
     assert repository.transaction_for_run(run["run_id"]) is None
+
+
+def test_pending_checkout_is_durable_and_reconciles_before_transaction(repository) -> None:
+    checkout = PendingThenCompletedCheckout()
+    service = WorkflowService(repository, prava=FakePrava(), home_checkout=checkout)
+    run = service.begin(build_user(), build_home_item())
+    service.act(run["run_id"], user_id=str(USER_ID), action="approve")
+
+    pending = service.resume_after_passkey(run["run_id"])
+
+    assert pending["state"] == "checkout_pending"
+    assert repository.transaction_for_run(run["run_id"]) is None
+    restarted_repository = RestockRepository(Database(repository.database.url))
+    restarted_service = WorkflowService(
+        restarted_repository,
+        prava=FakePrava(),
+        home_checkout=checkout,
+    )
+    completed = restarted_service.reconcile_checkout(run["run_id"])
+    assert completed["state"] == "completed"
+    assert checkout.reconcile_calls == 1
+    assert restarted_repository.transaction_for_run(run["run_id"])["merchant_order_id"] == "order-reconciled"
+
+
+def test_checkout_price_change_returns_to_explicit_reapproval(repository) -> None:
+    checkout = FakeCheckout(status="price_changed")
+    prava = FakePrava()
+    service = WorkflowService(repository, prava=prava, home_checkout=checkout)
+    run = service.begin(build_user(), build_home_item())
+    service.act(run["run_id"], user_id=str(USER_ID), action="approve")
+
+    changed = service.resume_after_passkey(run["run_id"])
+
+    assert changed["state"] == "reapproval_required"
+    assert changed["mandate_ref"] is None
+    assert repository.transaction_for_run(run["run_id"]) is None
+    pending = repository.pending_notifications(str(USER_ID))
+    assert any("price changed" in notification["message"].lower() for notification in pending)
+    reapproved = service.act(run["run_id"], user_id=str(USER_ID), action="approve")
+    assert reapproved["state"] == "passkey_pending"
+    assert reapproved["prava_intent_ref"] != run["prava_intent_ref"]
+    assert prava.calls == 2
 
 
 def test_teams_switch_requires_explicit_action(repository) -> None:

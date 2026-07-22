@@ -30,6 +30,14 @@ Shared by API, worker, and Slack:
 API only:
 
 - `RESTOCK_SESSION_SECRET`: at least 32 high-entropy characters.
+- `RESTOCK_SOLO_USER_ID`: the existing owner user UUID represented by the login.
+  The user row must already exist in the production database before login is enabled.
+- `RESTOCK_SOLO_PASSWORD_HASH`: a scrypt hash produced interactively by
+  `scripts/generate_solo_password_hash.py`; never store or deploy the plaintext.
+- `RESTOCK_SESSION_TTL_SECONDS=3600` and
+  `RESTOCK_AUTH_RATE_LIMIT_PER_MINUTE=5` are safe defaults for the solo login.
+  Production login throttling is stored in PostgreSQL and shared across API
+  replicas; the API fails closed if that durable throttle is unavailable.
 - `RESTOCK_SLACK_SERVICE_TOKEN`: the same independently generated service token
   referenced by the Slack service.
 - `RESTOCK_WORKER_SERVICE_TOKEN`: the same independently generated trigger-only

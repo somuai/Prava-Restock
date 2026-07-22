@@ -6,3 +6,8 @@ services:
     region: singapore
     healthCheckPath: /ready
     autoDeployTrigger: checksPass
+    envVars:
+      - key: RESTOCK_ENV
+        value: production
+      - key: RESTOCK_DEMO_MODE
+        value: "0"

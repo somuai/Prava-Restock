@@ -32,5 +32,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD ["python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PORT', '8000') + '/health', timeout=3)"]
 
-# Versioned migrations must finish before the web process accepts traffic.
-CMD ["sh", "-c", "alembic upgrade head && exec uvicorn ui.api:app --host 0.0.0.0 --port ${PORT}"]
+# Production validates the complete API contract before touching schema or
+# accepting traffic. Development keeps the zero-configuration local path.
+CMD ["sh", "-c", "if [ \"${RESTOCK_ENV:-development}\" = \"production\" ]; then python scripts/validate_service_env.py api; fi && alembic upgrade head && exec uvicorn ui.api:app --host 0.0.0.0 --port ${PORT}"]

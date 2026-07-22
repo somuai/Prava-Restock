@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import base64
 from collections.abc import Mapping
 import os
 from urllib.parse import urlsplit
+from uuid import UUID
 
 
 REQUIRED_VARIABLES: dict[str, tuple[str, ...]] = {
@@ -16,6 +18,8 @@ REQUIRED_VARIABLES: dict[str, tuple[str, ...]] = {
         "RESTOCK_ENV",
         "RESTOCK_DEMO_MODE",
         "RESTOCK_SESSION_SECRET",
+        "RESTOCK_SOLO_USER_ID",
+        "RESTOCK_SOLO_PASSWORD_HASH",
         "RESTOCK_SLACK_SERVICE_TOKEN",
         "RESTOCK_WORKER_SERVICE_TOKEN",
     ),
@@ -41,6 +45,25 @@ REQUIRED_VARIABLES: dict[str, tuple[str, ...]] = {
 }
 
 
+def _decoded_urlsafe(value: str) -> bytes:
+    return base64.b64decode(
+        value + "=" * (-len(value) % 4), altchars=b"-_", validate=True
+    )
+
+
+def _valid_scrypt_hash(value: str) -> bool:
+    try:
+        parts = value.split("$")
+        return (
+            len(parts) == 6
+            and parts[:4] == ["scrypt", "16384", "8", "1"]
+            and len(_decoded_urlsafe(parts[4])) >= 16
+            and len(_decoded_urlsafe(parts[5])) == 32
+        )
+    except (ValueError, TypeError):
+        return False
+
+
 def validate(service: str, environment: Mapping[str, str]) -> list[str]:
     if service not in REQUIRED_VARIABLES:
         raise ValueError(f"unknown service: {service}")
@@ -64,6 +87,15 @@ def validate(service: str, environment: Mapping[str, str]) -> list[str]:
         secret = environment.get("RESTOCK_SESSION_SECRET", "")
         if secret and len(secret) < 32:
             issues.append("RESTOCK_SESSION_SECRET_TOO_SHORT")
+        password_hash = environment.get("RESTOCK_SOLO_PASSWORD_HASH", "")
+        if password_hash and not _valid_scrypt_hash(password_hash):
+            issues.append("RESTOCK_SOLO_PASSWORD_HASH_INVALID_FORMAT")
+        user_id = environment.get("RESTOCK_SOLO_USER_ID", "")
+        if user_id:
+            try:
+                UUID(user_id)
+            except ValueError:
+                issues.append("RESTOCK_SOLO_USER_ID_INVALID")
 
     if service == "api":
         api_key = environment.get("PRAVA_API_KEY", "")

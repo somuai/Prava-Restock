@@ -7,7 +7,7 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 from merchant import saas_invoice_checkout, swiggy_checkout, zepto_checkout
-from merchant.models import MerchantQuote, StockStatus
+from merchant.models import CheckoutStatus, MerchantQuote, StockStatus
 from payments import prava_client
 from payments.models import TrackedItem, TriggerType, User
 from storage.repository import RestockRepository
@@ -21,6 +21,7 @@ class WorkflowState(str, Enum):
     PASSKEY_PENDING = "passkey_pending"
     MANDATE_APPROVED = "mandate_approved"
     QUOTE_REVALIDATED = "quote_revalidated"
+    CHECKOUT_PENDING = "checkout_pending"
     REAPPROVAL_REQUIRED = "reapproval_required"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -81,6 +82,142 @@ class WorkflowService:
             raise ValueError("proposal exceeds per-item or per-transaction cap")
         if self.repository.monthly_spend(str(user.user_id)) + amount > user.monthly_cap:
             raise ValueError("proposal would exceed monthly cap")
+
+    def _checkout_for_item(self, item: TrackedItem) -> CheckoutBoundary:
+        if item.trigger_type is TriggerType.KNOWN_DATE:
+            return self.teams_checkout
+        if self.home_checkout is not None:
+            return self.home_checkout
+        if item.preferred_merchant.value == "swiggy":
+            return swiggy_checkout
+        return zepto_checkout
+
+    def _finish_checkout(
+        self,
+        run: dict[str, Any],
+        item: TrackedItem,
+        response: dict[str, Any],
+        *,
+        expected_state: WorkflowState,
+    ) -> dict[str, Any]:
+        """Persist a merchant outcome without treating uncertainty as failure."""
+
+        raw_status = response.get("status")
+        status_value = raw_status.value if isinstance(raw_status, CheckoutStatus) else str(raw_status)
+        if status_value == CheckoutStatus.PENDING.value:
+            pending = self.repository.transition(
+                run["run_id"],
+                expected={expected_state.value},
+                state=WorkflowState.CHECKOUT_PENDING.value,
+                error_code=str(response.get("error_code") or "PAYMENT_PENDING"),
+            )
+            self.repository.audit(
+                user_id=run["user_id"],
+                run_id=run["run_id"],
+                item_id=run["item_id"],
+                event_type="checkout_pending",
+                payload={
+                    "merchant_order_id": response.get("merchant_order_id"),
+                    "retryable": bool(response.get("retryable", False)),
+                    "reason": response.get("error_code") or "PAYMENT_PENDING",
+                },
+                modes=run["modes"],
+            )
+            return pending
+        if status_value == CheckoutStatus.PRICE_CHANGED.value:
+            changed_amount = response.get("charged_amount")
+            changes: dict[str, Any] = {
+                "mandate_ref": None,
+                "error_code": "PRICE_CHANGED",
+            }
+            if changed_amount is not None:
+                changes["proposed_amount"] = Decimal(str(changed_amount))
+            reapproval = self.repository.transition(
+                run["run_id"],
+                expected={expected_state.value},
+                state=WorkflowState.REAPPROVAL_REQUIRED.value,
+                **changes,
+            )
+            self.repository.create_notification(
+                run_id=run["run_id"],
+                user_id=run["user_id"],
+                message="The final merchant price changed. Review the fresh amount and approve again before payment.",
+                actions=(
+                    ["renew_as_is", "switch_plan", "skip"]
+                    if item.trigger_type is TriggerType.KNOWN_DATE
+                    else ["approve", "adjust", "skip"]
+                ),
+            )
+            self.repository.audit(
+                user_id=run["user_id"],
+                run_id=run["run_id"],
+                item_id=run["item_id"],
+                event_type="reapproval_required",
+                payload={"reason": "price_changed", "fresh_amount": changed_amount},
+                modes=run["modes"],
+            )
+            return reapproval
+        if status_value != CheckoutStatus.COMPLETED.value:
+            failed = self.repository.transition(
+                run["run_id"],
+                expected={expected_state.value},
+                state=WorkflowState.FAILED.value,
+                error_code=status_value.upper(),
+            )
+            self.repository.audit(
+                user_id=run["user_id"], run_id=run["run_id"], item_id=run["item_id"],
+                event_type="checkout_failed", payload={"reason": status_value}, modes=run["modes"]
+            )
+            return failed
+
+        transaction = self.repository.create_transaction(
+            run_id=run["run_id"],
+            item_id=run["item_id"],
+            mandate_ref=str(run["mandate_ref"]),
+            merchant_order_id=response["merchant_order_id"],
+            amount=Decimal(str(response.get("charged_amount") or run["proposed_amount"])),
+            currency=str(response.get("currency") or run["currency"]),
+            execution_mode=str(response.get("execution_mode") or "disclosed_mock"),
+        )
+        if item.trigger_type is TriggerType.PREDICTED:
+            assert item.last_purchased_at is not None
+            predicted_date = consumption_model.predicted_depletion_date(item)
+            observed = max(1, (date.today() - item.last_purchased_at).days)
+            tenant_id = str(item.tenant_id) if item.tenant_id else self.repository.personal_tenant_id(str(item.user_id))
+            self.repository.log_forecast_observation(
+                tenant_id=tenant_id,
+                user_id=str(item.user_id),
+                item_id=str(item.item_id),
+                predicted_depletion_date=predicted_date.isoformat(),
+                actual_reorder_date=date.today().isoformat(),
+                category=item.category.value,
+                trigger_cause=run["trigger_reason"],
+                notification_action="approved",
+                forecast_error_days=float((date.today() - predicted_date).days),
+            )
+            consumption_model.recalibrate(item, observed)
+            item.last_purchased_at = date.today()
+            item.last_purchase_amount = Decimal(str(transaction["amount"]))
+            self.repository.upsert_item(item)
+        final = self.repository.transition(
+            run["run_id"],
+            expected={expected_state.value},
+            state=WorkflowState.COMPLETED.value,
+            error_code=None,
+        )
+        self.repository.audit(
+            user_id=run["user_id"],
+            run_id=run["run_id"],
+            item_id=run["item_id"],
+            event_type="transaction_completed",
+            payload={
+                "transaction_id": transaction["transaction_id"],
+                "amount": str(transaction["amount"]),
+                "currency": transaction["currency"],
+            },
+            modes=run["modes"],
+        )
+        return final
 
     def begin(
         self,
@@ -216,14 +353,46 @@ class WorkflowService:
             next_run = self.repository.transition(
                 run_id,
                 expected={WorkflowState.NOTIFIED.value, WorkflowState.REAPPROVAL_REQUIRED.value},
-                state=WorkflowState.NOTIFIED.value,
+                state=(
+                    WorkflowState.REAPPROVAL_REQUIRED.value
+                    if run["state"] == WorkflowState.REAPPROVAL_REQUIRED.value
+                    else WorkflowState.NOTIFIED.value
+                ),
                 proposed_amount=adjusted_amount,
             )
         else:
+            changes: dict[str, Any] = {}
+            if run["state"] == WorkflowState.REAPPROVAL_REQUIRED.value:
+                item = self.repository.get_item(run["item_id"])
+                amount = Decimal(str(run["proposed_amount"]))
+                quote = None
+                if self.quote_provider is not None and item.trigger_type is TriggerType.PREDICTED:
+                    quote = self.quote_provider(item)
+                    if quote.stock_status is StockStatus.OUT_OF_STOCK:
+                        raise ValueError("item is out of stock; reapproval cannot proceed")
+                    amount = quote.amount
+                user_data = self.repository.get_user(user_id)
+                if user_data is None:
+                    raise ValueError("workflow user no longer exists")
+                self._enforce_caps(User.model_validate(user_data), amount)
+                constraints = {
+                    "currency": run["currency"],
+                    "product_id": item.merchant_sku_id,
+                    "user_id": user_id,
+                }
+                changes = {
+                    "proposed_amount": amount,
+                    "quote": quote.model_dump(mode="json") if quote is not None else run.get("quote"),
+                    "prava_intent_ref": self.prava.create_intent(
+                        run["merchant"], amount, item.name, constraints
+                    ),
+                    "error_code": None,
+                }
             next_run = self.repository.transition(
                 run_id,
                 expected={WorkflowState.NOTIFIED.value, WorkflowState.REAPPROVAL_REQUIRED.value},
                 state=WorkflowState.PASSKEY_PENDING.value,
+                **changes,
             )
         self.repository.audit(
             user_id=user_id,
@@ -325,76 +494,35 @@ class WorkflowService:
             user_id=run["user_id"], run_id=run_id, item_id=run["item_id"],
             event_type="quote_revalidated", payload={"amount": str(run["proposed_amount"])}, modes=run["modes"]
         )
-        if item.trigger_type is TriggerType.KNOWN_DATE:
-            checkout = self.teams_checkout
-        elif self.home_checkout is not None:
-            checkout = self.home_checkout
-        elif item.preferred_merchant.value == "swiggy":
-            checkout = swiggy_checkout
-        else:
-            checkout = zepto_checkout
+        checkout = self._checkout_for_item(item)
         response = checkout.complete_checkout(
             result["credential_reference"],
             item.merchant_sku_id,
             run["proposed_amount"],
             run["idempotency_key"],
         )
-        if response["status"] != "completed":
-            failed = self.repository.transition(
-                run_id,
-                expected={WorkflowState.QUOTE_REVALIDATED.value},
-                state=WorkflowState.FAILED.value,
-                error_code=str(response["status"]).upper(),
-            )
-            self.repository.audit(
-                user_id=run["user_id"], run_id=run_id, item_id=run["item_id"],
-                event_type="checkout_failed", payload={"reason": str(response["status"])}, modes=run["modes"]
-            )
-            return failed
-        transaction = self.repository.create_transaction(
-            run_id=run_id,
-            item_id=run["item_id"],
-            mandate_ref=result["mandate_id"],
-            merchant_order_id=response["merchant_order_id"],
-            amount=Decimal(str(response.get("charged_amount") or run["proposed_amount"])),
-            currency=str(response.get("currency") or run["currency"]),
-            execution_mode=str(response.get("execution_mode") or "disclosed_mock"),
+        return self._finish_checkout(
+            run,
+            item,
+            response,
+            expected_state=WorkflowState.QUOTE_REVALIDATED,
         )
-        if item.trigger_type is TriggerType.PREDICTED:
-            assert item.last_purchased_at is not None
-            predicted_date = consumption_model.predicted_depletion_date(item)
-            observed = max(1, (date.today() - item.last_purchased_at).days)
-            tenant_id = str(item.tenant_id) if item.tenant_id else self.repository.personal_tenant_id(str(item.user_id))
-            self.repository.log_forecast_observation(
-                tenant_id=tenant_id,
-                user_id=str(item.user_id),
-                item_id=str(item.item_id),
-                predicted_depletion_date=predicted_date.isoformat(),
-                actual_reorder_date=date.today().isoformat(),
-                category=item.category.value,
-                trigger_cause=run["trigger_reason"],
-                notification_action="approved",
-                forecast_error_days=float((date.today() - predicted_date).days),
-            )
-            consumption_model.recalibrate(item, observed)
-            item.last_purchased_at = date.today()
-            item.last_purchase_amount = Decimal(str(transaction["amount"]))
-            self.repository.upsert_item(item)
-        final = self.repository.transition(
-            run_id,
-            expected={WorkflowState.QUOTE_REVALIDATED.value},
-            state=WorkflowState.COMPLETED.value,
+
+    def reconcile_checkout(self, run_id: str) -> dict[str, Any]:
+        """Reconcile a durable pending checkout without needing card credentials."""
+
+        run = self.repository.get_workflow(run_id)
+        if run["state"] != WorkflowState.CHECKOUT_PENDING.value:
+            raise ValueError("workflow is not waiting for checkout reconciliation")
+        item = self.repository.get_item(run["item_id"])
+        checkout = self._checkout_for_item(item)
+        reconcile = getattr(checkout, "reconcile_checkout", None)
+        if not callable(reconcile):
+            raise RuntimeError("merchant checkout reconciliation is not configured")
+        response = reconcile(run["idempotency_key"])
+        return self._finish_checkout(
+            run,
+            item,
+            response,
+            expected_state=WorkflowState.CHECKOUT_PENDING,
         )
-        self.repository.audit(
-            user_id=run["user_id"],
-            run_id=run_id,
-            item_id=run["item_id"],
-            event_type="transaction_completed",
-            payload={
-                "transaction_id": transaction["transaction_id"],
-                "amount": str(transaction["amount"]),
-                "currency": transaction["currency"],
-            },
-            modes=run["modes"],
-        )
-        return final

@@ -149,6 +149,8 @@ def test_slack_outbox_migration_reaches_new_head(tmp_path, monkeypatch) -> None:
     command.upgrade(config, "head")
 
     database = Database(database_url)
-    assert "slack_deliveries" in inspect(database.engine).get_table_names()
+    table_names = inspect(database.engine).get_table_names()
+    assert "slack_deliveries" in table_names
+    assert "auth_login_throttles" in table_names
     with database.engine.connect() as connection:
-        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20260722_04"
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20260722_06"

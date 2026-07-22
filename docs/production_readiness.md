@@ -7,6 +7,9 @@
 - Separate web, leased worker, and optional Slack processes.
 - Tenant isolation, RBAC, signed expiring sessions, bearer-only API semantics,
   security headers, CORS allow-listing, and rate limiting.
+- Production-safe solo-owner login using a configured scrypt password hash and
+  short-lived signed session; the web PWA keeps the session in session storage only.
+  Login-attempt windows are durable in PostgreSQL and serialized across replicas.
 - Code-owned caps, mandate gating, price-deviation reapproval, no substitution,
   consume-once credentials, checkout idempotency, and restart recovery.
 - Sanitized audit, correlation IDs, structured request logs, and aggregate metrics.

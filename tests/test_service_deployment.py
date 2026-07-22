@@ -35,6 +35,20 @@ def test_railway_service_configs_use_one_replica_and_distinct_commands() -> None
     assert "preDeployCommand" not in slack["deploy"]
 
 
+def test_docker_and_render_fail_closed_before_migrations_in_production() -> None:
+    dockerfile = (ROOT / "Dockerfile").read_text()
+    validator = "python scripts/validate_service_env.py api"
+    migrations = "alembic upgrade head"
+
+    assert validator in dockerfile
+    assert dockerfile.index(validator) < dockerfile.index(migrations)
+    assert '${RESTOCK_ENV:-development}' in dockerfile
+
+    render = (ROOT / "render.yaml").read_text()
+    assert "RESTOCK_ENV" in render
+    assert "production" in render
+
+
 def test_api_and_worker_contracts_reject_demo_or_sqlite() -> None:
     unsafe = {
         "DATABASE_URL": "sqlite:///logs/restock.db",
@@ -52,6 +66,8 @@ def test_api_and_worker_contracts_reject_demo_or_sqlite() -> None:
         "RESTOCK_ENV_MUST_BE_PRODUCTION",
         "RESTOCK_SESSION_SECRET_TOO_SHORT",
         "RESTOCK_SLACK_SERVICE_TOKEN",
+        "RESTOCK_SOLO_PASSWORD_HASH",
+        "RESTOCK_SOLO_USER_ID",
         "RESTOCK_WORKER_SERVICE_TOKEN",
     ]
     assert validate("worker", unsafe) == [
@@ -69,6 +85,8 @@ def test_all_service_contracts_accept_safe_shaped_values() -> None:
         "RESTOCK_ENV": "production",
         "RESTOCK_DEMO_MODE": "0",
         "RESTOCK_SESSION_SECRET": "a-high-entropy-placeholder-at-least-32-chars",
+        "RESTOCK_SOLO_USER_ID": "00000000-0000-0000-0000-000000000001",
+        "RESTOCK_SOLO_PASSWORD_HASH": "scrypt$16384$8$1$MDEyMzQ1Njc4OWFiY2RlZg$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         "PRAVA_API_KEY": "sk_test_placeholder",
         "PRAVA_API_URL": "https://sandbox.api.prava.space",
         "SLACK_BOT_TOKEN": "xoxb-placeholder",
@@ -129,6 +147,8 @@ def test_api_contract_requires_correctly_paired_prava_environment() -> None:
     shared = {
         **base,
         "RESTOCK_SESSION_SECRET": "session-secret-placeholder-over-32-characters",
+        "RESTOCK_SOLO_USER_ID": "00000000-0000-0000-0000-000000000001",
+        "RESTOCK_SOLO_PASSWORD_HASH": "scrypt$16384$8$1$MDEyMzQ1Njc4OWFiY2RlZg$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         "RESTOCK_SLACK_SERVICE_TOKEN": "slack-service-placeholder-over-32-characters",
         "RESTOCK_WORKER_SERVICE_TOKEN": "worker-service-placeholder-over-32-characters",
     }
@@ -143,3 +163,23 @@ def test_api_contract_requires_correctly_paired_prava_environment() -> None:
             "PRAVA_API_URL": "https://api.prava.space",
         },
     ) == ["PRAVA_PRODUCTION_GATE_REQUIRED"]
+
+
+def test_api_contract_rejects_malformed_solo_auth_configuration() -> None:
+    values = {
+        "DATABASE_URL": "postgresql://restock:secret@postgres/restock",
+        "PRAVA_API_KEY": "sk_test_placeholder",
+        "PRAVA_API_URL": "https://sandbox.api.prava.space",
+        "RESTOCK_ENV": "production",
+        "RESTOCK_DEMO_MODE": "0",
+        "RESTOCK_SESSION_SECRET": "session-secret-placeholder-over-32-characters",
+        "RESTOCK_SOLO_USER_ID": "not-a-uuid",
+        "RESTOCK_SOLO_PASSWORD_HASH": "scrypt$16384$8$1$short$short",
+        "RESTOCK_SLACK_SERVICE_TOKEN": "slack-service-placeholder-over-32-characters",
+        "RESTOCK_WORKER_SERVICE_TOKEN": "worker-service-placeholder-over-32-characters",
+    }
+
+    assert validate("api", values) == [
+        "RESTOCK_SOLO_PASSWORD_HASH_INVALID_FORMAT",
+        "RESTOCK_SOLO_USER_ID_INVALID",
+    ]

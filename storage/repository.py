@@ -7,19 +7,21 @@ import secrets
 from typing import Any
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.exc import IntegrityError
 
 from payments.models import TrackedItem, User
 from storage.database import Database
 from storage.schema import (
     AuditRow,
+    AuthLoginThrottleRow,
     ApprovalDecisionRow,
     ApprovalPolicyRow,
     ConsentRow,
     ForecastObservationRow,
     InvitationRow,
     MembershipRow,
+    MerchantCheckoutAttemptRow,
     NotificationActionRow,
     NotificationRow,
     TrackedItemRow,
@@ -583,6 +585,191 @@ class RestockRepository:
                 SlackDeliveryRow.notification_id == notification_id
             ))
             return _row_dict(row) if row else None
+
+    def reserve_merchant_checkout_attempt(
+        self,
+        *,
+        idempotency_key: str,
+        merchant: str,
+        merchant_sku_id: str,
+        expected_amount: Decimal,
+        currency: str,
+        prava_session_id: str,
+        prava_txn_ref_id: str,
+    ) -> tuple[dict[str, Any], bool]:
+        """Create the durable idempotency record before any merchant mutation."""
+
+        def validate(row: MerchantCheckoutAttemptRow) -> dict[str, Any]:
+            immutable = (
+                row.merchant == merchant
+                and row.merchant_sku_id == merchant_sku_id
+                and Decimal(str(row.expected_amount)) == Decimal(str(expected_amount))
+                and row.currency == currency
+                and row.prava_session_id == prava_session_id
+                and row.prava_txn_ref_id == prava_txn_ref_id
+            )
+            if not immutable:
+                raise ValueError("idempotency key is already bound to another checkout")
+            return _row_dict(row)
+
+        with self.database.session() as session:
+            existing = session.get(MerchantCheckoutAttemptRow, idempotency_key)
+            if existing is not None:
+                return validate(existing), False
+
+        row = MerchantCheckoutAttemptRow(
+            idempotency_key=idempotency_key,
+            merchant=merchant,
+            merchant_sku_id=merchant_sku_id,
+            expected_amount=expected_amount,
+            currency=currency,
+            state="reserved",
+            prava_session_id=prava_session_id,
+            prava_txn_ref_id=prava_txn_ref_id,
+        )
+        try:
+            with self.database.session() as session:
+                session.add(row)
+                session.flush()
+                return validate(row), True
+        except IntegrityError:
+            # A concurrent worker won the unique insert. Re-read and verify that
+            # the key is bound to the exact same immutable checkout request.
+            with self.database.session() as session:
+                existing = session.get(MerchantCheckoutAttemptRow, idempotency_key)
+                if existing is None:
+                    raise
+                return validate(existing), False
+
+    def get_merchant_checkout_attempt(self, idempotency_key: str) -> dict[str, Any] | None:
+        with self.database.session() as session:
+            row = session.get(MerchantCheckoutAttemptRow, idempotency_key)
+            return _row_dict(row) if row else None
+
+    def consume_login_attempt(
+        self,
+        *,
+        source_hash: str,
+        limit: int,
+        window_seconds: int = 60,
+        now: datetime | None = None,
+    ) -> bool:
+        """Atomically consume one durable login-attempt slot.
+
+        Production Postgres replicas serialize the same source with a
+        transaction-scoped advisory lock. SQLite supports deterministic local
+        and restart tests but is never accepted for production authentication.
+        """
+        if len(source_hash) != 64 or any(char not in "0123456789abcdef" for char in source_hash):
+            raise ValueError("source_hash must be a lowercase SHA-256 hex digest")
+        if limit <= 0 or window_seconds <= 0:
+            raise ValueError("login-attempt limit and window must be positive")
+        checked_at = now or datetime.now(timezone.utc)
+        with self.database.session() as session:
+            if self.database.engine.dialect.name == "postgresql":
+                lock_id = int(source_hash[:16], 16)
+                if lock_id >= 1 << 63:
+                    lock_id -= 1 << 64
+                session.execute(
+                    text("SELECT pg_advisory_xact_lock(:lock_id)"),
+                    {"lock_id": lock_id},
+                )
+            row = session.get(AuthLoginThrottleRow, source_hash)
+            if row is None:
+                session.add(AuthLoginThrottleRow(
+                    source_hash=source_hash,
+                    window_started_at=checked_at,
+                    attempts=1,
+                    updated_at=checked_at,
+                ))
+                return True
+            window_started_at = row.window_started_at
+            if window_started_at.tzinfo is None:
+                window_started_at = window_started_at.replace(tzinfo=timezone.utc)
+            if checked_at - window_started_at >= timedelta(seconds=window_seconds):
+                row.window_started_at = checked_at
+                row.attempts = 1
+                row.updated_at = checked_at
+                return True
+            if row.attempts >= limit:
+                return False
+            row.attempts += 1
+            row.updated_at = checked_at
+            return True
+
+    def update_merchant_checkout_attempt(
+        self,
+        idempotency_key: str,
+        *,
+        expected_states: set[str] | None = None,
+        expected_report_states: set[str] | None = None,
+        **changes: Any,
+    ) -> dict[str, Any]:
+        allowed = {
+            "state",
+            "merchant_order_id",
+            "merchant_order_code",
+            "credential_exposed",
+            "credential_used",
+            "report_status",
+            "report_state",
+            "report_attempts",
+            "prava_reported",
+            "last_error",
+        }
+        unsupported = set(changes).difference(allowed)
+        if unsupported:
+            raise ValueError(f"unsupported checkout-attempt fields: {sorted(unsupported)}")
+        values = {**changes, "updated_at": datetime.now(timezone.utc)}
+        with self.database.session() as session:
+            statement = update(MerchantCheckoutAttemptRow).where(
+                MerchantCheckoutAttemptRow.idempotency_key == idempotency_key
+            )
+            if expected_states is not None:
+                statement = statement.where(
+                    MerchantCheckoutAttemptRow.state.in_(expected_states)
+                )
+            if expected_report_states is not None:
+                statement = statement.where(
+                    MerchantCheckoutAttemptRow.report_state.in_(expected_report_states)
+                )
+            result = session.execute(statement.values(**values))
+            if result.rowcount != 1:
+                row = session.get(MerchantCheckoutAttemptRow, idempotency_key)
+                if row is None:
+                    raise KeyError(
+                        f"unknown checkout idempotency key: {idempotency_key}"
+                    )
+                raise ValueError("checkout-attempt compare-and-swap failed")
+            row = session.get(MerchantCheckoutAttemptRow, idempotency_key)
+            assert row is not None
+            session.refresh(row)
+            return _row_dict(row)
+
+    def claim_merchant_checkout_report(self, idempotency_key: str) -> dict[str, Any] | None:
+        """Atomically claim one pending Prava status report for delivery."""
+
+        now = datetime.now(timezone.utc)
+        with self.database.session() as session:
+            result = session.execute(
+                update(MerchantCheckoutAttemptRow)
+                .where(
+                    MerchantCheckoutAttemptRow.idempotency_key == idempotency_key,
+                    MerchantCheckoutAttemptRow.report_state == "pending",
+                    MerchantCheckoutAttemptRow.report_status.in_(("APPROVED", "DECLINED")),
+                )
+                .values(
+                    report_state="sending",
+                    report_attempts=MerchantCheckoutAttemptRow.report_attempts + 1,
+                    updated_at=now,
+                )
+            )
+            if result.rowcount != 1:
+                return None
+            row = session.get(MerchantCheckoutAttemptRow, idempotency_key)
+            assert row is not None
+            session.refresh(row)
+            return _row_dict(row)
 
     def claim_slack_delivery(
         self,

@@ -10,7 +10,7 @@ After installing the project, run `.venv/bin/python demo/dry_run.py` to exercise
 
 ## Local API
 
-Run `.venv/bin/alembic upgrade head`, then `.venv/bin/uvicorn ui.api:app --reload`. Public liveness and capability endpoints are `/health`, `/ready`, and `/capabilities`; behavioral endpoints under `/api/v1` require `Authorization: Bearer $RESTOCK_API_TOKEN`. Development falls back to the documented local demo token, but production refuses behavioral requests until a real token is configured.
+Run `.venv/bin/alembic upgrade head`, then `.venv/bin/uvicorn ui.api:app --reload`. Public liveness and capability endpoints are `/health`, `/ready`, and `/capabilities`. Development may use the documented local demo token. Production uses the password-only solo-owner login at `POST /api/v1/auth/login`, which maps to `RESTOCK_SOLO_USER_ID` and returns a short-lived `rst1` signed session; that user UUID must already exist in the production database. Configure only the scrypt hash in `RESTOCK_SOLO_PASSWORD_HASH`; plaintext passwords are never stored. Generate the hash interactively with `.venv/bin/python scripts/generate_solo_password_hash.py` and put its output directly into platform secret storage.
 
 Run the scheduler as a separate process with `.venv/bin/python -m workflow.worker`. The `Procfile` keeps web and worker commands separate so multiple web replicas cannot duplicate trigger scans.
 

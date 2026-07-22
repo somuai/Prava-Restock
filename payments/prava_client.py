@@ -383,6 +383,23 @@ def consume_credential(credential_reference: str) -> dict:
     return checkout_fields
 
 
+def credential_reporting_context(credential_reference: str) -> dict[str, str]:
+    """Return only durable-safe identifiers needed for a later status report."""
+
+    record = _credential_record(credential_reference)
+    session_id = record.get("session_id")
+    txn_ref_id = record.get("txn_ref_id")
+    if not session_id or not txn_ref_id:
+        raise ValueError("credential is missing Prava session reporting references")
+    return {"session_id": str(session_id), "txn_ref_id": str(txn_ref_id)}
+
+
+def retire_credential(credential_reference: str) -> None:
+    """Erase any remaining non-secret in-memory metadata after terminal reporting."""
+
+    _CREDENTIALS.pop(credential_reference, None)
+
+
 def purge_expired_credentials() -> int:
     """Remove expired one-time material and return the number of records purged."""
     purged = 0
@@ -394,18 +411,18 @@ def purge_expired_credentials() -> int:
     return purged
 
 
-def finalize_credential(credential_reference: str, transaction_status: str) -> None:
-    """Report the merchant outcome to Prava and retire the one-time credential."""
+def report_checkout_outcome(
+    session_id: str,
+    txn_ref_id: str,
+    transaction_status: str,
+) -> dict:
+    """Report a known merchant outcome using non-secret Prava references."""
+
     normalized_status = str(transaction_status).upper()
     if normalized_status not in {"APPROVED", "DECLINED"}:
         raise ValueError("transaction_status must be APPROVED or DECLINED")
-    record = _credential_record(credential_reference)
-    if record.get("consumed_at") is None:
-        raise ValueError("credential must be consumed by checkout before reporting status")
-    session_id = record.get("session_id")
-    txn_ref_id = record.get("txn_ref_id")
     if not session_id or not txn_ref_id:
-        raise ValueError("credential is missing Prava session reporting references")
+        raise ValueError("session_id and txn_ref_id are required")
 
     api_key, base_url = _load_prava_config()
     payload = {
@@ -448,4 +465,49 @@ def finalize_credential(credential_reference: str, transaction_status: str) -> N
     ):
         suffix = f" (X-Response-ID: {response_id})" if response_id else ""
         raise RuntimeError(f"Prava did not confirm the reported merchant outcome{suffix}")
+    return result
+
+
+def get_payment_result_status(session_id: str) -> str:
+    """Read one Prava session status for crash-safe report reconciliation."""
+
+    if not session_id:
+        raise ValueError("session_id is required")
+    api_key, base_url = _load_prava_config()
+    request = Request(
+        f"{base_url}/v1/sessions/{quote(str(session_id), safe='')}/payment-result",
+        headers={"Authorization": f"Bearer {api_key}"},
+        method="GET",
+    )
+    try:
+        with urlopen(request, timeout=20) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        response_id = exc.headers.get("X-Response-ID") if exc.headers else None
+        suffix = f" (X-Response-ID: {response_id})" if response_id else ""
+        raise RuntimeError(
+            f"Prava payment-result failed with HTTP {exc.code}{suffix}"
+        ) from exc
+    except (TimeoutError, URLError) as exc:
+        raise RuntimeError("Prava payment-result could not reach the configured API") from exc
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise RuntimeError("Prava payment-result returned an invalid response") from exc
+    status = str(result.get("status", "")).lower()
+    if status not in {"pending", "awaiting_result", "completed", "failed"}:
+        raise RuntimeError("Prava payment-result returned an unknown status")
+    return status
+
+
+def finalize_credential(credential_reference: str, transaction_status: str) -> None:
+    """Report the merchant outcome to Prava and retire the one-time credential."""
+
+    record = _credential_record(credential_reference)
+    if record.get("consumed_at") is None:
+        raise ValueError("credential must be consumed by checkout before reporting status")
+    context = credential_reporting_context(credential_reference)
+    report_checkout_outcome(
+        context["session_id"],
+        context["txn_ref_id"],
+        transaction_status,
+    )
     _CREDENTIALS.pop(credential_reference, None)

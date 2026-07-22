@@ -27,6 +27,12 @@ export async function loadSessionToken(): Promise<string | null> {
   return typeof value === "string" ? value : null;
 }
 
+export async function clearSessionToken(): Promise<void> {
+  if (!isNative()) return;
+  await SecureStorage.setKeyPrefix("space.prava.restock.");
+  await SecureStorage.remove(SESSION_KEY);
+}
+
 export async function initializeNative(
   onApprovalReturn: (runId: string) => Promise<void>,
   onPushToken?: (token: string) => Promise<void>,

@@ -3,13 +3,15 @@
 from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+import hashlib
+import hmac
 import json
 import os
 import logging
 from pathlib import Path
 import time
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from common import notification_store
+from common import password_auth
 from common import session_auth
 from channels import whatsapp
 from channels.slack_routes import router as slack_service_router
@@ -24,6 +27,7 @@ from workflow.service_routes import router as worker_service_router
 from merchant import swiggy_checkout, zepto_checkout
 from storage import Database, RestockRepository
 from workflow import WorkflowService
+from scripts.validate_service_env import validate as validate_service_environment
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,6 +36,7 @@ DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000001"
 LOCAL_DEMO_TOKEN = "restock-local-demo-token"
 REPOSITORY: RestockRepository | None = None
 _REQUESTS: dict[str, deque[datetime]] = defaultdict(deque)
+_AUTH_REQUESTS: dict[str, deque[datetime]] = defaultdict(deque)
 _METRICS: dict[str, float] = defaultdict(float)
 LOGGER = logging.getLogger("restock.api")
 
@@ -95,7 +100,8 @@ def get_repository() -> RestockRepository:
     global REPOSITORY
     if REPOSITORY is None:
         REPOSITORY = RestockRepository(Database())
-        REPOSITORY.create_schema()
+        if os.getenv("RESTOCK_ENV", "development") != "production":
+            REPOSITORY.create_schema()
     return REPOSITORY
 
 
@@ -130,6 +136,10 @@ def runtime_modes() -> dict[str, str | bool]:
             "RESTOCK_PUBLIC_APP_URL",
         )
     )
+    runtime_ready_check = getattr(zepto_checkout, "real_payment_runtime_ready", None)
+    zepto_runtime_ready = bool(
+        callable(runtime_ready_check) and runtime_ready_check()
+    )
     return {
         "prava_mode": prava_mode,
         "home_merchant_mode": zepto_checkout.merchant_mode().value,
@@ -139,7 +149,9 @@ def runtime_modes() -> dict[str, str | bool]:
             zepto_checkout.merchant_mode().value == "real"
             and os.getenv("ZEPTO_REAL_PAYMENT_ENABLED") == "1"
             and prava_mode == "production_configured"
+            and zepto_runtime_ready
         ),
+        "home_checkout_runtime_configured": zepto_runtime_ready,
         "slack_configured": slack_configured,
         "whatsapp_configured": all(
             os.getenv(name, "").strip()
@@ -155,20 +167,18 @@ def runtime_modes() -> dict[str, str | bool]:
 
 
 def production_configuration_issues() -> list[str]:
-    """Return non-secret identifiers for unsafe production configuration."""
-
+    """Reuse the production API startup contract and return names only."""
     if os.getenv("RESTOCK_ENV", "development") != "production":
         return []
-    issues: list[str] = []
-    database_url = os.getenv("DATABASE_URL", "")
-    if not database_url.startswith(("postgres://", "postgresql://", "postgresql+psycopg://")):
-        issues.append("DATABASE_URL_POSTGRES_REQUIRED")
-    session_secret = os.getenv("RESTOCK_SESSION_SECRET", "")
-    if len(session_secret) < 32:
-        issues.append("RESTOCK_SESSION_SECRET_TOO_SHORT")
-    if os.getenv("RESTOCK_DEMO_MODE", "1") != "0":
-        issues.append("RESTOCK_DEMO_MODE_MUST_BE_DISABLED")
-    return issues
+    issues = validate_service_environment("api", os.environ)
+    if (
+        zepto_checkout.merchant_mode().value == "real"
+        and os.getenv("ZEPTO_REAL_PAYMENT_ENABLED") == "1"
+    ):
+        runtime_ready_check = getattr(zepto_checkout, "real_payment_runtime_ready", None)
+        if not callable(runtime_ready_check) or not runtime_ready_check():
+            issues.append("ZEPTO_REAL_CHECKOUT_RUNTIME_UNAVAILABLE")
+    return sorted(set(issues))
 
 
 def require_user(
@@ -206,6 +216,60 @@ def require_user(
 class WorkflowActionRequest(BaseModel):
     action: str
     adjusted_amount: Decimal | None = Field(default=None, gt=Decimal("0"))
+
+
+class SoloLoginRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=1024)
+
+
+def _enforce_login_rate_limit(
+    request: Request,
+    repository: RestockRepository,
+    session_secret: str,
+) -> None:
+    source = request.client.host if request.client else "unknown"
+    limit = max(1, int(os.getenv("RESTOCK_AUTH_RATE_LIMIT_PER_MINUTE", "5")))
+    if os.getenv("RESTOCK_ENV", "development") == "production":
+        if repository.database.engine.dialect.name != "postgresql":
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="authentication unavailable",
+            )
+        source_hash = hmac.new(
+            session_secret.encode("utf-8"),
+            source.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        try:
+            allowed = repository.consume_login_attempt(
+                source_hash=source_hash,
+                limit=limit,
+                window_seconds=60,
+            )
+        except Exception as exc:
+            LOGGER.error(json.dumps({"event": "auth_rate_limit_unavailable"}))
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="authentication unavailable",
+            ) from exc
+        if not allowed:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="too many login attempts",
+            )
+        return
+
+    now = datetime.now(timezone.utc)
+    window = _AUTH_REQUESTS[source]
+    cutoff = now - timedelta(minutes=1)
+    while window and window[0] < cutoff:
+        window.popleft()
+    if len(window) >= limit:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="too many login attempts",
+        )
+    window.append(now)
 
 
 class TenantCreateRequest(BaseModel):
@@ -264,7 +328,12 @@ def readiness() -> dict[str, Any]:
         LOGGER.error(json.dumps({"event": "production_configuration_invalid", "issues": issues}))
         raise HTTPException(status_code=503, detail="production configuration incomplete")
     try:
-        get_repository().create_schema()
+        repository = get_repository()
+        if os.getenv("RESTOCK_ENV", "development") == "production":
+            with repository.database.engine.connect() as connection:
+                connection.exec_driver_sql("SELECT 1")
+        else:
+            repository.create_schema()
     except Exception as exc:
         raise HTTPException(status_code=503, detail="database unavailable") from exc
     return {"status": "ready", "capabilities": runtime_modes()}
@@ -273,6 +342,63 @@ def readiness() -> dict[str, Any]:
 @app.get("/capabilities")
 def capabilities() -> dict[str, str | bool]:
     return runtime_modes()
+
+
+@app.post("/api/v1/auth/login")
+def solo_login(payload: SoloLoginRequest, request: Request) -> dict[str, str | int]:
+    password_hash = os.getenv("RESTOCK_SOLO_PASSWORD_HASH", "").strip()
+    user_id = os.getenv("RESTOCK_SOLO_USER_ID", "").strip()
+    session_secret = os.getenv("RESTOCK_SESSION_SECRET", "")
+    if (
+        not password_auth.is_supported_hash(password_hash)
+        or not user_id
+        or len(session_secret) < 32
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="authentication unavailable",
+        )
+    try:
+        UUID(user_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="authentication unavailable",
+        ) from exc
+    try:
+        repository = get_repository()
+    except Exception as exc:
+        LOGGER.error(json.dumps({"event": "authentication_store_unavailable"}))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="authentication unavailable",
+        ) from exc
+    _enforce_login_rate_limit(request, repository, session_secret)
+    if not password_auth.verify_password(payload.password, password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid credentials",
+        )
+    try:
+        owner = repository.get_user(user_id)
+    except Exception as exc:
+        LOGGER.error(json.dumps({"event": "authentication_store_unavailable"}))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="authentication unavailable",
+        ) from exc
+    if owner is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="authentication unavailable",
+        )
+    ttl_seconds = int(os.getenv("RESTOCK_SESSION_TTL_SECONDS", "3600"))
+    ttl_seconds = min(max(ttl_seconds, 300), 86400)
+    return {
+        "access_token": session_auth.mint(user_id, session_secret, ttl_seconds),
+        "token_type": "bearer",
+        "expires_in": ttl_seconds,
+    }
 
 
 @app.get("/metrics")
@@ -551,6 +677,21 @@ def resume_workflow(
         raise HTTPException(status_code=403, detail="workflow belongs to a different user")
     try:
         return WorkflowService(repository).resume_after_passkey(run_id)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/workflows/{run_id}/reconcile-checkout")
+def reconcile_checkout(
+    run_id: str,
+    user_id: str = Depends(require_user),
+    repository: RestockRepository = Depends(get_repository),
+) -> dict[str, Any]:
+    run = repository.get_workflow(run_id)
+    if run["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="workflow belongs to a different user")
+    try:
+        return WorkflowService(repository).reconcile_checkout(run_id)
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
