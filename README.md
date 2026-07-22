@@ -2,7 +2,7 @@
 
 Restock is a consumption-triggered replenishment agent that predicts when recurring household essentials will run out, or when team subscriptions will renew, and prepares a bounded Prava payment flow before the deadline.
 
-The repository contains the deterministic trigger/orchestrator foundation and a real Prava sandbox client. The merchant checkout boundary remains disclosed simulation until Phase 8 completes; see [Phase 7 evidence](docs/phase7_evidence.md) and the real-versus-simulated notes below.
+The repository contains the implementation through Phase 14: deterministic triggers, the Agents SDK orchestrator, a real Prava sandbox client, durable workflows, merchant adapters, user surfaces, tenant controls, native wrappers, and the forecasting foundation. Building an integration is distinct from activating it with provider credentials or real money; see [Phase 7 evidence](docs/phase7_evidence.md), [production readiness](docs/production_readiness.md), and the runtime disclosures below.
 
 ## Offline dry run
 
@@ -24,20 +24,20 @@ After deployment, verify every public endpoint with:
 ./scripts/smoke_test.sh https://restock-offline-stub-production.up.railway.app
 ```
 
-The currently hosted URL is the credential-free Phase 6 offline deployment. The repository's local Phase 7 integration can call the real Prava sandbox when credentials are supplied through `.env`; those credentials are not committed or baked into the image.
+The hosted URL runs the current application in credential-free demo mode. Its public `/capabilities` response currently reports Prava as `sandbox_unconfigured`, all merchant/billing boundaries as `disclosed_mock`, channel integrations as unconfigured, real money disabled, and `demo_mode=true`. Local or platform-secret configuration can activate the implemented integrations; credentials are not committed or baked into the image.
 
 ## What is real and what is simulated
 
 - **Real:** deterministic trigger logic, code-owned spend caps, OpenAI Agents SDK tool surface, and Prava sandbox intent/passkey/mandate integration.
 - **Real merchant boundary:** Zepto OAuth/MCP client, address selection, live exact-SKU price lookup, cart preview, exact-price quote normalization, stock handling, and payment-status reconciliation interface. Similar search results are rejected rather than substituted.
 - **Disclosed simulation:** final Zepto live-money charge and Restock Teams billing-portal fulfillment. Zepto publishes no merchant payment sandbox, so the final charge stays disabled unless an operator explicitly enables a compatible-card checkout.
-- **Hosted URL:** still the Phase 6 offline build until the later deployment phase publishes the resumable workflow and UI.
+- **Hosted runtime:** the current application is published, but the hosted environment remains deliberately unactivated: demo mode is on, provider credentials are absent, and real-money execution is disabled. `/capabilities` is authoritative for the running environment.
 
 Runtime modes are returned by `/capabilities`. The default is `HOME_MERCHANT_MODE=disclosed_mock`; `ZEPTO_REAL_PAYMENT_ENABLED=1` is an additional operator gate and is never enabled in CI.
 
 ## Workflow and persistence
 
-Phase 9 adds a resumable database-backed state machine, Postgres-compatible SQLAlchemy repositories, an initial Alembic migration, unique active-workflow and idempotency constraints, authenticated action/resume endpoints, scheduler leases, sanitized mode-tagged audit entries, and cadence recalibration after completed Home purchases. SQLite is the zero-cost local/demo default; set `DATABASE_URL` to Postgres for a durable deployment.
+Phase 9 implemented a resumable database-backed state machine, Postgres-compatible SQLAlchemy repositories, an initial Alembic migration, unique active-workflow and idempotency constraints, authenticated action/resume endpoints, scheduler leases, sanitized mode-tagged audit entries, and cadence recalibration after completed Home purchases. SQLite is the zero-cost local/demo default; set `DATABASE_URL` to Postgres for a durable deployment.
 
 Run `.venv/bin/python demo/dry_run.py --mode offline` for all five deterministic seeded workflows. Use `--mode integration --item coffee` for the explicitly interactive Prava path; it opens the short-lived approval page and never makes the live Zepto payment path automatic.
 
@@ -45,7 +45,7 @@ Run `.venv/bin/python demo/dry_run.py --mode offline` for all five deterministic
 
 The React/TypeScript PWA lives in `ui/web` and is served from `/app` in the production Docker image. Run `npm ci && npm run dev` there for local frontend development, or `npm run build` for the deployable bundle. Its Restock-owned decision inbox uses a conversational Home hierarchy and a denser Teams approval hierarchy, with explicit preview/sandbox/simulation disclosure at the affected step. Typography, color, logo usage, and interaction rules are documented in the [design system](docs/design-system.md).
 
-- **Slack:** `channels/slack_manifest.yaml` and the Bolt Socket Mode adapter are ready for one-workspace installation. Configure `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_SIGNING_SECRET`, and `SLACK_CHANNEL_ID`; no Marketplace submission is needed for the private demo workspace.
+- **Slack:** `channels/slack_manifest.yaml` and the Bolt Socket Mode adapter are implemented, the private workspace app is installed, bot authentication and a real Socket Mode handshake pass, and a labeled live notification with all approval buttons has been delivered. A deployed persistent Slack process and one real workflow-action callback remain activation gates; see [Slack evidence](docs/slack_evidence.md). No Marketplace submission is needed for the private demo workspace.
 - **WhatsApp:** the Cloud API adapter sends the three-button proactive template only after recorded opt-in. The webhook verifies Meta's HMAC signature and maps Approve/Skip actions to workflows; Adjust opens the amount UI. Configure the `WHATSAPP_*` values only in local/platform secrets.
 - **Guaranteed submission path:** the PWA remains functional and visibly disclosed if Slack or Meta setup is still awaiting external approval.
 
@@ -53,7 +53,7 @@ No paid channel, store enrollment, hosting upgrade, or real Zepto payment is act
 
 ## Tenants and privacy
 
-Phase 11 adds Household and Organization tenants, owner/admin/approver/member roles, expiring one-use invitations, tenant-scoped items, multi-approver policies, consent records, privacy export, and deletion/pseudonymization. An explicit skip vetoes a pending multi-approver purchase; otherwise all positive decisions must agree and meet the configured threshold. Production rejects the development user header and requires an HMAC-signed, expiring bearer session using `RESTOCK_SESSION_SECRET`.
+Phase 11 implemented Household and Organization tenants, owner/admin/approver/member roles, expiring one-use invitations, tenant-scoped items, multi-approver policies, consent records, privacy export, and deletion/pseudonymization. An explicit skip vetoes a pending multi-approver purchase; otherwise all positive decisions must agree and meet the configured threshold. Production rejects the development user header and requires an HMAC-signed, expiring bearer session using `RESTOCK_SESSION_SECRET`.
 
 ## Native wrappers
 
@@ -61,11 +61,11 @@ The same PWA is wrapped by Capacitor 8 under `ui/web/android` and `ui/web/ios`. 
 
 ## Forecasting
 
-EWMA remains the production baseline. Phase 13 adds consent-gated forecast observations, category priors for cold start, export/deletion, and a dependency-free offline benchmark reporting MAE, trigger precision, missed-depletion rate, and action rate. `forecasting/datasets.json` blocks data whose training license is not authoritative; UCI Online Retail II is permitted only as a weak pipeline benchmark, not as a household-behavior model.
+EWMA remains the production baseline. Phase 13 implemented consent-gated forecast observations, category priors for cold start, export/deletion, and a dependency-free offline benchmark reporting MAE, trigger precision, missed-depletion rate, and action rate. `forecasting/datasets.json` blocks data whose training license is not authoritative; UCI Online Retail II is permitted only as a weak pipeline benchmark, not as a household-behavior model.
 
 ## Additional merchant adapters
 
-Phase 14 adds the official Swiggy MCP endpoints for catalog/cart work through the same quote/checkout/reconciliation contract. Swiggy's MCP can expose COD, but Restock never treats COD as a substitute for an approved Prava card payment; card checkout stays an explicit browser boundary and defaults to a disclosed simulation. Restock Teams also supports HTTPS hosted-invoice quotes and idempotent one-time disclosed checkout. Recurring Teams charging remains disabled pending Prava's standing-mandate answer.
+Phase 14 implemented the official Swiggy MCP endpoints for catalog/cart work through the same quote/checkout/reconciliation contract. Swiggy's MCP can expose COD, but Restock never treats COD as a substitute for an approved Prava card payment; card checkout stays an explicit browser boundary and defaults to a disclosed simulation. Restock Teams also supports HTTPS hosted-invoice quotes and idempotent one-time disclosed checkout. Recurring Teams charging remains disabled pending Prava's standing-mandate answer.
 
 ## Operations and recovery
 

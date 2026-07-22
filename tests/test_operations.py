@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from demo.seed_reset import demo_user
 from storage import Database, RestockRepository
 from storage.backup import backup_sqlite, restore_sqlite, verify_sqlite
@@ -21,6 +23,24 @@ def test_sqlite_backup_restore_round_trip(tmp_path) -> None:
     assert restore_sqlite(backup_path, restored_url) == digest
     restored = RestockRepository(Database(restored_url))
     assert restored.get_user(str(demo_user().user_id))["display_name"] == demo_user().display_name
+
+
+def test_sqlite_backup_refuses_to_overwrite_source(tmp_path) -> None:
+    database_path = tmp_path / "source.db"
+    repository = RestockRepository(Database(f"sqlite:///{database_path}"))
+    repository.create_schema()
+
+    with pytest.raises(ValueError, match="must differ"):
+        backup_sqlite(f"sqlite:///{database_path}", database_path)
+
+
+def test_sqlite_restore_refuses_to_overwrite_backup(tmp_path) -> None:
+    backup_path = tmp_path / "backup.db"
+    repository = RestockRepository(Database(f"sqlite:///{backup_path}"))
+    repository.create_schema()
+
+    with pytest.raises(ValueError, match="must differ"):
+        restore_sqlite(backup_path, f"sqlite:///{backup_path}")
 
 
 def test_retention_deletes_old_audit_but_preserves_recent(tmp_path) -> None:

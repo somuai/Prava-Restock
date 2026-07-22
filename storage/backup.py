@@ -27,6 +27,8 @@ def sha256(path: Path) -> str:
 
 def backup_sqlite(database_url: str, destination: Path) -> str:
     source_path = _sqlite_path(database_url)
+    if source_path == destination.resolve():
+        raise ValueError("backup destination must differ from the source database")
     destination.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(source_path) as source, sqlite3.connect(destination) as target:
         source.backup(target)
@@ -37,6 +39,8 @@ def backup_sqlite(database_url: str, destination: Path) -> str:
 def restore_sqlite(backup_path: Path, destination_url: str) -> str:
     verify_sqlite(backup_path)
     destination_path = _sqlite_path(destination_url)
+    if backup_path.resolve() == destination_path:
+        raise ValueError("restore destination must differ from the backup file")
     destination_path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(backup_path) as source, sqlite3.connect(destination_path) as target:
         source.backup(target)

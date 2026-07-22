@@ -114,6 +114,23 @@ def runtime_modes() -> dict[str, str | bool]:
     }
 
 
+def production_configuration_issues() -> list[str]:
+    """Return non-secret identifiers for unsafe production configuration."""
+
+    if os.getenv("RESTOCK_ENV", "development") != "production":
+        return []
+    issues: list[str] = []
+    database_url = os.getenv("DATABASE_URL", "")
+    if not database_url.startswith(("postgres://", "postgresql://", "postgresql+psycopg://")):
+        issues.append("DATABASE_URL_POSTGRES_REQUIRED")
+    session_secret = os.getenv("RESTOCK_SESSION_SECRET", "")
+    if len(session_secret) < 32:
+        issues.append("RESTOCK_SESSION_SECRET_TOO_SHORT")
+    if os.getenv("RESTOCK_DEMO_MODE", "1") != "0":
+        issues.append("RESTOCK_DEMO_MODE_MUST_BE_DISABLED")
+    return issues
+
+
 def require_user(
     authorization: str | None = Header(default=None),
     x_restock_user: str = Header(default=DEFAULT_USER_ID),
@@ -202,6 +219,10 @@ def health() -> dict[str, str]:
 
 @app.get("/ready")
 def readiness() -> dict[str, Any]:
+    issues = production_configuration_issues()
+    if issues:
+        LOGGER.error(json.dumps({"event": "production_configuration_invalid", "issues": issues}))
+        raise HTTPException(status_code=503, detail="production configuration incomplete")
     try:
         get_repository().create_schema()
     except Exception as exc:

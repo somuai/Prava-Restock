@@ -62,6 +62,32 @@ def test_behavioral_endpoints_require_authentication() -> None:
     assert client.get("/api/v1/workflows").status_code == 401
 
 
+def test_readiness_rejects_unsafe_production_configuration(monkeypatch) -> None:
+    monkeypatch.setenv("RESTOCK_ENV", "production")
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///logs/restock.db")
+    monkeypatch.delenv("RESTOCK_SESSION_SECRET", raising=False)
+    monkeypatch.setenv("RESTOCK_DEMO_MODE", "1")
+
+    response = client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "production configuration incomplete"}
+    assert api.production_configuration_issues() == [
+        "DATABASE_URL_POSTGRES_REQUIRED",
+        "RESTOCK_SESSION_SECRET_TOO_SHORT",
+        "RESTOCK_DEMO_MODE_MUST_BE_DISABLED",
+    ]
+
+
+def test_production_configuration_accepts_postgres_secret_and_no_demo(monkeypatch) -> None:
+    monkeypatch.setenv("RESTOCK_ENV", "production")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://restock:secret@db/restock")
+    monkeypatch.setenv("RESTOCK_SESSION_SECRET", "a-secure-random-session-secret-over-32-characters")
+    monkeypatch.setenv("RESTOCK_DEMO_MODE", "0")
+
+    assert api.production_configuration_issues() == []
+
+
 def test_authenticated_v1_endpoints_and_action(tmp_path, monkeypatch) -> None:
     repository = RestockRepository(Database(f"sqlite:///{tmp_path / 'api.db'}"))
     repository.create_schema()

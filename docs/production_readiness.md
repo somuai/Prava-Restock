@@ -11,6 +11,12 @@
 - Sanitized audit, correlation IDs, structured request logs, and aggregate metrics.
 - Configurable retention plus SQLite and Postgres backup/restore tooling.
 - React PWA and simulator-buildable Android/iOS wrappers.
+- Zepto and Swiggy catalog/cart/quote adapters, plus one-time Teams invoice support;
+  real merchant payment remains independently gated.
+- Slack Socket Mode and WhatsApp Cloud API adapters. The private Slack app is
+  installed; bot authentication, a real Socket Mode handshake, and live notification
+  delivery are verified. The workflow-action callback still needs a persistent
+  deployed listener and a real pending workflow.
 
 ## External launch gates
 
@@ -18,10 +24,16 @@
   hosting and therefore is not activated automatically.
 - Configure permanent high-entropy session/API secrets in platform secret storage.
 - Run a restore drill against a disposable managed Postgres database.
-- Install the Slack app and configure Meta's WhatsApp test/production assets.
+- Run the Slack listener as a persistent deployed process and verify one button
+  callback against a real pending workflow. Live notification delivery is complete.
+- Configure Meta's WhatsApp test/production assets and complete a real template/webhook
+  round trip.
 - Validate push/deep links on physical devices and enroll in stores only after approval.
 - Execute any real Zepto/Swiggy payment only with an explicit operator confirmation
   and compatible real card. Default checkout remains disclosed simulation.
 
-The public Railway service is a credential-free demo deployment until those gates are
-completed. Its `/capabilities` response is the authoritative runtime disclosure.
+The public Railway service runs the current application, but it is a credential-free,
+unactivated demo runtime until those gates are completed. Its `/capabilities` response
+is the authoritative disclosure and currently reports `demo_mode=true`, real money
+disabled, Prava sandbox unconfigured, channel integrations unconfigured, and merchant
+and billing execution as disclosed simulation.
