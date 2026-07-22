@@ -1,8 +1,10 @@
 """Single-workspace Slack adapter using Bolt and Socket Mode."""
 
 import os
+import threading
 from typing import Any
 from urllib.error import HTTPError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 import json
 
@@ -42,7 +44,13 @@ def notification_blocks(notification: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-def resolved_blocks(message: str, action: str, state: str) -> list[dict[str, Any]]:
+def resolved_blocks(
+    message: str,
+    action: str,
+    state: str,
+    *,
+    workflow_url: str | None = None,
+) -> list[dict[str, Any]]:
     labels = {
         "approve": "Approve",
         "adjust": "Adjust",
@@ -50,7 +58,7 @@ def resolved_blocks(message: str, action: str, state: str) -> list[dict[str, Any
         "renew_as_is": "Renew as-is",
         "switch_plan": "Switch plan",
     }
-    return [
+    blocks = [
         {"type": "section", "text": {"type": "mrkdwn", "text": message}},
         {
             "type": "context",
@@ -62,6 +70,15 @@ def resolved_blocks(message: str, action: str, state: str) -> list[dict[str, Any
             ],
         },
     ]
+    if state == "passkey_pending" and workflow_url:
+        blocks.append({
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"<{workflow_url}|Continue securely in Restock to approve payment>",
+            },
+        })
+    return blocks
 
 
 def build_app() -> App:
@@ -77,9 +94,9 @@ def build_app() -> App:
             ack()
             run_id = body["actions"][0]["value"]
             api_url = os.getenv("RESTOCK_PUBLIC_API_URL", "http://localhost:8000").rstrip("/")
-            api_token = os.getenv("RESTOCK_API_TOKEN", "")
+            api_token = os.getenv("RESTOCK_SLACK_SERVICE_TOKEN", "")
             request = Request(
-                f"{api_url}/api/v1/workflows/{run_id}/actions",
+                f"{api_url}/api/v1/service/slack/workflows/{run_id}/actions",
                 data=json.dumps({"action": action}).encode("utf-8"),
                 headers={"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"},
                 method="POST",
@@ -88,6 +105,11 @@ def build_app() -> App:
                 with urlopen(request, timeout=10) as response:
                     result = json.loads(response.read())
                 message = body.get("message", {})
+                state = str(result.get("state", "updated"))
+                workflow_url = None
+                if state == "passkey_pending":
+                    app_url = os.getenv("RESTOCK_PUBLIC_APP_URL", "").rstrip("/")
+                    workflow_url = f"{app_url}/?workflow={quote(str(run_id), safe='')}"
                 client.chat_update(
                     channel=body["channel"]["id"],
                     ts=message["ts"],
@@ -95,7 +117,8 @@ def build_app() -> App:
                     blocks=resolved_blocks(
                         message.get("text", "Restock workflow updated."),
                         action,
-                        str(result.get("state", "updated")),
+                        state,
+                        workflow_url=workflow_url,
                     ),
                 )
             except HTTPError as exc:
@@ -136,7 +159,21 @@ def main() -> int:
     app_token = os.getenv("SLACK_APP_TOKEN", "")
     if not app_token:
         raise RuntimeError("SLACK_APP_TOKEN is required for Socket Mode")
-    SocketModeHandler(app, app_token).start()
+    from channels.slack_dispatcher import run_dispatch_loop
+
+    stop = threading.Event()
+    dispatcher = threading.Thread(
+        target=run_dispatch_loop,
+        args=(app.client, stop),
+        name="slack-outbox-dispatcher",
+        daemon=True,
+    )
+    dispatcher.start()
+    try:
+        SocketModeHandler(app, app_token).start()
+    finally:
+        stop.set()
+        dispatcher.join(timeout=10)
     return 0
 
 

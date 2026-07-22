@@ -36,6 +36,8 @@ def test_example_environment_contains_placeholders_only() -> None:
         "SLACK_BOT_TOKEN",
         "SLACK_APP_TOKEN",
         "SLACK_SIGNING_SECRET",
+        "RESTOCK_SLACK_SERVICE_TOKEN",
+        "RESTOCK_WORKER_SERVICE_TOKEN",
         "WHATSAPP_ACCESS_TOKEN",
         "WHATSAPP_APP_SECRET",
         "WHATSAPP_VERIFY_TOKEN",

@@ -239,6 +239,13 @@ class WorkflowService:
         run = self.repository.get_workflow(run_id)
         if run["state"] != WorkflowState.PASSKEY_PENDING.value:
             raise ValueError("workflow is not waiting for passkey approval")
+        if self.prava is prava_client and run["prava_intent_ref"] not in prava_client._INTENTS:
+            prava_client.register_intent_context(
+                run["prava_intent_ref"],
+                merchant=run["merchant"],
+                amount=str(run["proposed_amount"]),
+                constraints={"currency": run["currency"]},
+            )
         result = self.prava.await_mandate(run["prava_intent_ref"])
         if result["status"] != "approved":
             terminal = (

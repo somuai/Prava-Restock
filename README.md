@@ -65,7 +65,7 @@ EWMA remains the production baseline. Phase 13 implemented consent-gated forecas
 
 ## Additional merchant adapters
 
-Phase 14 implemented the official Swiggy MCP endpoints for catalog/cart work through the same quote/checkout/reconciliation contract. Swiggy's MCP can expose COD, but Restock never treats COD as a substitute for an approved Prava card payment; card checkout stays an explicit browser boundary and defaults to a disclosed simulation. Restock Teams also supports HTTPS hosted-invoice quotes and idempotent one-time disclosed checkout. Recurring Teams charging remains disabled pending Prava's standing-mandate answer.
+Phase 14 implemented the official Swiggy MCP endpoints for catalog/cart work through the same quote/checkout/reconciliation contract. Swiggy's MCP can expose COD, but Restock never treats COD as a substitute for an approved Prava card payment; card checkout stays an explicit browser boundary and defaults to a disclosed simulation. Restock Teams also supports HTTPS hosted-invoice quotes and idempotent one-time disclosed checkout. Prava's [Report Status documentation](https://docs.prava.space/api-reference/report-status) now states that mandates are currently one-time and recurring frequencies are planned, so recurring Teams charging is explicitly unsupported and disabled.
 
 ## Operations and recovery
 

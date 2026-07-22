@@ -35,6 +35,20 @@ def test_slack_resolved_blocks_remove_buttons_and_show_terminal_state() -> None:
     assert all(block["type"] != "actions" for block in blocks)
 
 
+def test_slack_passkey_state_links_to_restock_not_raw_prava() -> None:
+    blocks = slack_app.resolved_blocks(
+        "TeamTool renews tomorrow.",
+        "renew_as_is",
+        "passkey_pending",
+        workflow_url="https://restock.example/app/?workflow=run-1",
+    )
+
+    serialized = json.dumps(blocks)
+    assert "https://restock.example/app/?workflow=run-1" in serialized
+    assert "iframe" not in serialized
+    assert "prava" not in serialized.lower()
+
+
 def test_whatsapp_template_contains_three_quick_reply_buttons() -> None:
     payload = whatsapp.template_payload(
         recipient="910000000000",

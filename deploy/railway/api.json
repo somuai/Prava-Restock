@@ -1,0 +1,20 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "Dockerfile"
+  },
+  "deploy": {
+    "preDeployCommand": [
+      "python scripts/validate_service_env.py api && alembic upgrade head"
+    ],
+    "startCommand": "sh -c 'exec uvicorn ui.api:app --host 0.0.0.0 --port ${PORT:-8000}'",
+    "numReplicas": 1,
+    "healthcheckPath": "/ready",
+    "healthcheckTimeout": 100,
+    "restartPolicyType": "ALWAYS",
+    "sleepApplication": false,
+    "overlapSeconds": 20,
+    "drainingSeconds": 10
+  }
+}

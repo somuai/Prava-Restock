@@ -523,14 +523,17 @@ onto WhatsApp’s interactive buttons) or an installable PWA with web push (no a
 review cycle, works immediately). Native app only becomes justified once retention data on
 one of those two shows people actually act on the notifications — building app-store presence
 before that risks being wasted effort.
-2. **One-time invoice path built; recurring remains gated:** Real SaaS billing integration. The mock exists because a subscription renewal is
+2. **One-time invoice path built; recurring is currently unsupported:** Real SaaS billing integration. The mock exists because a subscription renewal is
 merchant-initiated (recurring), not agent-initiated (one-time) like a grocery reorder — a genuinely different transaction shape from what’s built. Two paths:
-   - Path A (elegant, unconfirmed): if Prava supports a standing/recurring mandate scoped
-to one merchant with a cap, the vendor’s own billing system charges it directly, and
+   - Path A (planned platform capability, not available now): Prava's [Report Status
+documentation](https://docs.prava.space/api-reference/report-status) states that mandates
+are currently one-time and recurring frequencies are planned. If that future capability
+supports a standing/recurring mandate scoped to one merchant with a cap, the vendor’s own
+billing system charges it directly, and
 Restock’s job becomes watching for a decline or an over-cap amount as the trigger for a
 renegotiation notification. This is the direction Visa’s Aldar pilot and AP2’s “Human Not
-Present” mode both point toward — worth a direct question to Prava’s team rather than
-an assumption (see Appendix B).
+Present” mode both point toward, but Restock must not enable it until Prava ships and
+documents the capability.
    - Path B (buildable now, no new dependency): keep the existing agent-initiated, one-time-credential flow exactly as built, and have Restock pay the vendor’s hosted
 invoice/payment link directly two days before the known renewal date — same architecture, different merchant_sku_id target. This is the one to actually build first.
 3. **Data foundation built; production ML still gated:** Real forecasting model. The constraint is data volume, not modeling difficulty — a
@@ -591,10 +594,11 @@ shape.
 - Location of Prava’s sandbox test-card/test-data reference in prava-skills.
 - Whether Prava mandates expose a configurable TTL/expiry we should set explicitly on
 Intent creation, or whether it’s fixed by Prava.
-- Whether Prava supports a standing/recurring mandate (scoped to one merchant, capped,
-valid for repeat charges) — would let Restock Teams move off the disclosed billing mock
-onto real vendor-initiated renewal charges (Path A in §27). Ask directly in Discord/office
-hours rather than assuming either way.
+- RESOLVED — Prava's [Report Status
+documentation](https://docs.prava.space/api-reference/report-status) states that mandates
+are currently one-time and recurring frequencies are planned. Restock Teams therefore keeps
+recurring charging unsupported and disabled; Path A in §27 cannot be enabled until Prava
+ships and documents recurring mandate frequencies.
 
 ### C. Glossary
 

@@ -1,4 +1,4 @@
-"""Server-side Prava sandbox client using the documented Session REST API.
+"""Server-side Prava client using the documented Session REST API.
 
 Prava does not publish a Python SDK. The browser-only ``@prava-sdk/core``
 package owns card entry and passkey approval; this module implements the
@@ -23,38 +23,69 @@ STUB_MODE = False
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _SANDBOX_URL = "https://sandbox.api.prava.space"
+_PRODUCTION_URL = "https://api.prava.space"
 _INTENTS: dict[str, dict] = {}
 # One-time token/CVV values are held only in process memory and are never
 # returned, logged, or persisted. Downstream code receives an opaque reference.
 _CREDENTIALS: dict[str, dict] = {}
 _CREDENTIAL_TTL_SECONDS = 15 * 60
+_SENSITIVE_CREDENTIAL_FIELDS = (
+    "token",
+    "dynamic_cvv",
+    "expiry_month",
+    "expiry_year",
+)
 
 
-def _load_sandbox_config() -> tuple[str, str]:
+def _load_prava_config() -> tuple[str, str]:
     load_dotenv(_PROJECT_ROOT / ".env", override=False)
     api_key = os.getenv("PRAVA_API_KEY", "").strip()
-    base_url = os.getenv("PRAVA_SANDBOX_URL", "").strip().rstrip("/")
+    base_url = (
+        os.getenv("PRAVA_API_URL", "").strip()
+        or os.getenv("PRAVA_SANDBOX_URL", "").strip()
+    ).rstrip("/")
     if not api_key:
         raise RuntimeError("PRAVA_API_KEY is not configured in .env")
     if not base_url:
-        raise RuntimeError("PRAVA_SANDBOX_URL is not configured in .env")
-    if not api_key.startswith("sk_test_"):
-        raise RuntimeError("Phase 7 accepts only a Prava sandbox sk_test_* key")
-    if base_url != _SANDBOX_URL:
+        raise RuntimeError("PRAVA_API_URL is not configured in .env")
+    if api_key.startswith("sk_test_"):
+        if base_url != _SANDBOX_URL:
+            raise RuntimeError(
+                f"Prava sandbox keys require the official sandbox host: {_SANDBOX_URL}"
+            )
+        return api_key, base_url
+    if api_key.startswith("sk_live_"):
+        if os.getenv("PRAVA_PRODUCTION_ENABLED") != "1":
+            raise RuntimeError(
+                "Prava production is disabled; set PRAVA_PRODUCTION_ENABLED=1 only "
+                "after go-live approval and an operator-controlled launch review"
+            )
+        if base_url != _PRODUCTION_URL:
+            raise RuntimeError(
+                f"Prava live keys require the official production host: {_PRODUCTION_URL}"
+            )
+        return api_key, base_url
+    raise RuntimeError("PRAVA_API_KEY must use the sk_test_* or sk_live_* prefix")
+
+
+def _load_sandbox_config() -> tuple[str, str]:
+    """Backward-compatible test helper that still rejects production credentials."""
+    api_key, base_url = _load_prava_config()
+    if not api_key.startswith("sk_test_") or base_url != _SANDBOX_URL:
         raise RuntimeError(
-            f"Phase 7 accepts only the official Prava sandbox host: {_SANDBOX_URL}"
+            "this operation requires the official Prava sandbox configuration"
         )
     return api_key, base_url
 
 
 def create_intent(merchant, amount, item_description, constraints):
-    """Create a real Prava sandbox session and return its session identifier."""
+    """Create a Prava session in the explicitly configured environment."""
     parsed_amount = Decimal(str(amount))
     if parsed_amount <= 0:
         raise ValueError("amount must be positive")
 
     constraints = dict(constraints)
-    api_key, base_url = _load_sandbox_config()
+    api_key, base_url = _load_prava_config()
 
     merchant_key = str(merchant).strip().lower()
     merchant_defaults = {
@@ -142,7 +173,7 @@ def create_intent(merchant, amount, item_description, constraints):
     except TimeoutError as exc:
         raise RuntimeError("Prava session creation timed out") from exc
     except URLError as exc:
-        raise RuntimeError("Prava session creation could not reach the sandbox") from exc
+        raise RuntimeError("Prava session creation could not reach the configured API") from exc
 
     required = {"session_id", "iframe_url", "expires_at"}
     missing = required.difference(result)
@@ -164,6 +195,34 @@ def create_intent(merchant, amount, item_description, constraints):
     return intent_ref
 
 
+def register_intent_context(
+    intent_ref: str,
+    *,
+    merchant: str,
+    amount: str,
+    constraints: dict | None = None,
+) -> None:
+    """Reconstruct only non-secret polling context after an API process restart.
+
+    Approval URLs are intentionally not persisted or reconstructed. The durable
+    workflow already owns the session reference, merchant, and approved amount;
+    those values are sufficient to poll Prava and scope the normalized result.
+    """
+    if not intent_ref:
+        raise ValueError("intent_ref is required")
+    _INTENTS.setdefault(
+        str(intent_ref),
+        {
+            "merchant": str(merchant),
+            "amount": str(amount),
+            "item_description": "Restock checkout",
+            "constraints": dict(constraints or {}),
+            "expires_at": None,
+            "restored": True,
+        },
+    )
+
+
 def await_mandate(intent_ref):
     """Poll a real Prava session until approved, rejected, expired, or timed out."""
     try:
@@ -174,7 +233,7 @@ def await_mandate(intent_ref):
     if "outcome" in intent:
         return dict(intent["outcome"])
 
-    api_key, base_url = _load_sandbox_config()
+    api_key, base_url = _load_prava_config()
 
     constraints = intent["constraints"]
     poll_timeout = float(constraints.get("poll_timeout_seconds", 90))
@@ -220,7 +279,7 @@ def await_mandate(intent_ref):
         line_items = transaction.get("line_items") or []
         line_item = line_items[0] if line_items else {}
 
-        if status in {"awaiting_result", "completed"}:
+        if status == "awaiting_result":
             token = line_item.get("token")
             dynamic_cvv = line_item.get("dynamic_cvv")
             if token and dynamic_cvv:
@@ -233,6 +292,7 @@ def await_mandate(intent_ref):
                     "session_id": str(intent_ref),
                     "txn_ref_id": line_item.get("txn_ref_id"),
                     "created_at": datetime.now(timezone.utc),
+                    "consumed_at": None,
                 }
                 outcome = {
                     "status": "approved",
@@ -251,6 +311,11 @@ def await_mandate(intent_ref):
                 intent["outcome"] = outcome
                 return dict(outcome)
 
+        if status == "completed":
+            raise RuntimeError(
+                "Prava session is already completed; no reusable checkout credential exists"
+            )
+
         if status == "failed":
             error = transaction.get("error") or result.get("error") or {}
             code = str(error.get("code", "")).upper()
@@ -260,8 +325,11 @@ def await_mandate(intent_ref):
             return dict(outcome)
 
         try:
-            expires_at = datetime.fromisoformat(
-                str(intent["expires_at"]).replace("Z", "+00:00")
+            raw_expires_at = intent.get("expires_at")
+            expires_at = (
+                datetime.fromisoformat(str(raw_expires_at).replace("Z", "+00:00"))
+                if raw_expires_at
+                else None
             )
         except ValueError:
             expires_at = None
@@ -295,11 +363,24 @@ def _credential_record(credential_reference: str) -> dict:
 
 
 def consume_credential(credential_reference: str) -> dict:
-    """Return one-time checkout fields exactly once, then delete them from memory."""
-    record = dict(_credential_record(credential_reference))
-    _CREDENTIALS.pop(credential_reference, None)
-    record.pop("created_at", None)
-    return record
+    """Lease one-time checkout fields exactly once and erase their stored values.
+
+    Non-sensitive Prava reporting references remain in memory until
+    :func:`finalize_credential` reports the merchant outcome. This lets the payment
+    boundary obey both requirements: card material is consume-once, while the
+    mandatory ``report-status`` call can still identify the session and transaction.
+    """
+    record = _credential_record(credential_reference)
+    if record.get("consumed_at") is not None:
+        raise ValueError("unknown or already-consumed credential reference")
+    if any(not record.get(field) for field in _SENSITIVE_CREDENTIAL_FIELDS):
+        raise ValueError("credential reference is missing one-time checkout fields")
+
+    checkout_fields = {
+        field: record.pop(field) for field in _SENSITIVE_CREDENTIAL_FIELDS
+    }
+    record["consumed_at"] = datetime.now(timezone.utc)
+    return checkout_fields
 
 
 def purge_expired_credentials() -> int:
@@ -319,12 +400,14 @@ def finalize_credential(credential_reference: str, transaction_status: str) -> N
     if normalized_status not in {"APPROVED", "DECLINED"}:
         raise ValueError("transaction_status must be APPROVED or DECLINED")
     record = _credential_record(credential_reference)
+    if record.get("consumed_at") is None:
+        raise ValueError("credential must be consumed by checkout before reporting status")
     session_id = record.get("session_id")
     txn_ref_id = record.get("txn_ref_id")
     if not session_id or not txn_ref_id:
         raise ValueError("credential is missing Prava session reporting references")
 
-    api_key, base_url = _load_sandbox_config()
+    api_key, base_url = _load_prava_config()
     payload = {
         "txn_ref_id": str(txn_ref_id),
         "txn_status": normalized_status,
@@ -340,11 +423,29 @@ def finalize_credential(credential_reference: str, transaction_status: str) -> N
     )
     try:
         with urlopen(request, timeout=20) as response:
-            response.read()
+            raw_body = response.read()
+            headers = getattr(response, "headers", None)
+            response_id = headers.get("X-Response-ID") if headers is not None else None
     except HTTPError as exc:
+        response_id = exc.headers.get("X-Response-ID") if exc.headers is not None else None
+        suffix = f" (X-Response-ID: {response_id})" if response_id else ""
         raise RuntimeError(
-            f"Prava report-status failed with HTTP {exc.code}"
+            f"Prava report-status failed with HTTP {exc.code}{suffix}"
         ) from exc
     except (TimeoutError, URLError) as exc:
-        raise RuntimeError("Prava report-status could not reach the sandbox") from exc
+        raise RuntimeError("Prava report-status could not reach the configured API") from exc
+
+    try:
+        result = json.loads(raw_body.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        suffix = f" (X-Response-ID: {response_id})" if response_id else ""
+        raise RuntimeError(f"Prava report-status returned an invalid response{suffix}") from exc
+    if (
+        result.get("status") != "confirmed"
+        or result.get("txn_status") != normalized_status
+        or result.get("txn_ref_id") != str(txn_ref_id)
+        or result.get("visa_confirmation") != "SUCCESS"
+    ):
+        suffix = f" (X-Response-ID: {response_id})" if response_id else ""
+        raise RuntimeError(f"Prava did not confirm the reported merchant outcome{suffix}")
     _CREDENTIALS.pop(credential_reference, None)

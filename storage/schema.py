@@ -160,6 +160,26 @@ class NotificationActionRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class SlackDeliveryRow(Base):
+    """Durable, one-row-per-notification Slack delivery outbox."""
+
+    __tablename__ = "slack_deliveries"
+
+    delivery_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    notification_id: Mapped[str] = mapped_column(
+        ForeignKey("notifications.notification_id"), unique=True, index=True
+    )
+    run_id: Mapped[str] = mapped_column(ForeignKey("workflow_runs.run_id"), index=True)
+    status: Mapped[str] = mapped_column(String(30), default="pending", index=True)
+    attempts: Mapped[int] = mapped_column(default=0)
+    lease_owner: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    slack_message_ts: Mapped[str | None] = mapped_column(String(40), nullable=True, unique=True)
+    last_error: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class TransactionRow(Base):
     __tablename__ = "transactions"
 

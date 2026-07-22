@@ -292,8 +292,8 @@ Every durable state transition writes a sanitized domain-audit entry with run, u
 *Resolution paths for each of these live in `PRD.md` §15 (Roadmap) — this list is deliberately just the "not done yet" inventory, not the plan to close it.*
 
 - No production ML forecasting model — deterministic EWMA remains the production baseline while consented observation logging and offline benchmarking collect evidence.
-- One-time hosted SaaS invoice quoting is implemented; its unattended final payment remains a disclosed mock. Recurring Teams charging is disabled until Prava confirms standing-mandate semantics.
-- Multi-user Household/Organization membership, roles, invitations, consent, and multi-approver policy are implemented; shared Prava mandate semantics remain gated on Prava's standing-mandate answer.
+- One-time hosted SaaS invoice quoting is implemented; its unattended final payment remains a disclosed mock. Prava's [Report Status documentation](https://docs.prava.space/api-reference/report-status) states that mandates are currently one-time and recurring frequencies are planned, so recurring Teams charging is unsupported and disabled.
+- Multi-user Household/Organization membership, roles, invitations, consent, and multi-approver policy are implemented; shared payment approval does not make the underlying one-time Prava mandate reusable or recurring.
 - Capacitor Android/iOS wrappers are implemented and simulator-built; store enrollment, physical-device push validation, and publication remain external launch gates.
 - The guaranteed submission surface remains the disclosed PWA. The real Slack adapter and Meta test-number adapter must still disclose whether external credentials/setup are active.
 - Home adapters cover real Zepto and Swiggy catalog/cart quoting. Zepto's unattended final payment remains disclosed-mock by default; Swiggy card payment remains an explicit browser boundary and is never silently replaced by COD.
@@ -306,7 +306,7 @@ Every durable state transition writes a sanitized domain-audit entry with run, u
 - [ ] Location of Prava's sandbox test-card/test-data reference in `prava-skills`.
 - [ ] Whether Prava mandates expose a configurable TTL/expiry we should set explicitly on `Intent` creation, or whether it's fixed by Prava.
 - [x] **RESOLVED — platform fact:** Prava requires a Visa card issued in the US, Canada, Hong Kong, or Singapore for any real card used in the flow, whether in sandbox or production. Prava's own documented sandbox test cards are unaffected and complete a full simulated flow with no geography restriction; use those for the hackathon. For production, Prava has offered: "reach out to us and we'll sort you out with a compatible card".
-- [ ] Whether Prava supports a standing/recurring mandate (scoped to one merchant, capped, valid for repeat charges) — this would let Restock Teams move off the disclosed billing mock onto real vendor-initiated renewal charges (Path A in the roadmap, §15). Follow-up question sent via Discord 17 July 2026 — awaiting response. Do not assume either answer; this still gates whether Restock Teams' billing can move off the disclosed mock.
+- [x] **RESOLVED — one-time mandate semantics:** Prava's [Report Status documentation](https://docs.prava.space/api-reference/report-status) states that mandates are currently one-time and recurring frequencies are planned. Restock Teams therefore treats standing/recurring charging as unsupported and keeps it disabled; moving Path A onto vendor-initiated renewal charges requires a future documented Prava capability.
 
 ## 18. Glossary
 

@@ -2,7 +2,8 @@
 
 ## Verified in code and CI
 
-- Durable versioned migrations through `20260719_03`.
+- Durable versioned migrations through `20260722_04`; the latest revision adds
+  the unique Slack delivery outbox.
 - Separate web, leased worker, and optional Slack processes.
 - Tenant isolation, RBAC, signed expiring sessions, bearer-only API semantics,
   security headers, CORS allow-listing, and rate limiting.
@@ -20,7 +21,10 @@
 - Slack Socket Mode and WhatsApp Cloud API adapters. The private Slack app is
   installed; bot authentication, a real Socket Mode handshake, and live notification
   delivery are verified. A real Skip callback changed exactly one persisted workflow,
-  and the handler removes resolved buttons to prevent repeated actions.
+  and the handler removes resolved buttons to prevent repeated actions. New Teams
+  notifications now enqueue one durable Slack delivery, callbacks use a dedicated
+  action-limited service token, and positive decisions link only to the authenticated
+  Restock PWA rather than exposing Prava approval URLs in Slack.
 
 ## External launch gates
 

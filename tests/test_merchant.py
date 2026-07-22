@@ -5,7 +5,7 @@ import pytest
 
 from merchant import mock_checkout, zepto_checkout
 from merchant.models import ExecutionMode, MerchantQuote, StockStatus
-from merchant.zepto_mcp import ZeptoMCPError
+from merchant.zepto_mcp import ZeptoMCPClient, ZeptoMCPError
 
 
 @pytest.fixture(autouse=True)
@@ -110,6 +110,246 @@ def test_real_price_check_calls_zepto_search(monkeypatch) -> None:
         product_name="Coffee",
         client=FakeClient(),
     ) == Decimal("412.5")
+
+
+class FakeZeptoCartClient:
+    def __init__(
+        self,
+        *,
+        products=None,
+        cart=None,
+        payment_methods=None,
+        preview=None,
+    ) -> None:
+        self.products = products or [
+            {
+                "productVariantId": "coffee-500g",
+                "storeProductId": "store-coffee-500g",
+                "name": "Exact Coffee",
+                "price": 38000,
+                "availableQuantity": 3,
+            }
+        ]
+        self.cart = cart or {
+            "cartItems": [{"productVariantId": "coffee-500g", "quantity": 1}]
+        }
+        self.payment_methods = payment_methods or {
+            "paymentMethods": [
+                {"displayName": "Pay Online (UPI / Cards / Wallets)", "available": True}
+            ]
+        }
+        self.preview = preview or {
+            "order": {"toPay": "412.50", "orderId": "preview-exact", "deliverable": True}
+        }
+        self.calls = []
+
+    def select_saved_address(self, address_id):
+        self.calls.append(("select_saved_address", address_id))
+        return {"selected": address_id}
+
+    def search_products(self, query):
+        self.calls.append(("search_products", query))
+        return {"products": self.products}
+
+    def update_cart(self, arguments):
+        self.calls.append(("update_cart", arguments))
+        return {"updated": True}
+
+    def view_cart(self):
+        self.calls.append(("view_cart", None))
+        return self.cart
+
+    def get_payment_methods(self):
+        self.calls.append(("get_payment_methods", None))
+        return self.payment_methods
+
+    def preview_order(self, address_id):
+        self.calls.append(("preview_order", address_id))
+        return self.preview
+
+
+def test_exact_cart_preparation_is_disabled_by_default(monkeypatch) -> None:
+    monkeypatch.delenv("ZEPTO_CART_PREPARATION_ENABLED", raising=False)
+    client = FakeZeptoCartClient()
+
+    with pytest.raises(RuntimeError, match="cart preparation is disabled"):
+        zepto_checkout.prepare_exact_cart_quote(
+            "coffee-500g", "Coffee", "address-1", "device-1", client=client
+        )
+
+    assert client.calls == []
+
+
+def test_exact_cart_preparation_uses_safe_schema_and_preview(monkeypatch) -> None:
+    monkeypatch.setenv("ZEPTO_CART_PREPARATION_ENABLED", "1")
+    client = FakeZeptoCartClient(
+        products=[
+            {
+                "productVariantId": "similar-coffee",
+                "storeProductId": "store-similar",
+                "name": "Similar Coffee",
+                "price": 30000,
+                "availableQuantity": 5,
+            },
+            {
+                "productVariantId": "coffee-500g",
+                "storeProductId": "store-coffee-500g",
+                "name": "Exact Coffee",
+                "price": 38000,
+                "availableQuantity": 3,
+            },
+        ]
+    )
+
+    quote = zepto_checkout.prepare_exact_cart_quote(
+        "coffee-500g", "Coffee", "address-1", "device-1", client=client
+    )
+
+    assert quote.amount == Decimal("412.50")
+    assert quote.quote_reference == "preview-exact"
+    assert [call[0] for call in client.calls] == [
+        "select_saved_address",
+        "search_products",
+        "update_cart",
+        "view_cart",
+        "get_payment_methods",
+        "preview_order",
+    ]
+    assert client.calls[2][1] == {
+        "deviceId": "device-1",
+        "cartItems": [
+            {
+                "productVariantId": "coffee-500g",
+                "storeProductId": "store-coffee-500g",
+                "quantity": 1,
+            }
+        ],
+        "replaceCart": True,
+    }
+
+
+def test_preview_order_never_confirms_order(monkeypatch) -> None:
+    client = ZeptoMCPClient()
+    calls = []
+
+    def fake_call(name, arguments=None):
+        calls.append((name, arguments))
+        return {"toPay": "412.50"}
+
+    monkeypatch.setattr(client, "call", fake_call)
+
+    client.preview_order("address-1")
+
+    assert calls == [
+        (
+            "create_online_payment_order",
+            {
+                "confirmOrder": False,
+                "riderTip": 0,
+                "userAddressId": "address-1",
+                "useZeptoCash": False,
+            },
+        )
+    ]
+
+
+def test_exact_cart_preparation_refuses_substitution_before_cart_mutation(monkeypatch) -> None:
+    monkeypatch.setenv("ZEPTO_CART_PREPARATION_ENABLED", "1")
+    client = FakeZeptoCartClient(
+        products=[
+            {
+                "productVariantId": "similar-coffee",
+                "storeProductId": "store-similar",
+                "name": "Similar Coffee",
+                "price": 30000,
+                "availableQuantity": 5,
+            }
+        ]
+    )
+
+    with pytest.raises(ZeptoMCPError, match="refusing substitution"):
+        zepto_checkout.prepare_exact_cart_quote(
+            "coffee-500g", "Coffee", "address-1", "device-1", client=client
+        )
+
+    assert "update_cart" not in [call[0] for call in client.calls]
+
+
+def test_exact_cart_preparation_refuses_out_of_stock_before_cart_mutation(monkeypatch) -> None:
+    monkeypatch.setenv("ZEPTO_CART_PREPARATION_ENABLED", "1")
+    client = FakeZeptoCartClient(
+        products=[
+            {
+                "productVariantId": "coffee-500g",
+                "storeProductId": "store-coffee-500g",
+                "name": "Exact Coffee",
+                "price": 38000,
+                "availableQuantity": 0,
+            }
+        ]
+    )
+
+    with pytest.raises(ZeptoMCPError, match="out of stock"):
+        zepto_checkout.prepare_exact_cart_quote(
+            "coffee-500g", "Coffee", "address-1", "device-1", client=client
+        )
+
+    assert "update_cart" not in [call[0] for call in client.calls]
+
+
+def test_exact_cart_preparation_refuses_cart_without_exact_sku(monkeypatch) -> None:
+    monkeypatch.setenv("ZEPTO_CART_PREPARATION_ENABLED", "1")
+    client = FakeZeptoCartClient(
+        cart={"cartItems": [{"productVariantId": "different-sku", "quantity": 1}]}
+    )
+
+    with pytest.raises(ZeptoMCPError, match="does not exactly match"):
+        zepto_checkout.prepare_exact_cart_quote(
+            "coffee-500g", "Coffee", "address-1", "device-1", client=client
+        )
+
+    assert "preview_order" not in [call[0] for call in client.calls]
+
+
+def test_exact_cart_preparation_refuses_unrequested_extra_item(monkeypatch) -> None:
+    monkeypatch.setenv("ZEPTO_CART_PREPARATION_ENABLED", "1")
+    client = FakeZeptoCartClient(
+        cart={
+            "cartItems": [
+                {"productVariantId": "coffee-500g", "quantity": 1},
+                {"productVariantId": "unrequested-snack", "quantity": 1},
+            ]
+        }
+    )
+
+    with pytest.raises(ZeptoMCPError, match="does not exactly match"):
+        zepto_checkout.prepare_exact_cart_quote(
+            "coffee-500g", "Coffee", "address-1", "device-1", client=client
+        )
+
+    assert "preview_order" not in [call[0] for call in client.calls]
+
+
+def test_exact_cart_preparation_requires_available_online_card_method(monkeypatch) -> None:
+    monkeypatch.setenv("ZEPTO_CART_PREPARATION_ENABLED", "1")
+    client = FakeZeptoCartClient(
+        payment_methods={
+            "paymentMethods": [
+                {"displayName": "Cash on Delivery", "available": True},
+                {
+                    "displayName": "Pay Online (UPI / Cards / Wallets)",
+                    "available": False,
+                },
+            ]
+        }
+    )
+
+    with pytest.raises(ZeptoMCPError, match="card method is unavailable"):
+        zepto_checkout.prepare_exact_cart_quote(
+            "coffee-500g", "Coffee", "address-1", "device-1", client=client
+        )
+
+    assert "preview_order" not in [call[0] for call in client.calls]
 
 
 def test_disclosed_checkout_is_durable_and_idempotent() -> None:

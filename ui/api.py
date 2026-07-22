@@ -19,6 +19,8 @@ from pydantic import BaseModel, Field
 from common import notification_store
 from common import session_auth
 from channels import whatsapp
+from channels.slack_routes import router as slack_service_router
+from workflow.service_routes import router as worker_service_router
 from merchant import swiggy_checkout, zepto_checkout
 from storage import Database, RestockRepository
 from workflow import WorkflowService
@@ -49,6 +51,8 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Authorization", "Content-Type", "X-Restock-User"],
 )
+app.include_router(slack_service_router)
+app.include_router(worker_service_router)
 
 
 @app.middleware("http")
@@ -96,19 +100,55 @@ def get_repository() -> RestockRepository:
 
 
 def runtime_modes() -> dict[str, str | bool]:
-    prava_configured = os.getenv("PRAVA_API_KEY", "").startswith("sk_test_")
+    prava_key = os.getenv("PRAVA_API_KEY", "").strip()
+    prava_url = (
+        os.getenv("PRAVA_API_URL", "").strip()
+        or os.getenv("PRAVA_SANDBOX_URL", "").strip()
+    ).rstrip("/")
+    if prava_key.startswith("sk_live_") and prava_url == "https://api.prava.space":
+        prava_mode = (
+            "production_configured"
+            if os.getenv("PRAVA_PRODUCTION_ENABLED") == "1"
+            else "production_disabled"
+        )
+    elif (
+        prava_key.startswith("sk_test_")
+        and prava_url == "https://sandbox.api.prava.space"
+    ):
+        prava_mode = "sandbox_configured"
+    else:
+        prava_mode = "sandbox_unconfigured"
+    slack_configured = all(
+        os.getenv(name, "").strip()
+        for name in (
+            "SLACK_BOT_TOKEN",
+            "SLACK_APP_TOKEN",
+            "SLACK_SIGNING_SECRET",
+            "SLACK_CHANNEL_ID",
+            "RESTOCK_SLACK_SERVICE_TOKEN",
+            "RESTOCK_PUBLIC_API_URL",
+            "RESTOCK_PUBLIC_APP_URL",
+        )
+    )
     return {
-        "prava_mode": "sandbox_configured" if prava_configured else "sandbox_unconfigured",
+        "prava_mode": prava_mode,
         "home_merchant_mode": zepto_checkout.merchant_mode().value,
         "swiggy_payment_mode": swiggy_checkout.payment_mode().value,
         "teams_billing_mode": "disclosed_mock",
         "real_money_enabled": (
             zepto_checkout.merchant_mode().value == "real"
             and os.getenv("ZEPTO_REAL_PAYMENT_ENABLED") == "1"
+            and prava_mode == "production_configured"
         ),
-        "slack_configured": bool(os.getenv("SLACK_BOT_TOKEN") and os.getenv("SLACK_APP_TOKEN")),
-        "whatsapp_configured": bool(
-            os.getenv("WHATSAPP_ACCESS_TOKEN") and os.getenv("WHATSAPP_PHONE_NUMBER_ID")
+        "slack_configured": slack_configured,
+        "whatsapp_configured": all(
+            os.getenv(name, "").strip()
+            for name in (
+                "WHATSAPP_ACCESS_TOKEN",
+                "WHATSAPP_PHONE_NUMBER_ID",
+                "WHATSAPP_APP_SECRET",
+                "WHATSAPP_VERIFY_TOKEN",
+            )
         ),
         "demo_mode": os.getenv("RESTOCK_DEMO_MODE", "1") == "1",
     }

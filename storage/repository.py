@@ -27,6 +27,7 @@ from storage.schema import (
     UserRow,
     WorkflowRunRow,
     SchedulerLeaseRow,
+    SlackDeliveryRow,
     TenantRow,
 )
 
@@ -159,6 +160,24 @@ class RestockRepository:
                 query = query.where(TrackedItemRow.user_id == user_id)
             rows = session.scalars(query).all()
             return [dict(row.payload) for row in rows]
+
+    def list_schedulable_items(self) -> list[tuple[User, TrackedItem]]:
+        """Return active persisted items with their owners for the leased worker."""
+
+        with self.database.session() as session:
+            rows = session.execute(
+                select(TrackedItemRow, UserRow).join(
+                    UserRow, UserRow.user_id == TrackedItemRow.user_id
+                )
+            ).all()
+            candidates: list[tuple[User, TrackedItem]] = []
+            for item_row, user_row in rows:
+                item = TrackedItem.model_validate(item_row.payload)
+                if item.status.value != "active":
+                    continue
+                user = User.model_validate(_row_dict(user_row))
+                candidates.append((user, item))
+            return candidates
 
     def create_tenant(self, *, name: str, kind: str, owner_user_id: str) -> dict[str, Any]:
         if kind not in {"household", "organization"}:
@@ -428,6 +447,12 @@ class RestockRepository:
     def delete_user_data(self, user_id: str) -> None:
         """Privacy deletion removes user-authored activity and pseudonymizes retained payment proof."""
         with self.database.session() as session:
+            notification_ids = select(NotificationRow.notification_id).where(
+                NotificationRow.user_id == user_id
+            )
+            session.execute(delete(SlackDeliveryRow).where(
+                SlackDeliveryRow.notification_id.in_(notification_ids)
+            ))
             for model in (ConsentRow, NotificationActionRow, NotificationRow, MembershipRow):
                 for row in session.scalars(select(model).where(model.user_id == user_id)).all():
                     session.delete(row)
@@ -528,18 +553,104 @@ class RestockRepository:
         message: str,
         actions: list[str],
     ) -> dict[str, Any]:
-        run = self.get_workflow(run_id)
-        row = NotificationRow(
-            run_id=run_id,
-            user_id=user_id,
-            tenant_id=run.get("tenant_id"),
-            message=message,
-            actions=actions,
-        )
         with self.database.session() as session:
+            run = session.get(WorkflowRunRow, run_id)
+            if run is None:
+                raise KeyError(f"unknown run_id: {run_id}")
+            item = session.get(TrackedItemRow, run.item_id)
+            if item is None:
+                raise KeyError(f"unknown item_id: {run.item_id}")
+            row = NotificationRow(
+                run_id=run_id,
+                user_id=user_id,
+                tenant_id=run.tenant_id,
+                message=message,
+                actions=actions,
+            )
             session.add(row)
             session.flush()
+            if item.payload.get("track") == "teams":
+                session.add(SlackDeliveryRow(
+                    notification_id=row.notification_id,
+                    run_id=run_id,
+                ))
+                session.flush()
             return _row_dict(row)
+
+    def slack_delivery_for_notification(self, notification_id: str) -> dict[str, Any] | None:
+        with self.database.session() as session:
+            row = session.scalar(select(SlackDeliveryRow).where(
+                SlackDeliveryRow.notification_id == notification_id
+            ))
+            return _row_dict(row) if row else None
+
+    def claim_slack_delivery(
+        self,
+        *,
+        owner_id: str,
+        lease_seconds: int = 30,
+    ) -> dict[str, Any] | None:
+        """Claim one pending delivery; ambiguous attempts are never auto-retried."""
+
+        now = datetime.now(timezone.utc)
+        with self.database.session() as session:
+            query = (
+                select(SlackDeliveryRow)
+                .where(SlackDeliveryRow.status == "pending")
+                .order_by(SlackDeliveryRow.created_at)
+                .limit(1)
+            )
+            if self.database.engine.dialect.name == "postgresql":
+                query = query.with_for_update(skip_locked=True)
+            row = session.scalar(query)
+            if row is None:
+                return None
+            row.status = "sending"
+            row.attempts += 1
+            row.lease_owner = owner_id
+            row.lease_expires_at = now + timedelta(seconds=max(10, lease_seconds))
+            row.updated_at = now
+            notification = session.get(NotificationRow, row.notification_id)
+            if notification is None:
+                row.status = "failed_ambiguous"
+                row.last_error = "notification_missing"
+                return None
+            session.flush()
+            return {**_row_dict(row), "notification": _row_dict(notification)}
+
+    def complete_slack_delivery(
+        self,
+        *,
+        delivery_id: str,
+        owner_id: str,
+        slack_message_ts: str,
+    ) -> None:
+        with self.database.session() as session:
+            row = session.get(SlackDeliveryRow, delivery_id)
+            if row is None or row.status != "sending" or row.lease_owner != owner_id:
+                raise ValueError("Slack delivery is not owned by this dispatcher")
+            row.status = "sent"
+            row.slack_message_ts = slack_message_ts
+            row.lease_owner = None
+            row.lease_expires_at = None
+            row.updated_at = datetime.now(timezone.utc)
+
+    def fail_slack_delivery(
+        self,
+        *,
+        delivery_id: str,
+        owner_id: str,
+        error_code: str,
+    ) -> None:
+        with self.database.session() as session:
+            row = session.get(SlackDeliveryRow, delivery_id)
+            if row is None or row.status != "sending" or row.lease_owner != owner_id:
+                raise ValueError("Slack delivery is not owned by this dispatcher")
+            row.status = "failed_ambiguous"
+            row.last_error = error_code[:120]
+            row.lease_owner = None
+            row.lease_expires_at = None
+            row.updated_at = datetime.now(timezone.utc)
 
     def pending_notifications(self, user_id: str) -> list[dict[str, Any]]:
         with self.database.session() as session:
@@ -696,6 +807,13 @@ class RestockRepository:
         """Delete old audit and resolved notification records; payment proof is retained."""
         with self.database.session() as session:
             audit_result = session.execute(delete(AuditRow).where(AuditRow.created_at < before))
+            resolved_notification_ids = select(NotificationRow.notification_id).where(
+                NotificationRow.created_at < before,
+                NotificationRow.status != "pending",
+            )
+            session.execute(delete(SlackDeliveryRow).where(
+                SlackDeliveryRow.notification_id.in_(resolved_notification_ids)
+            ))
             notification_result = session.execute(delete(NotificationRow).where(
                 NotificationRow.created_at < before,
                 NotificationRow.status != "pending",

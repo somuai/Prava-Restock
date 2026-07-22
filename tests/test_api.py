@@ -30,6 +30,56 @@ def test_hello_world_and_health_endpoints(monkeypatch) -> None:
     assert client.get("/metrics").json()["http_requests_total"] >= 1
 
 
+def test_whatsapp_capability_requires_send_and_webhook_credentials(monkeypatch) -> None:
+    required = (
+        "WHATSAPP_ACCESS_TOKEN",
+        "WHATSAPP_PHONE_NUMBER_ID",
+        "WHATSAPP_APP_SECRET",
+        "WHATSAPP_VERIFY_TOKEN",
+    )
+    for name in required:
+        monkeypatch.setenv(name, f"configured-{name.lower()}")
+
+    assert api.runtime_modes()["whatsapp_configured"] is True
+
+    for missing in required:
+        monkeypatch.delenv(missing)
+        assert api.runtime_modes()["whatsapp_configured"] is False
+        monkeypatch.setenv(missing, f"configured-{missing.lower()}")
+
+    monkeypatch.setenv("WHATSAPP_VERIFY_TOKEN", "   ")
+    assert api.runtime_modes()["whatsapp_configured"] is False
+
+
+def test_runtime_modes_require_complete_slack_and_environment_bound_prava(monkeypatch) -> None:
+    slack_required = (
+        "SLACK_BOT_TOKEN",
+        "SLACK_APP_TOKEN",
+        "SLACK_SIGNING_SECRET",
+        "SLACK_CHANNEL_ID",
+        "RESTOCK_SLACK_SERVICE_TOKEN",
+        "RESTOCK_PUBLIC_API_URL",
+        "RESTOCK_PUBLIC_APP_URL",
+    )
+    for name in slack_required:
+        monkeypatch.setenv(name, f"configured-{name.lower()}")
+    assert api.runtime_modes()["slack_configured"] is True
+    monkeypatch.delenv("SLACK_CHANNEL_ID")
+    assert api.runtime_modes()["slack_configured"] is False
+
+    monkeypatch.setenv("PRAVA_API_KEY", "sk_live_runtime")
+    monkeypatch.setenv("PRAVA_API_URL", "https://api.prava.space")
+    monkeypatch.delenv("PRAVA_PRODUCTION_ENABLED", raising=False)
+    assert api.runtime_modes()["prava_mode"] == "production_disabled"
+    assert api.runtime_modes()["real_money_enabled"] is False
+
+    monkeypatch.setenv("PRAVA_PRODUCTION_ENABLED", "1")
+    monkeypatch.setenv("HOME_MERCHANT_MODE", "real")
+    monkeypatch.setenv("ZEPTO_REAL_PAYMENT_ENABLED", "1")
+    assert api.runtime_modes()["prava_mode"] == "production_configured"
+    assert api.runtime_modes()["real_money_enabled"] is True
+
+
 def test_audit_log_endpoint_reads_json_file(tmp_path, monkeypatch) -> None:
     audit_path = tmp_path / "audit.json"
     audit_path.write_text(json.dumps([{"event_type": "transaction_completed"}]))

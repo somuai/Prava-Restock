@@ -9,5 +9,7 @@
   interactive card checkout requires an explicitly confirmed browser session.
 - Teams supports one-time HTTPS hosted-invoice quotes with idempotent disclosed
   payment execution.
-- `TEAMS_RECURRING_ENABLED=1` fails closed pending Prava confirmation.
+- `TEAMS_RECURRING_ENABLED=1` fails closed because Prava's
+  [Report Status documentation](https://docs.prava.space/api-reference/report-status)
+  states that mandates are currently one-time and recurring frequencies are planned.
 - The five-item offline run completes through merchant-specific adapters.
