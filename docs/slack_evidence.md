@@ -11,10 +11,18 @@ configured private workspace without printing or logging credentials.
 - The Slack message timestamp was `1784735402.162709`.
 - Five focused Slack adapter tests passed.
 
-No action button was clicked because the smoke message intentionally had no real
-workflow or transaction behind it. The remaining channel proof is to run the Slack
-listener persistently in the deployed environment, create a genuine pending workflow,
-and verify that one button callback changes only that workflow.
+Later the same day, a separate safe callback message was connected to a persisted
+test workflow. Its only action was Skip, and the message stated that no payment or
+Prava session would be created. The real Socket Mode callback returned HTTP 200 and
+changed exactly that workflow from `notified` to `skipped`.
+
+Repeated clicks on an older smoke message also exposed an expected `409` path. The
+handler now replaces action buttons with a terminal confirmation after success and
+treats an already-processed workflow as idempotent instead of logging it as an
+unexpected failure.
+
+The remaining channel activation gate is to run the listener persistently in the
+deployed environment with rotated, non-exposed credentials.
 
 The app intentionally holds `chat:write` rather than broader channel-read scopes.
 Notification delivery succeeded with that least-privilege scope.

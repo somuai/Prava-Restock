@@ -2,6 +2,7 @@
 
 import os
 from typing import Any
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 import json
 
@@ -41,6 +42,28 @@ def notification_blocks(notification: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def resolved_blocks(message: str, action: str, state: str) -> list[dict[str, Any]]:
+    labels = {
+        "approve": "Approve",
+        "adjust": "Adjust",
+        "skip": "Skip",
+        "renew_as_is": "Renew as-is",
+        "switch_plan": "Switch plan",
+    }
+    return [
+        {"type": "section", "text": {"type": "mrkdwn", "text": message}},
+        {
+            "type": "context",
+            "elements": [
+                {
+                    "type": "mrkdwn",
+                    "text": f"Recorded: *{labels.get(action, action)}* · Workflow `{state}`",
+                }
+            ],
+        },
+    ]
+
+
 def build_app() -> App:
     token = os.getenv("SLACK_BOT_TOKEN", "")
     signing_secret = os.getenv("SLACK_SIGNING_SECRET", "")
@@ -50,7 +73,7 @@ def build_app() -> App:
 
     def register(action: str) -> None:
         @app.action(f"restock_{action}")
-        def handle(ack, body, logger):
+        def handle(ack, body, client, logger):
             ack()
             run_id = body["actions"][0]["value"]
             api_url = os.getenv("RESTOCK_PUBLIC_API_URL", "http://localhost:8000").rstrip("/")
@@ -63,7 +86,33 @@ def build_app() -> App:
             )
             try:
                 with urlopen(request, timeout=10) as response:
-                    response.read()
+                    result = json.loads(response.read())
+                message = body.get("message", {})
+                client.chat_update(
+                    channel=body["channel"]["id"],
+                    ts=message["ts"],
+                    text=message.get("text", "Restock workflow updated."),
+                    blocks=resolved_blocks(
+                        message.get("text", "Restock workflow updated."),
+                        action,
+                        str(result.get("state", "updated")),
+                    ),
+                )
+            except HTTPError as exc:
+                if exc.code == 409:
+                    message = body.get("message", {})
+                    client.chat_update(
+                        channel=body["channel"]["id"],
+                        ts=message["ts"],
+                        text=message.get("text", "Restock workflow already processed."),
+                        blocks=resolved_blocks(
+                            message.get("text", "Restock workflow already processed."),
+                            action,
+                            "already processed",
+                        ),
+                    )
+                    return
+                logger.exception("Restock Slack action failed after acknowledgement")
             except Exception:
                 logger.exception("Restock Slack action failed after acknowledgement")
 

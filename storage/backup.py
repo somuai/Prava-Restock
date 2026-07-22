@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 import sqlite3
 import subprocess
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from storage.database import normalize_database_url
 
@@ -55,18 +57,62 @@ def verify_sqlite(path: Path) -> None:
         raise RuntimeError(f"SQLite integrity check failed: {result}")
 
 
-def backup_postgres(database_url: str, destination: Path) -> None:
-    normalized = normalize_database_url(database_url).replace("postgresql+psycopg://", "postgresql://")
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        ["pg_dump", "--format=custom", "--no-owner", "--file", str(destination), normalized],
-        check=True,
+def _postgres_environment(database_url: str) -> dict[str, str]:
+    normalized = normalize_database_url(database_url).replace(
+        "postgresql+psycopg://", "postgresql://"
     )
+    parsed = urlsplit(normalized)
+    if parsed.scheme != "postgresql" or not parsed.hostname or not parsed.path.strip("/"):
+        raise ValueError("invalid Postgres database URL")
+    environment = {
+        **os.environ,
+        "PGHOST": parsed.hostname,
+        "PGPORT": str(parsed.port or 5432),
+        "PGDATABASE": unquote(parsed.path.lstrip("/")),
+    }
+    if parsed.username:
+        environment["PGUSER"] = unquote(parsed.username)
+    if parsed.password:
+        environment["PGPASSWORD"] = unquote(parsed.password)
+    query = parse_qs(parsed.query)
+    if query.get("sslmode"):
+        environment["PGSSLMODE"] = query["sslmode"][-1]
+    return environment
+
+
+def backup_postgres(database_url: str, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    environment = _postgres_environment(database_url)
+    command = [
+        os.getenv("PG_DUMP_BIN", "pg_dump"),
+        "--format=custom",
+        "--no-owner",
+        "--file",
+        str(destination),
+    ]
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True, env=environment)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        destination.unlink(missing_ok=True)
+        detail = exc.stderr.strip() if isinstance(exc, subprocess.CalledProcessError) else str(exc)
+        raise RuntimeError(f"Postgres backup failed: {detail}") from exc
 
 
 def restore_postgres(backup_path: Path, destination_url: str) -> None:
-    normalized = normalize_database_url(destination_url).replace("postgresql+psycopg://", "postgresql://")
-    subprocess.run(
-        ["pg_restore", "--clean", "--if-exists", "--no-owner", "--dbname", normalized, str(backup_path)],
-        check=True,
-    )
+    if not backup_path.is_file() or backup_path.stat().st_size == 0:
+        raise ValueError("Postgres backup file is missing or empty")
+    environment = _postgres_environment(destination_url)
+    command = [
+        os.getenv("PG_RESTORE_BIN", "pg_restore"),
+        "--clean",
+        "--if-exists",
+        "--no-owner",
+        "--dbname",
+        environment["PGDATABASE"],
+        str(backup_path),
+    ]
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True, env=environment)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        detail = exc.stderr.strip() if isinstance(exc, subprocess.CalledProcessError) else str(exc)
+        raise RuntimeError(f"Postgres restore failed: {detail}") from exc

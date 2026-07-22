@@ -1,11 +1,18 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import subprocess
 
 import pytest
 
 from demo.seed_reset import demo_user
 from storage import Database, RestockRepository
-from storage.backup import backup_sqlite, restore_sqlite, verify_sqlite
+from storage.backup import (
+    backup_postgres,
+    backup_sqlite,
+    restore_postgres,
+    restore_sqlite,
+    verify_sqlite,
+)
 from storage.schema import AuditRow
 
 
@@ -41,6 +48,69 @@ def test_sqlite_restore_refuses_to_overwrite_backup(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="must differ"):
         restore_sqlite(backup_path, f"sqlite:///{backup_path}")
+
+
+def test_postgres_backup_keeps_credentials_out_of_process_arguments(tmp_path, monkeypatch) -> None:
+    destination = tmp_path / "restock.dump"
+    captured: dict[str, object] = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured["environment"] = kwargs["env"]
+        destination.write_bytes(b"valid-dump")
+
+    monkeypatch.setattr("storage.backup.subprocess.run", fake_run)
+    backup_postgres(
+        "postgresql://restock:private-password@db.example/restock",
+        destination,
+    )
+
+    assert "private-password" not in " ".join(captured["command"])
+    assert captured["environment"]["PGHOST"] == "db.example"
+    assert captured["environment"]["PGUSER"] == "restock"
+    assert captured["environment"]["PGPASSWORD"] == "private-password"
+    assert captured["environment"]["PGDATABASE"] == "restock"
+
+
+def test_failed_postgres_backup_removes_partial_file(tmp_path, monkeypatch) -> None:
+    destination = tmp_path / "partial.dump"
+    destination.write_bytes(b"partial")
+
+    def fail_run(*_args, **_kwargs):
+        raise subprocess.CalledProcessError(1, ["pg_dump"], stderr="client/server version mismatch")
+
+    monkeypatch.setattr("storage.backup.subprocess.run", fail_run)
+    with pytest.raises(RuntimeError, match="version mismatch"):
+        backup_postgres("postgresql://restock:secret@db/restock", destination)
+    assert not destination.exists()
+
+
+def test_postgres_restore_rejects_empty_backup(tmp_path) -> None:
+    backup_path = tmp_path / "empty.dump"
+    backup_path.touch()
+
+    with pytest.raises(ValueError, match="missing or empty"):
+        restore_postgres(backup_path, "postgresql://restock:secret@db/restock")
+
+
+def test_postgres_restore_uses_database_name_without_password_argument(tmp_path, monkeypatch) -> None:
+    backup_path = tmp_path / "restock.dump"
+    backup_path.write_bytes(b"valid-dump")
+    captured: dict[str, object] = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured["environment"] = kwargs["env"]
+
+    monkeypatch.setattr("storage.backup.subprocess.run", fake_run)
+    restore_postgres(
+        backup_path,
+        "postgresql://restock:private-password@db.example/restored",
+    )
+
+    assert captured["command"][-2:] == ["restored", str(backup_path)]
+    assert "private-password" not in " ".join(captured["command"])
+    assert captured["environment"]["PGPASSWORD"] == "private-password"
 
 
 def test_retention_deletes_old_audit_but_preserves_recent(tmp_path) -> None:

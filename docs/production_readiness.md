@@ -10,22 +10,30 @@
   consume-once credentials, checkout idempotency, and restart recovery.
 - Sanitized audit, correlation IDs, structured request logs, and aggregate metrics.
 - Configurable retention plus SQLite and Postgres backup/restore tooling.
+- Local PostgreSQL production-mode proof completed against a disposable database:
+  migrations through `20260719_03`, repository writes, `/ready`, custom-format
+  backup, restore into a fresh database, and restored-row verification all pass.
+  See [PostgreSQL evidence](postgres_evidence.md).
 - React PWA and simulator-buildable Android/iOS wrappers.
 - Zepto and Swiggy catalog/cart/quote adapters, plus one-time Teams invoice support;
   real merchant payment remains independently gated.
 - Slack Socket Mode and WhatsApp Cloud API adapters. The private Slack app is
   installed; bot authentication, a real Socket Mode handshake, and live notification
-  delivery are verified. The workflow-action callback still needs a persistent
-  deployed listener and a real pending workflow.
+  delivery are verified. A real Skip callback changed exactly one persisted workflow,
+  and the handler removes resolved buttons to prevent repeated actions.
 
 ## External launch gates
 
 - Provision managed Postgres and a separate worker service. This may require paid
   hosting and therefore is not activated automatically.
 - Configure permanent high-entropy session/API secrets in platform secret storage.
-- Run a restore drill against a disposable managed Postgres database.
-- Run the Slack listener as a persistent deployed process and verify one button
-  callback against a real pending workflow. Live notification delivery is complete.
+- Repeat the proven restore drill against the final disposable managed Postgres
+  service before production cutover.
+  Run `pg_dump`/`pg_restore` from a client whose major version is at least the
+  managed server's major version; `PG_DUMP_BIN` and `PG_RESTORE_BIN` can select
+  explicitly installed compatible binaries.
+- Run the Slack listener as a persistent deployed process with rotated credentials.
+  Live notification delivery and a persisted workflow callback are complete.
 - Configure Meta's WhatsApp test/production assets and complete a real template/webhook
   round trip.
 - Validate push/deep links on physical devices and enroll in stores only after approval.
