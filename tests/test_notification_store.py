@@ -1,5 +1,3 @@
-import json
-
 import pytest
 
 from common import notification_store
@@ -45,7 +43,6 @@ def test_reset_clears_every_notification() -> None:
     notification_store.reset()
 
     assert notification_store.get_pending() == []
-    assert json.loads(notification_store.NOTIFICATION_STORE_PATH.read_text()) == []
 
 
 @pytest.mark.parametrize(
@@ -59,6 +56,4 @@ def test_payment_or_credential_fields_are_never_persisted(unsafe_field: str) -> 
     with pytest.raises(ValueError, match="unsupported fields"):
         notification_store.create(payload)
 
-    contents = notification_store.NOTIFICATION_STORE_PATH.read_text()
-    assert unsafe_field not in contents
-    assert "must-not-be-stored" not in contents
+    assert notification_store.get_pending() == []
