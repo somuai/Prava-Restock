@@ -2,12 +2,48 @@
 
 from datetime import date, timedelta
 from decimal import Decimal
+import json
+from pathlib import Path
 
 from payments.models import TrackedItem, TriggerType
 
 
 ALPHA = 0.3
 TRIGGER_WINDOW_DAYS = 2
+
+
+_PRIORS_PATH = Path(__file__).resolve().parent / "category_priors.json"
+_category_priors_cache: dict[str, float] | None = None
+
+
+def _load_category_priors() -> dict[str, float]:
+    """Load the static category-level reorder-interval priors (cached)."""
+    global _category_priors_cache
+    if _category_priors_cache is None:
+        raw = json.loads(_PRIORS_PATH.read_text(encoding="utf-8"))
+        _category_priors_cache = {
+            k: float(v) for k, v in raw.items() if not k.startswith("_")
+        }
+    return _category_priors_cache
+
+
+def seed_cadence_from_priors(
+    category: str, user_estimate: float | None = None
+) -> float:
+    """Return a cold-start cadence for a new item with no purchase history.
+
+    Uses a public category-level prior (Instacart Market Basket dataset) when
+    available, falling back to the user-provided estimate.  Raises ValueError
+    if neither source provides a value.
+    """
+    priors = _load_category_priors()
+    if category in priors:
+        return priors[category]
+    if user_estimate is not None and user_estimate > 0:
+        return user_estimate
+    raise ValueError(
+        f"no category prior for {category!r} and no user estimate provided"
+    )
 
 
 def _require_predicted(item: TrackedItem) -> None:

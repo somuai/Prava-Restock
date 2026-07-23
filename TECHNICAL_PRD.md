@@ -30,7 +30,7 @@ User <──approve/adjust/skip──> Restock Backend <──intent/mandate─�
 |---|---|---|
 | **Trigger engine** | Two interchangeable trigger sources feeding the same downstream pipeline: **predicted** (consumption forecast, Restock Home) and **known-date** (subscription renewal date, Restock Teams) | Deterministic, no ML model for v1 — see §6 |
 | **Orchestrator agent** | Tool-using loop (OpenAI Agents SDK) deciding what/when to propose, handling approve/adjust/skip, sequencing the Prava + merchant calls | Runs on a schedule tick; not a chat-request handler; trigger-type-agnostic |
-| **Prava client** | Thin wrapper around Prava's SDK — intent creation, mandate status polling/webhook, credential retrieval | Isolate all Prava-specific code behind this interface so a real SDK-signature mismatch only requires changing one file |
+| **Prava client** | Thin wrapper around Prava's SDK — intent creation, mandate status polling, credential retrieval | Isolate all Prava-specific code behind this interface so a real SDK-signature mismatch only requires changing one file |
 | **Merchant client** | Wraps the Zepto/Swiggy MCP checkout skill (Home) and a disclosed mock subscription-billing checkout (Teams) | Same isolation principle as the Prava client; both implement the same `complete_checkout(...)` contract — see §9.2 |
 | **Audit/notification store** | Persists Intents, Mandates (references only, never raw credentials), Transactions, and the user-facing audit log | See §5 for schemas |
 | **UI (chat surface)** | Displays proactive notifications, approve/adjust/skip controls, and the audit/savings log | The guaranteed surface is the disclosed WhatsApp-style/Slack-style PWA. A real single-workspace Slack Bolt adapter and a Meta test-number webhook/template adapter are implemented; whether the external accounts are configured is exposed at runtime. Meta publishes template review guidance of up to 24 hours, but no fixed business-verification SLA is claimed. |
@@ -66,6 +66,8 @@ TrackedItem                     # base entity — both tracks share this shape
   sensitive_flag       bool          # user-marked; excluded from any analytics
   preferred_merchant   enum(zepto, swiggy, mock_subscription_billing, mock)
   merchant_sku_id      string
+  merchant_address_ref string | null  # opaque saved-address ID; never a raw address/phone
+  quantity             integer | null # positive exact quantity for Home quotes
   status               enum(active, paused, deleted)
 
   # populated only when trigger_type = predicted (Restock Home)
@@ -74,6 +76,10 @@ TrackedItem                     # base entity — both tracks share this shape
   last_purchase_amount decimal
   price_threshold      decimal | null  # user-set; fire when observed price is at/below this
   last_observed_price  decimal | null  # latest price returned by the merchant price check
+
+  # Home quote context: merchant_address_ref and quantity are required before
+  # a real quote, optional for legacy/mock items, and unused for known-date items. Device IDs remain
+  # deployment secrets/configuration and are never persisted on TrackedItem.
 
   # populated only when trigger_type = known_date (Restock Teams)
   renewal_date          date          # the actual, known billing date — not predicted
@@ -139,7 +145,9 @@ typical_cadence_days_new = ALPHA * observed_interval_days
 
 **First-time items** seed `typical_cadence_days` from a transparent category prior or a user-provided estimate at onboarding. Personal EWMA observations replace the prior as completed purchases accumulate.
 
-If depletion and price conditions become true in the same check, `propose(item)` emits one notification containing both reasons. In `HOME_MERCHANT_MODE=real`, the Phase 8 Zepto adapter queries Zepto's live MCP search for the tracked product's exact product-variant ID, converts the returned minor-unit price to INR, and refuses a nearby result rather than silently substituting it. Seeded/offline tests retain the deterministic adapter.
+**Cold-start priors:** Cold-start estimates are seeded from public aggregate reorder-interval data (Instacart Market Basket dataset, Kaggle, CC0/research-use) at the category level, not personalized — per-user recalibration via EWMA remains the mechanism that adapts to actual behavior. Categories with a direct Instacart mapping (`grocery` → 11.0 days, `health` → 18.0 days) use the dataset median; categories without a match (`stationery`, `saas_subscription`, `other`) fall back to the user-provided estimate. This is deliberately not a trained model — see `PRD.md` §27 for why a real forecasting model is post-hackathon scope.
+
+If depletion and price conditions become true in the same check, `propose(item)` emits one notification containing both reasons. In `HOME_MERCHANT_MODE=real`, the Phase 8 Zepto adapter queries Zepto's live MCP search for the tracked product's exact product-variant ID, converts the returned minor-unit price to INR, and refuses a nearby result rather than silently substituting it. `HOME_PAYMENT_MODE` is independent: it can remain `disclosed_mock` while catalog/cart/quote operations are real, and capabilities plus audit events report the two modes separately. Seeded/offline tests retain the deterministic adapter.
 
 **Production baseline:** EWMA remains authoritative. Consent-gated observations, deletion, category priors, and an offline comparison harness are built. A regression/time-series candidate remains feature-flagged until it materially beats EWMA on MAE, trigger precision, missed depletion, and action rate without weakening explainability.
 
@@ -223,11 +231,15 @@ log_event(event_type: str, payload: dict) -> None
 
 ### 9.1 Prava (conceptual — verify exact method signatures at build time)
 
-Conceptually: **Intent → Passkey → Mandate → one-time credential.** Do not hardcode API paths or class names from this document — pull the current `PravaSDK` class reference and session API reference from the `prava-sdk-integration` skill folder in `Prava-Payments/prava-skills`, and use their documented sandbox test cards for all development. Treat this section as an interface contract our own `Prava client` component must satisfy, not a literal API spec:
+Conceptually: **Session → Passkey → Mandate → one-time credential.** Do not hardcode API paths or class names from this document — pull the current `PravaSDK` class reference and session API reference from the `prava-sdk-integration` skill folder in `Prava-Payments/prava-skills`, and use their documented sandbox test cards for all development. Treat this section as an interface contract our own `Prava client` component must satisfy, not a literal API spec. Prava does not expose a mandate webhook; poll to fetch successful credential creation (Prava's exact words: "polling to fetch successful credential creation; that's the reliable way to integrate"):
 
 ```
-create_intent(merchant, amount, item_description, constraints) -> intent_ref
-await_mandate(intent_ref) -> { mandate_id, credential_reference, scope, approved_at } | rejected | expired
+create_session(merchant, amount, item_description, constraints) -> session_ref
+    # Prava's term is Session; what we previously called Intent maps directly
+    # to this — no separate object exists on their side.
+await_mandate(session_ref) -> { mandate_id, credential_reference, scope, approved_at } | rejected | expired
+    # Polling only — Prava does not expose a mandate webhook. Poll to fetch
+    # successful credential creation; that's the reliable way to integrate.
 ```
 
 **Known platform fact for production planning:** Prava requires a Visa card issued in the US, Canada, Hong Kong, or Singapore for any real card used in the flow, whether in sandbox or production. Prava's own documented sandbox test cards are unaffected and complete a full simulated flow with no geography restriction; use those for all hackathon build and demo work. See the resolved merchant-access and real-card-testing entries in `PRD.md` §21, "Risks and mitigations."
@@ -242,6 +254,8 @@ complete_checkout(credential_reference, merchant_sku_id, amount, idempotency_key
 
 **Restock Home implementation:** the official Zepto MCP integration now covers OAuth, saved-address selection, product/cart tools, exact-price preview, and payment-status reconciliation. Zepto publishes no dedicated merchant payment sandbox, so the final live-money payment-link execution defaults to `disclosed_mock`. Real execution is a separate operator-controlled mode requiring a compatible card and controllable browser; it is never silently enabled. The Prava sandbox approval and Zepto merchant integration are real, while the final charge boundary is disclosed.
 
+Real Home proposals must be based on a fresh exact-cart quote for the tracked `merchant_sku_id`, positive `quantity`, and opaque `merchant_address_ref`. Initial quoting prepares and verifies the exact cart before preview; pre-checkout revalidation previews the already-prepared cart again. The Zepto device ID is supplied only through deployment configuration (`ZEPTO_DEVICE_ID`) and must never be persisted in `TrackedItem`, logs, or API payloads. Merchant clients remain injected so credential-free tests cannot make live calls by accident.
+
 **Restock Teams:** real OAuth into a SaaS vendor's billing portal (Stripe Billing, Chargebee, etc.) isn't realistic in 48 hours regardless of sandbox access, so `merchant/mock_subscription_checkout.py` is the intended implementation from the start, not a fallback — implement it against the same `complete_checkout(...)` contract so the orchestrator and Prava mandate flow genuinely don't know or care which track they're serving. Disclose this plainly in the submission: the renewal date and the Prava mandate are real, the billing-portal call is simulated.
 
 ### 9.3 OpenAI Agents SDK
@@ -254,6 +268,7 @@ Standard tool-calling loop; no fine-tuning required for the hackathon scope. Mod
 |---|---|
 | Notification-to-confirmation latency (excluding user response time) | < 5s |
 | Mandate creation success rate (sandbox) | ≥ 99% across test runs |
+| End-to-end success definition | (1) session created, (2) credential generated, (3) credential populated into real checkout form, (4) Pay attempt fails due to test-card status — not due to a bug in steps 1–3 |
 | Unauthorized transactions (no valid passkey-approved mandate) | 0 — hard guardrail, not a target |
 | Spend-cap breaches | 0 — hard guardrail |
 | Idempotent merchant checkout | Every call keyed by `intent_id`; retried calls must not double-charge |
@@ -301,12 +316,12 @@ Every durable state transition writes a sanitized domain-audit entry with run, u
 ## 17. Open questions — verify before/during build
 
 - [x] **RESOLVED** — Model selection for the orchestrator: one verified-reliable model, `gpt-5.4-mini`, for the full loop including notification copy and the Teams plan-comparison decision. This removes a constrained-quota live-demo dependency; hard constraints stay in code-level Guardrails. See §7.
-- [ ] Exact `PravaSDK` method signatures for intent creation and mandate webhook payload shape.
+- [ ] Exact `PravaSDK` method signatures for intent creation and mandate polling payload shape.
 - [x] **RESOLVED — Zepto merchant contract:** the official skill uses `mcp-remote https://mcp.zepto.co.in/mcp` with OAuth/mobile OTP and publishes tools for saved addresses, product search, cart mutation/view, payment methods, online-order preview/creation, payment status, and order history. Final payment-link execution is operator-controlled because no merchant sandbox is documented.
 - [ ] Location of Prava's sandbox test-card/test-data reference in `prava-skills`.
 - [ ] Whether Prava mandates expose a configurable TTL/expiry we should set explicitly on `Intent` creation, or whether it's fixed by Prava.
 - [x] **RESOLVED — platform fact:** Prava requires a Visa card issued in the US, Canada, Hong Kong, or Singapore for any real card used in the flow, whether in sandbox or production. Prava's own documented sandbox test cards are unaffected and complete a full simulated flow with no geography restriction; use those for the hackathon. For production, Prava has offered: "reach out to us and we'll sort you out with a compatible card".
-- [x] **RESOLVED — one-time mandate semantics:** Prava's [Report Status documentation](https://docs.prava.space/api-reference/report-status) states that mandates are currently one-time and recurring frequencies are planned. Restock Teams therefore treats standing/recurring charging as unsupported and keeps it disabled; moving Path A onto vendor-initiated renewal charges requires a future documented Prava capability.
+- [x] **RESOLVED — CONFIRMED UNAVAILABLE:** Prava confirmed (Shubham Kukreti, Discord, 22–23 July 2026) that standing or recurring mandates are not live yet for use — neither in sandbox nor production. Treat everything as one-time per mandate. Restock Teams proceeds on Path B (pay the hosted invoice via one-time credential) or the disclosed mock only, permanently for this hackathon, not pending any answer.
 
 ## 18. Glossary
 

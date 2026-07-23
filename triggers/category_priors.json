@@ -1,0 +1,6 @@
+{
+  "_source": "Instacart Market Basket Analysis dataset (2017), Kaggle, CC0/research-use",
+  "_note": "Category-level median days-between-reorders. Seeds cold-start estimates only; per-user EWMA recalibration replaces these after the first completed purchase.",
+  "grocery": 11.0,
+  "health": 18.0
+}
