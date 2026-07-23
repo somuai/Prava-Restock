@@ -218,6 +218,8 @@ TrackedItem                         # base entity — both tracks share this sha
   sensitive_flag        bool        # user-marked; excluded from any analytics
   preferred_merchant    enum(zepto, swiggy, mock_subscription_billing, mock)
   merchant_sku_id       string
+  merchant_address_ref  string | null # opaque saved-address reference, never raw address/phone
+  quantity              integer | null # positive exact Home quote quantity
   status                enum(active, paused, deleted)
 
   # predicted trigger only (Restock Home)
@@ -226,6 +228,9 @@ TrackedItem                         # base entity — both tracks share this sha
   last_purchase_amount  decimal
   price_threshold       decimal | null  # user-set price signal
   last_observed_price   decimal | null  # latest merchant price check
+  # merchant_address_ref and quantity are required before a real Home quote;
+  # legacy/mock Home items may omit them. Device IDs
+  # stay in deployment configuration and are never stored on the item.
 
   # known-date trigger only (Restock Teams)
   renewal_date          date
@@ -457,6 +462,8 @@ Design commitments:
 | --- | --- |
 | **RESOLVED** — Prava markets “US & SEA” coverage, but its skill repo ships Zepto/Swiggy (India) integrations — previously unclear if live for hackathon sandbox use | Merchant flows are confirmed buildable per Prava’s team directly, not just the docs. Shubham Kukreti confirmed via Discord on 17 July 2026: "Merchants aren't restricted, so you can build flows for things like Zepto or Swiggy." |
 | Real-card testing (sandbox or production) requires a Visa card issued in US/Canada/Hong Kong/Singapore, which the team does not currently hold | Use Prava's own documented sandbox test cards for all hackathon build and demo work — confirmed to complete a full simulated flow with no geography restriction. Defer the real-card question to post-hackathon production planning; Prava has offered to help source a compatible card at that stage. |
+
+**Merchant choice:** Zepto was confirmed as an explicit, deliberate choice (Prava, Discord, 22–23 July 2026: "any merchant you can target totally on your use-case") because it fits the grocery/consumables narrative better than a restaurant-delivery platform like Zomato or Swiggy's core product.
 | Forecasting looks like a science project and eats the clock | Ship the day-counter first; add smoothing only if time remains after the payment flow works end-to-end |
 | Passkey/biometric approval doesn’t demo well on a shared screen | Scripted, clearly-labeled fallback ready for the recorded demo |
 | Judges read “proactive” as unsafe or spammy | Make spend caps and the approve/adjust/skip step visually central — control is the pitch, not autonomy for its own sake |
@@ -480,8 +487,7 @@ engineering debug trail for the hackathon — no separate dashboard needed.
 
 ### 24. Success metrics for the demo
 
-- One real (or sandboxed) end-to-end Prava transaction per track, agent-initiated, with no
-user-typed purchase request.
+- One end-to-end Prava flow per track, agent-initiated, with no user-typed purchase request. Success = (1) intent/session created, (2) one-time credential generated, (3) credential correctly populated into the real checkout form via browser automation, (4) Pay attempt fails specifically due to test-card status — not due to a bug in steps 1–3. Sandbox transactions cannot succeed against any real merchant because the test card will be declined; this is expected and fully acceptable for judging.
 - At least 2 of the 3–5 Home items reordered autonomously during the judged walkthrough,
 plus the one Teams subscription renewal proposal.
 - A visible, believable savings number in the audit log for both tracks.
@@ -525,15 +531,7 @@ one of those two shows people actually act on the notifications — building app
 before that risks being wasted effort.
 2. **One-time invoice path built; recurring is currently unsupported:** Real SaaS billing integration. The mock exists because a subscription renewal is
 merchant-initiated (recurring), not agent-initiated (one-time) like a grocery reorder — a genuinely different transaction shape from what’s built. Two paths:
-   - Path A (planned platform capability, not available now): Prava's [Report Status
-documentation](https://docs.prava.space/api-reference/report-status) states that mandates
-are currently one-time and recurring frequencies are planned. If that future capability
-supports a standing/recurring mandate scoped to one merchant with a cap, the vendor’s own
-billing system charges it directly, and
-Restock’s job becomes watching for a decline or an over-cap amount as the trigger for a
-renegotiation notification. This is the direction Visa’s Aldar pilot and AP2’s “Human Not
-Present” mode both point toward, but Restock must not enable it until Prava ships and
-documents the capability.
+   - Path A (confirmed unavailable — closed): Prava confirmed (Shubham Kukreti, Discord, 22–23 July 2026) that standing or recurring mandates are not live yet for use — neither in sandbox nor production. Restock Teams proceeds on Path B (pay the hosted invoice via one-time credential) or the disclosed mock only, permanently for this hackathon, not pending any answer.
    - Path B (buildable now, no new dependency): keep the existing agent-initiated, one-time-credential flow exactly as built, and have Restock pay the vendor’s hosted
 invoice/payment link directly two days before the known renewal date — same architecture, different merchant_sku_id target. This is the one to actually build first.
 3. **Data foundation built; production ML still gated:** Real forecasting model. The constraint is data volume, not modeling difficulty — a
@@ -594,11 +592,7 @@ shape.
 - Location of Prava’s sandbox test-card/test-data reference in prava-skills.
 - Whether Prava mandates expose a configurable TTL/expiry we should set explicitly on
 Intent creation, or whether it’s fixed by Prava.
-- RESOLVED — Prava's [Report Status
-documentation](https://docs.prava.space/api-reference/report-status) states that mandates
-are currently one-time and recurring frequencies are planned. Restock Teams therefore keeps
-recurring charging unsupported and disabled; Path A in §27 cannot be enabled until Prava
-ships and documents recurring mandate frequencies.
+- RESOLVED — CONFIRMED UNAVAILABLE: Prava confirmed (Shubham Kukreti, Discord, 22–23 July 2026) that standing or recurring mandates are not live — neither in sandbox nor production. Treat everything as one-time per mandate. Restock Teams proceeds on Path B or disclosed mock only, permanently for this hackathon.
 
 ### C. Glossary
 

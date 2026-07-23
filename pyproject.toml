@@ -20,6 +20,7 @@ dependencies = [
     "alembic==1.18.5",
     "psycopg[binary]==3.3.4",
     "slack-bolt==1.30.0",
+    "playwright==1.52.0",
 ]
 
 [tool.pytest.ini_options]
@@ -30,4 +31,4 @@ markers = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["agent*", "channels*", "common*", "forecasting*", "triggers*", "payments*", "merchant*", "ui*", "demo*", "storage*", "workflow*"]
+include = ["agent*", "channels*", "common*", "forecasting*", "triggers*", "payments*", "merchant*", "ui*", "demo*", "storage*", "workflow*", "nanda_trigger_service*"]

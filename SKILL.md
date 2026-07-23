@@ -178,6 +178,8 @@ from datetime import date, timedelta
 class ConsumableItem:
     name: str
     merchant_sku_id: str
+    merchant_address_ref: str  # opaque saved-address ID; never raw address/phone
+    quantity: int              # positive exact cart quantity
     typical_cadence_days: float   # user-reported starting estimate
     last_purchased: date
     price_estimate: float
@@ -195,6 +197,12 @@ class ConsumableItem:
             + (1 - smoothing) * self.typical_cadence_days
         )
 ```
+
+For a real Home quote, resolve the exact SKU and quantity against the opaque
+saved-address reference, then preview the exact cart. Supply the merchant device
+ID from `ZEPTO_DEVICE_ID` at runtime only; never persist it on an item or include
+it in logs. Keep the merchant client injected so the default test path remains
+offline and deterministic.
 
 Trigger rule for the orchestrator: when `days_until_depletion <= 2`, fire the
 proactive-purchase flow. Recalibrate `typical_cadence_days` every time an item is
@@ -272,10 +280,24 @@ error:
 - Use the implemented `merchant/mock_checkout.py` boundary: a clearly labeled,
   durable and idempotent simulation for only the final live-money merchant step.
   Prava sandbox approval and Zepto catalog/cart/quote operations remain real.
+- Configure and disclose catalog/quote mode independently from final-payment
+  mode; a real Zepto quote must not be mislabeled because payment remains
+  `disclosed_mock`.
 - State this explicitly in the submission write-up. The hackathon rules ask you
   to disclose what's simulated — do this rather than let a judge discover it.
 - This does not weaken the "meaningful agent action" or "handles payment
   clearly" criteria, since the Prava mandate flow itself is still real.
+
+**Browser automation boundary:** Prava confirmed that no merchant has MCP
+support for the payment-form step (entering card number, CVV, expiry, and
+clicking Pay). This step is implemented as browser automation using Playwright
+(`merchant/browser_checkout.py`). Because this depends on the merchant's real,
+unversioned checkout DOM, automation failures (selector not found, page-
+structure change) are caught distinctly from expected payment declines and
+logged as automation failures, not payment failures. If browser automation
+proves too fragile within the hackathon's time budget, the accepted fallback
+is a clearly disclosed simulated/recorded version of this step — same
+disclosure standard as every other mock in this project.
 
 ---
 
@@ -342,7 +364,7 @@ in `TECHNICAL_PRD.md` §6 wasn't done right.
 
 ## 11. Pre-submission checklist
 
-- [ ] One real (sandbox or live) Prava transaction completes end-to-end, agent-initiated
+- [ ] One end-to-end Prava flow per track, agent-initiated: (1) session created, (2) credential generated, (3) credential populated into real checkout form via browser automation, (4) Pay attempt fails due to test-card status — not due to a bug
 - [ ] At least 2 of 3–5 demo items successfully reorder autonomously in a run-through
 - [ ] Proactive notification clearly fires without a user-typed purchase request
 - [ ] Spend caps and approve/adjust/skip step are visible in the demo, not just in code
