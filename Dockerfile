@@ -18,6 +18,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     HOME=/home/restock \
     MCP_REMOTE_CONFIG_DIR=/home/restock/.mcp-auth \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     PORT=8000
 
 WORKDIR /app
@@ -26,7 +27,8 @@ COPY . .
 COPY --from=web /web/dist /app/ui/web/dist
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-runtime /opt/zepto-mcp /opt/zepto-mcp
-RUN python -m pip install --no-cache-dir .
+RUN python -m pip install --no-cache-dir . \
+    && python -m playwright install --with-deps chromium
 
 # Runtime data is the only application-owned writable path. Keeping the source
 # tree read-only and dropping root privileges limits the impact of a compromise.
