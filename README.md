@@ -33,7 +33,7 @@ The hosted URL runs the current application in credential-free demo mode. Its pu
 - **Disclosed simulation:** final Zepto live-money charge and Restock Teams billing-portal fulfillment. Zepto publishes no merchant payment sandbox, so the final charge stays disabled unless an operator explicitly enables a compatible-card checkout.
 - **Hosted runtime:** the current application is published, but the hosted environment remains deliberately unactivated: demo mode is on, provider credentials are absent, and real-money execution is disabled. `/capabilities` is authoritative for the running environment.
 
-Runtime modes are returned by `/capabilities`. The default is `HOME_MERCHANT_MODE=disclosed_mock`; `ZEPTO_REAL_PAYMENT_ENABLED=1` is an additional operator gate and is never enabled in CI.
+Runtime modes are returned by `/capabilities`. `HOME_MERCHANT_MODE` controls catalog/cart quoting independently from `HOME_PAYMENT_MODE`, which controls the final charge. Both default to `disclosed_mock`, so production can truthfully expose a real Zepto quote with a disclosed simulated payment. A real charge additionally requires `ZEPTO_REAL_PAYMENT_ENABLED=1`, production Prava configuration, and an allowlisted payment-browser executor; it is never enabled in CI.
 
 ## Workflow and persistence
 
@@ -50,6 +50,25 @@ The React/TypeScript PWA lives in `ui/web` and is served from `/app` in the prod
 - **Guaranteed submission path:** the PWA remains functional and visibly disclosed if Slack or Meta setup is still awaiting external approval.
 
 No paid channel, store enrollment, hosting upgrade, or real Zepto payment is activated by repository code.
+
+The production container carries Node.js 24 and an image-local
+`mcp-remote@0.1.38` bridge installed from a committed integrity lockfile. Runtime
+does not include npm/npx or download executable packages; CI checks the bridge with container
+networking disabled, without starting OAuth or contacting Zepto. A Railway
+deployment still needs an operator-completed
+Zepto OAuth/mobile-OTP session and persistent storage for
+`/home/restock/.mcp-auth`; the repository does not create or embed that external
+authorization.
+
+For local live-MCP development, run `npm ci` in `merchant/mcp-runtime`; Restock
+then resolves that locked repository-local binary. `MCP_REMOTE_BINARY` may point
+to another absolute executable in development only. Production rejects overrides
+and always uses `/opt/zepto-mcp/node_modules/.bin/mcp-remote`. The capabilities
+API reports Zepto OAuth only as `unknown` or `configured_unverified`; cache
+presence is not proof that provider authorization remains valid. Real-money
+readiness requires a successful MCP initialize/tool call in the current process
+within the short verification TTL (300 seconds by default); a later bridge,
+authorization, or provider-call failure clears that proof.
 
 ## Tenants and privacy
 

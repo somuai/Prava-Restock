@@ -41,7 +41,9 @@ class DeterministicCheckout:
                 "status": "completed",
                 "merchant_order_id": f"order-{len(self.by_key) + 1}",
                 "charged_amount": str(amount),
-                "currency": "INR",
+                "currency": (
+                    "USD" if merchant_sku_id == "teamtool-pro-monthly" else "INR"
+                ),
                 "execution_mode": "disclosed_mock",
             },
         )

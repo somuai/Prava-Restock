@@ -6,24 +6,36 @@ RUN npm ci
 COPY ui/web/ ./
 RUN npm run build
 
+FROM node:24-slim AS node-runtime
+
+WORKDIR /opt/zepto-mcp
+COPY merchant/mcp-runtime/package.json merchant/mcp-runtime/package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts
+
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    HOME=/home/restock \
+    MCP_REMOTE_CONFIG_DIR=/home/restock/.mcp-auth \
     PORT=8000
 
 WORKDIR /app
 
 COPY . .
 COPY --from=web /web/dist /app/ui/web/dist
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-runtime /opt/zepto-mcp /opt/zepto-mcp
 RUN python -m pip install --no-cache-dir .
 
 # Runtime data is the only application-owned writable path. Keeping the source
 # tree read-only and dropping root privileges limits the impact of a compromise.
 RUN groupadd --system --gid 10001 restock \
-    && useradd --system --uid 10001 --gid restock --no-create-home restock \
-    && mkdir -p /app/logs \
-    && chown -R restock:restock /app/logs
+    && useradd --system --uid 10001 --gid restock --home-dir /home/restock --create-home restock \
+    && mkdir -p /app/logs /home/restock/.mcp-auth \
+    && chown -R restock:restock /app/logs /home/restock \
+    && node --version \
+    && test -x /opt/zepto-mcp/node_modules/.bin/mcp-remote
 
 USER 10001:10001
 

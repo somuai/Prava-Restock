@@ -1,12 +1,12 @@
 """Zepto quote integration with an explicitly disclosed payment boundary."""
 
+from hashlib import sha256
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 from urllib.parse import urlparse
-from uuid import uuid4
 
 from merchant import mock_checkout
 from merchant.models import CheckoutStatus, ExecutionMode, MerchantCheckoutResult, MerchantQuote, StockStatus
@@ -16,6 +16,7 @@ from storage.repository import RestockRepository
 
 STUB_MODE = False
 HOME_MERCHANT_MODE_ENV = "HOME_MERCHANT_MODE"
+HOME_PAYMENT_MODE_ENV = "HOME_PAYMENT_MODE"
 REAL_PAYMENT_MODE_ENV = "ZEPTO_REAL_PAYMENT_ENABLED"
 CART_PREPARATION_MODE_ENV = "ZEPTO_CART_PREPARATION_ENABLED"
 
@@ -25,6 +26,7 @@ _STUB_BASE_PRICES = {
 }
 _STUB_PRICE_OFFSETS = (Decimal("0.00"), Decimal("-12.00"), Decimal("8.00"))
 _ZEPTO_PRICE_MINOR_UNITS = Decimal("100")
+DEFAULT_QUOTE_TTL = timedelta(minutes=2)
 _ZEPTO_PRODUCT_ID_KEYS = (
     "id",
     "productVariantId",
@@ -90,12 +92,27 @@ class BrowserPaymentExecutor(Protocol):
 
 
 @dataclass(frozen=True)
+class CheckoutCartContext:
+    """Non-secret durable quote context resolved by checkout idempotency key."""
+
+    merchant_sku_id: str
+    quantity: int
+    merchant_address_ref: str
+    quoted_amount: Decimal
+    currency: str
+    merchant_context_reference: str
+    quote_reference: str
+    observed_at: datetime
+
+
+@dataclass(frozen=True)
 class RealCheckoutRuntime:
     repository: RestockRepository
     client: Any
     address_id: str
     executor: BrowserPaymentExecutor | None = None
     redirect_policy: PaymentRedirectPolicy | None = None
+    checkout_context_provider: Callable[[str], CheckoutCartContext] | None = None
 
 
 _REAL_CHECKOUT_RUNTIME: RealCheckoutRuntime | None = None
@@ -116,7 +133,6 @@ def real_checkout_runtime_ready() -> bool:
         runtime is not None
         and runtime.repository
         and runtime.client
-        and runtime.address_id
     )
 
 
@@ -130,6 +146,7 @@ def real_payment_runtime_ready() -> bool:
         and runtime.executor is not None
         and runtime.redirect_policy is not None
         and runtime.redirect_policy.allowed_hosts
+        and runtime.checkout_context_provider is not None
     )
 
 
@@ -146,12 +163,26 @@ def reconcile_checkout(idempotency_key: str) -> dict[str, Any]:
 
 
 def merchant_mode() -> ExecutionMode:
+    """Return the independently configured Zepto catalog/quote mode."""
+
     raw = os.getenv(HOME_MERCHANT_MODE_ENV, ExecutionMode.DISCLOSED_MOCK.value)
     try:
         return ExecutionMode(raw)
     except ValueError as exc:
         raise RuntimeError(
             f"{HOME_MERCHANT_MODE_ENV} must be real, sandbox, or disclosed_mock"
+        ) from exc
+
+
+def payment_mode() -> ExecutionMode:
+    """Return final-payment execution mode independently from catalog access."""
+
+    raw = os.getenv(HOME_PAYMENT_MODE_ENV, ExecutionMode.DISCLOSED_MOCK.value)
+    try:
+        return ExecutionMode(raw)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"{HOME_PAYMENT_MODE_ENV} must be real, sandbox, or disclosed_mock"
         ) from exc
 
 
@@ -179,6 +210,8 @@ def _checkout_result(
     amount: Decimal | None,
     retryable: bool = False,
     error_code: str | None = None,
+    credential_exposed: bool = False,
+    credential_used: bool = False,
 ) -> dict[str, Any]:
     return MerchantCheckoutResult(
         status=status,
@@ -188,6 +221,8 @@ def _checkout_result(
         retryable=retryable,
         execution_mode=ExecutionMode.REAL,
         error_code=error_code,
+        credential_exposed=credential_exposed,
+        credential_used=credential_used,
     ).model_dump(mode="json")
 
 
@@ -313,6 +348,11 @@ def _deliver_prava_report(
             str(claimed["prava_session_id"]),
             str(claimed["prava_txn_ref_id"]),
             str(claimed["report_status"]),
+            amount_paid=(
+                claimed["expected_amount"]
+                if claimed["report_status"] == "APPROVED"
+                else None
+            ),
         )
     except Exception:
         return repository.update_merchant_checkout_attempt(
@@ -372,12 +412,17 @@ def _resume_existing_attempt(
     state = str(attempt["state"])
     order_id = attempt.get("merchant_order_id")
     amount = Decimal(str(attempt["expected_amount"]))
+    exposure = {
+        "credential_exposed": bool(attempt.get("credential_exposed")),
+        "credential_used": bool(attempt.get("credential_used")),
+    }
     if state == "completed":
         _deliver_prava_report(runtime.repository, attempt, credential_reference)
         return _checkout_result(
             CheckoutStatus.COMPLETED,
             merchant_order_id=order_id,
             amount=amount,
+            **exposure,
         )
     if state == "declined":
         _deliver_prava_report(runtime.repository, attempt, credential_reference)
@@ -386,6 +431,7 @@ def _resume_existing_attempt(
             merchant_order_id=order_id,
             amount=None,
             error_code=attempt.get("last_error") or "PAYMENT_DECLINED",
+            **exposure,
         )
     if state in {"failed", "price_changed"}:
         checkout_status = (
@@ -398,6 +444,7 @@ def _resume_existing_attempt(
             merchant_order_id=order_id,
             amount=None,
             error_code=attempt.get("last_error") or state.upper(),
+            **exposure,
         )
     if not order_id:
         # `creating_order` was persisted before the remote mutation. After a crash,
@@ -408,6 +455,7 @@ def _resume_existing_attempt(
             amount=None,
             retryable=False,
             error_code="AMBIGUOUS_ORDER_CREATION",
+            **exposure,
         )
     outcome = _reconcile_order(runtime.client, str(order_id))
     if outcome == "pending":
@@ -426,6 +474,7 @@ def _resume_existing_attempt(
             amount=None,
             retryable=True,
             error_code="PAYMENT_PENDING",
+            **exposure,
         )
     attempt = _persist_terminal_outcome(runtime.repository, attempt, outcome)
     _deliver_prava_report(runtime.repository, attempt, credential_reference)
@@ -434,6 +483,8 @@ def _resume_existing_attempt(
         merchant_order_id=str(order_id),
         amount=amount if outcome == "approved" else None,
         error_code=None if outcome == "approved" else "PAYMENT_DECLINED",
+        credential_exposed=bool(attempt.get("credential_exposed")),
+        credential_used=bool(attempt.get("credential_used")),
     )
 
 
@@ -464,60 +515,141 @@ def _exact_search_product(
     return product
 
 
-def _contains_exact_sku(payload: Any, merchant_sku_id: str) -> bool:
-    if isinstance(payload, dict):
-        identifiers = {
-            str(payload[key])
-            for key in _ZEPTO_PRODUCT_ID_KEYS
-            if payload.get(key) is not None
-        }
-        return merchant_sku_id in identifiers or any(
-            _contains_exact_sku(value, merchant_sku_id) for value in payload.values()
-        )
-    if isinstance(payload, list):
-        return any(_contains_exact_sku(value, merchant_sku_id) for value in payload)
-    return False
+def _line_has_exact_sku(line: dict[str, Any], merchant_sku_id: str) -> bool:
+    identifiers = {
+        str(line[key])
+        for key in _ZEPTO_PRODUCT_ID_KEYS
+        if line.get(key) is not None
+    }
+    return merchant_sku_id in identifiers
 
 
 def _cart_line_items(payload: Any) -> list[dict[str, Any]] | None:
-    """Find an explicit cart-item collection without accepting unrelated metadata."""
-    if isinstance(payload, dict):
-        for key in ("cartItems", "items", "products"):
-            value = payload.get(key)
-            if isinstance(value, list) and all(isinstance(item, dict) for item in value):
-                if any(
-                    any(item.get(id_key) is not None for id_key in _ZEPTO_PRODUCT_ID_KEYS)
-                    for item in value
-                ):
-                    return value
-        for value in payload.values():
-            found = _cart_line_items(value)
-            if found is not None:
-                return found
+    """Read documented cart-line paths, never recommendations or metadata."""
+
+    if not isinstance(payload, dict):
+        return None
+    candidates: list[Any] = [payload.get("cartItems")]
+    for envelope_key in ("cart", "data", "result"):
+        envelope = payload.get(envelope_key)
+        if isinstance(envelope, dict):
+            candidates.append(envelope.get("cartItems"))
+            nested_cart = envelope.get("cart")
+            if isinstance(nested_cart, dict):
+                candidates.append(nested_cart.get("cartItems"))
+    for value in candidates:
+        if isinstance(value, list) and all(isinstance(item, dict) for item in value):
+            return value
     return None
 
 
 def _online_card_method_available(payload: Any) -> bool:
-    if isinstance(payload, dict):
-        if any(
-            payload.get(key) is False
+    if not isinstance(payload, dict):
+        return False
+    methods = payload.get("paymentMethods")
+    if methods is None and isinstance(payload.get("data"), dict):
+        methods = payload["data"].get("paymentMethods")
+    if not isinstance(methods, list):
+        return False
+    for method in methods:
+        if not isinstance(method, dict):
+            continue
+        enabled_values = [
+            method[key]
             for key in ("available", "enabled", "isAvailable", "isEnabled")
-        ):
-            return False
-        labels = " ".join(
-            str(payload[key]).lower()
-            for key in ("name", "displayName", "label", "method", "type", "code")
-            if payload.get(key) is not None
+            if key in method
+        ]
+        if not enabled_values or not all(value is True for value in enabled_values):
+            continue
+        identifiers = " ".join(
+            str(method[key]).strip().lower()
+            for key in ("code", "type", "method", "name", "displayName")
+            if method.get(key) is not None
         )
-        if any(term in labels for term in ("card", "credit", "debit")):
+        if any(term in identifiers for term in ("card", "credit", "debit")):
             return True
-        return any(_online_card_method_available(value) for value in payload.values())
-    if isinstance(payload, list):
-        return any(_online_card_method_available(value) for value in payload)
-    if isinstance(payload, str):
-        lowered = payload.lower()
-        return any(term in lowered for term in ("card", "credit", "debit"))
     return False
+
+
+def _require_exact_cart(
+    payload: Any, merchant_sku_id: str, quantity: int
+) -> list[dict[str, Any]]:
+    cart_items = _cart_line_items(payload)
+    exact = (
+        cart_items is not None
+        and len(cart_items) == 1
+        and _line_has_exact_sku(cart_items[0], merchant_sku_id)
+        and cart_items[0].get("quantity") is not None
+        and Decimal(str(cart_items[0]["quantity"])) == quantity
+    )
+    if not exact:
+        raise ZeptoMCPError(
+            f"Zepto cart does not exactly match SKU {merchant_sku_id!r} and quantity; "
+            "refusing order operation"
+        )
+    return cart_items
+
+
+def _terminal_preview(preview: dict[str, Any]) -> dict[str, Any]:
+    """Return the documented order object, never a recursive subtotal match."""
+
+    if "toPay" in preview:
+        return preview
+    order = preview.get("order")
+    if isinstance(order, dict) and "toPay" in order:
+        return order
+    for key in ("data", "result"):
+        envelope = preview.get(key)
+        if not isinstance(envelope, dict):
+            continue
+        if "toPay" in envelope:
+            return envelope
+        order = envelope.get("order")
+        if isinstance(order, dict) and "toPay" in order:
+            return order
+    raise ZeptoMCPError("Zepto preview did not contain terminal toPay")
+
+
+def _quote_reference(
+    *,
+    merchant_sku_id: str,
+    quantity: int,
+    address_ref: str,
+    amount: Decimal,
+    currency: str,
+    merchant_context_reference: str,
+    observed_at: datetime,
+) -> str:
+    material = "\x1f".join(
+        (
+            "zepto-quote-v1",
+            merchant_sku_id,
+            str(quantity),
+            address_ref,
+            format(amount.quantize(Decimal("0.01")), "f"),
+            currency.upper(),
+            merchant_context_reference,
+            observed_at.isoformat(),
+        )
+    )
+    return f"zepto:v1:{sha256(material.encode('utf-8')).hexdigest()}"
+
+
+def quote_is_fresh(
+    quote: MerchantQuote,
+    *,
+    now: datetime | None = None,
+    ttl: timedelta = DEFAULT_QUOTE_TTL,
+) -> bool:
+    """Return whether a timezone-aware quote is within the positive TTL."""
+
+    if ttl <= timedelta(0) or quote.observed_at.tzinfo is None:
+        return False
+    checked_at = now or datetime.now(timezone.utc)
+    if checked_at.tzinfo is None:
+        raise ValueError("quote freshness check requires a timezone-aware now")
+    age = checked_at - quote.observed_at
+    return timedelta(0) <= age <= ttl
 
 
 def prepare_exact_cart_quote(
@@ -577,18 +709,7 @@ def prepare_exact_cart_quote(
         }
     )
     cart = mcp_client.view_cart()
-    cart_items = _cart_line_items(cart)
-    exact_cart = (
-        cart_items is not None
-        and len(cart_items) == 1
-        and _contains_exact_sku(cart_items[0], merchant_sku_id)
-        and Decimal(str(cart_items[0].get("quantity", quantity))) == quantity
-    )
-    if not exact_cart:
-        raise ZeptoMCPError(
-            f"Zepto cart does not exactly match SKU {merchant_sku_id!r} and quantity; "
-            "refusing preview"
-        )
+    _require_exact_cart(cart, merchant_sku_id, quantity)
     if not _online_card_method_available(mcp_client.get_payment_methods()):
         raise ZeptoMCPError("Pay Online card method is unavailable")
 
@@ -597,6 +718,8 @@ def prepare_exact_cart_quote(
         preview,
         merchant_sku_id=merchant_sku_id,
         product_name=str(product.get("name") or product_name),
+        quantity=quantity,
+        address_ref=address_id,
     )
     if quote.stock_status is StockStatus.OUT_OF_STOCK:
         raise ZeptoMCPError(f"exact Zepto SKU {merchant_sku_id!r} is out of stock")
@@ -608,26 +731,78 @@ def quote_from_preview(
     *,
     merchant_sku_id: str,
     product_name: str,
+    quantity: int,
+    address_ref: str,
+    observed_at: datetime | None = None,
 ) -> MerchantQuote:
-    raw_amount = _first_value(preview, ("toPay", "total", "totalAmount", "amount"))
-    if raw_amount is None:
-        raise ValueError("Zepto preview did not contain a final amount")
-    available = _first_value(
-        preview,
-        ("deliverable", "inStock", "available", "isAvailable"),
+    if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity <= 0:
+        raise ValueError("quantity must be a positive integer")
+    if not address_ref or not address_ref.strip():
+        raise ValueError("opaque merchant address reference is required")
+    terminal = _terminal_preview(preview)
+    raw_amount = terminal["toPay"]
+    amount = Decimal(str(raw_amount)).quantize(Decimal("0.01"))
+    if amount <= 0:
+        raise ZeptoMCPError("Zepto terminal toPay must be positive")
+    currency = str(terminal.get("currency") or preview.get("currency") or "INR").upper()
+    if currency != "INR":
+        raise ZeptoMCPError("Zepto quote currency must be INR")
+    merchant_context_reference = str(
+        terminal.get("quoteId")
+        or terminal.get("orderId")
+        or terminal.get("orderCode")
+        or preview.get("quoteId")
+        or preview.get("orderId")
+        or preview.get("orderCode")
+        or ""
+    ).strip()
+    if not merchant_context_reference:
+        raise ZeptoMCPError("Zepto preview requires an opaque quote/cart/order reference")
+    returned_address = next(
+        (
+            str(container[key])
+            for container in (terminal, preview)
+            for key in ("userAddressId", "addressId", "address_id")
+            if container.get(key) is not None
+        ),
+        None,
     )
-    order_ref = _first_value(preview, ("quoteId", "orderId", "orderCode"))
+    if returned_address is not None and returned_address != address_ref:
+        raise ZeptoMCPError("Zepto preview address context does not match the requested profile")
+    available = next(
+        (
+            container[key]
+            for container in (terminal, preview)
+            for key in ("deliverable", "inStock", "available", "isAvailable")
+            if key in container
+        ),
+        None,
+    )
+    if not isinstance(available, bool):
+        raise ZeptoMCPError("Zepto preview must explicitly state deliverability")
+    timestamp = observed_at or datetime.now(timezone.utc)
+    if timestamp.tzinfo is None:
+        raise ValueError("observed_at must be timezone-aware")
     return MerchantQuote(
         merchant="zepto",
         merchant_sku_id=merchant_sku_id,
         product_name=product_name,
-        amount=Decimal(str(raw_amount)),
+        amount=amount,
         currency="INR",
         stock_status=(
             StockStatus.OUT_OF_STOCK if available is False else StockStatus.IN_STOCK
         ),
-        quote_reference=str(order_ref or f"zepto_preview_{uuid4().hex}"),
-        observed_at=datetime.now(timezone.utc),
+        quote_reference=_quote_reference(
+            merchant_sku_id=merchant_sku_id,
+            quantity=quantity,
+            address_ref=address_ref,
+            amount=amount,
+            currency=currency,
+            merchant_context_reference=merchant_context_reference,
+            observed_at=timestamp,
+        ),
+        observed_at=timestamp,
+        merchant_context_reference=merchant_context_reference,
         execution_mode=ExecutionMode.REAL,
     )
 
@@ -637,16 +812,20 @@ def fetch_real_quote(
     product_name: str,
     address_id: str,
     *,
+    quantity: int = 1,
     client: ZeptoMCPClient | None = None,
 ) -> MerchantQuote:
     """Preview the already-prepared Zepto cart at its exact final amount."""
     mcp_client = client or ZeptoMCPClient()
     mcp_client.select_saved_address(address_id)
+    _require_exact_cart(mcp_client.view_cart(), merchant_sku_id, quantity)
     preview = mcp_client.preview_order(address_id)
     return quote_from_preview(
         preview,
         merchant_sku_id=merchant_sku_id,
         product_name=product_name,
+        quantity=quantity,
+        address_ref=address_id,
     )
 
 
@@ -737,7 +916,7 @@ def check_current_price(
 
 def complete_checkout(credential_reference, merchant_sku_id, amount, idempotency_key):
     """Complete the safe configured boundary without silently spending real money."""
-    mode = merchant_mode()
+    mode = payment_mode()
     if mode is ExecutionMode.REAL and os.getenv(REAL_PAYMENT_MODE_ENV) != "1":
         raise RuntimeError(
             "real Zepto payment is disabled; set ZEPTO_REAL_PAYMENT_ENABLED=1 only "
@@ -760,8 +939,6 @@ def complete_checkout(credential_reference, merchant_sku_id, amount, idempotency
             "real payment-link executor/redirect policy is not configured; refusing to "
             "create a Zepto order"
         )
-    if not runtime.address_id:
-        raise RuntimeError("real Zepto checkout requires an injected saved address ID")
     if not credential_reference or not merchant_sku_id or not idempotency_key:
         raise ValueError("credential reference, SKU, and idempotency key are required")
     expected_amount = Decimal(str(amount)).quantize(Decimal("0.01"))
@@ -780,6 +957,31 @@ def complete_checkout(credential_reference, merchant_sku_id, amount, idempotency
         return _resume_existing_attempt(
             runtime, existing, str(credential_reference)
         )
+
+    assert runtime.checkout_context_provider is not None
+    context = runtime.checkout_context_provider(str(idempotency_key))
+    if (
+        context.merchant_sku_id != str(merchant_sku_id)
+        or isinstance(context.quantity, bool)
+        or context.quantity <= 0
+        or not context.merchant_address_ref.strip()
+        or Decimal(str(context.quoted_amount)).quantize(Decimal("0.01"))
+        != expected_amount
+        or context.currency.upper() != "INR"
+        or not context.merchant_context_reference.strip()
+        or context.observed_at.tzinfo is None
+        or context.quote_reference
+        != _quote_reference(
+            merchant_sku_id=context.merchant_sku_id,
+            quantity=context.quantity,
+            address_ref=context.merchant_address_ref,
+            amount=Decimal(str(context.quoted_amount)),
+            currency=context.currency,
+            merchant_context_reference=context.merchant_context_reference,
+            observed_at=context.observed_at,
+        )
+    ):
+        raise ValueError("durable checkout context does not match the approved quote")
 
     reporting = prava_client.credential_reporting_context(str(credential_reference))
     attempt, created = runtime.repository.reserve_merchant_checkout_attempt(
@@ -800,7 +1002,26 @@ def complete_checkout(credential_reference, merchant_sku_id, amount, idempotency
         state="creating_order",
     )
     try:
-        payment_order = runtime.client.create_payment_link(runtime.address_id)
+        runtime.client.select_saved_address(context.merchant_address_ref)
+        _require_exact_cart(
+            runtime.client.view_cart(), str(merchant_sku_id), context.quantity
+        )
+    except Exception:
+        runtime.repository.update_merchant_checkout_attempt(
+            str(idempotency_key),
+            expected_states={"creating_order"},
+            state="failed",
+            last_error="CART_CONTEXT_MISMATCH",
+        )
+        return _checkout_result(
+            CheckoutStatus.FAILED,
+            merchant_order_id=None,
+            amount=None,
+            retryable=False,
+            error_code="CART_CONTEXT_MISMATCH",
+        )
+    try:
+        payment_order = runtime.client.create_payment_link(context.merchant_address_ref)
     except Exception:
         # The remote call may have committed before the connection failed. Persist
         # ambiguity and require operator/order-history reconciliation; never retry.

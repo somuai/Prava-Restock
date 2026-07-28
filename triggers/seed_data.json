@@ -15,7 +15,9 @@
     "last_purchased_at": "2026-07-02",
     "last_purchase_amount": "450.00",
     "price_threshold": "400.00",
-    "last_observed_price": "380.00"
+    "last_observed_price": "380.00",
+    "merchant_address_ref": "saved-address-demo-home",
+    "quantity": 1
   },
   {
     "item_id": "00000000-0000-0000-0000-000000000102",
@@ -31,7 +33,9 @@
     "status": "active",
     "typical_cadence_days": 30.0,
     "last_purchased_at": "2026-06-16",
-    "last_purchase_amount": "899.00"
+    "last_purchase_amount": "899.00",
+    "merchant_address_ref": "saved-address-demo-home",
+    "quantity": 1
   },
   {
     "item_id": "00000000-0000-0000-0000-000000000103",
@@ -47,7 +51,9 @@
     "status": "active",
     "typical_cadence_days": 45.0,
     "last_purchased_at": "2026-06-01",
-    "last_purchase_amount": "650.00"
+    "last_purchase_amount": "650.00",
+    "merchant_address_ref": "saved-address-demo-home",
+    "quantity": 1
   },
   {
     "item_id": "00000000-0000-0000-0000-000000000104",
@@ -63,7 +69,9 @@
     "status": "active",
     "typical_cadence_days": 21.0,
     "last_purchased_at": "2026-06-25",
-    "last_purchase_amount": "250.00"
+    "last_purchase_amount": "250.00",
+    "merchant_address_ref": "saved-address-demo-home",
+    "quantity": 1
   },
   {
     "item_id": "00000000-0000-0000-0000-000000000105",

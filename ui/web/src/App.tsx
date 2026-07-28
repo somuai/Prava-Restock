@@ -63,6 +63,7 @@ function ModeBadge({ mode, label }: { mode: string; label?: string }) {
 
 function AppHeader({ capabilities }: { capabilities: Capabilities | null }) {
   const mode = capabilities?.prava_mode || "sandbox_unconfigured";
+  const paymentMode = capabilities?.home_payment_mode || "disclosed_mock";
   return (
     <header className="app-header">
       <a className="brand-lockup" href="#decisions" aria-label="Restock home">
@@ -71,7 +72,7 @@ function AppHeader({ capabilities }: { capabilities: Capabilities | null }) {
       </a>
       <div className="header-context">
         <ModeBadge mode={mode} label={mode.includes("sandbox") ? "Sandbox" : undefined} />
-        <span className="header-mode-copy">Final payment simulated</span>
+        <span className="header-mode-copy">{paymentMode === "real" ? "Live merchant payment" : "Final payment simulated"}</span>
         <button className="profile-button" type="button" aria-label="Open account menu">
           <span className="profile-avatar" aria-hidden="true">SG</span>
           <span className="profile-name">Soumyajit</span>
@@ -105,8 +106,9 @@ function Sidebar({ view, setView, capabilities }: { view: View; setView: (view: 
         ))}
       </nav>
       <div className="sidebar-mode">
-        <ModeBadge mode={capabilities?.home_merchant_mode || "disclosed_mock"} label="Sandbox mode" />
-        <p>Approvals are safe to test. No real merchant payment is made.</p>
+        <ModeBadge mode={capabilities?.home_merchant_mode || "disclosed_mock"} label={`Catalog · ${humanize(capabilities?.home_merchant_mode || "disclosed_mock")}`} />
+        <ModeBadge mode={capabilities?.home_payment_mode || "disclosed_mock"} label={`Payment · ${humanize(capabilities?.home_payment_mode || "disclosed_mock")}`} />
+        <p>Catalog data and final payment are disclosed independently.</p>
       </div>
     </aside>
   );
@@ -155,9 +157,11 @@ function AdjustAmount({ onCancel, onSubmit }: { onCancel: () => void; onSubmit: 
 function HomeDecision({
   notification,
   onAction,
+  capabilities,
 }: {
   notification: Notification;
   onAction: (notification: Notification, action: string, adjustedAmount?: string) => void;
+  capabilities: Capabilities | null;
 }) {
   const [expanded, setExpanded] = useState(true);
   const [adjusting, setAdjusting] = useState(false);
@@ -177,7 +181,10 @@ function HomeDecision({
             <span>from Zepto</span>
             <span className="price-signal"><ArrowDown size={15} weight="bold" /> ₹20 below your alert threshold</span>
           </div>
-          <ModeBadge mode="disclosed_mock" label="Sandbox approval · Final payment simulated" />
+          <ModeBadge
+            mode={capabilities?.home_payment_mode || "disclosed_mock"}
+            label={`${humanize(capabilities?.home_merchant_mode || "disclosed_mock")} catalog · ${humanize(capabilities?.home_payment_mode || "disclosed_mock")} payment`}
+          />
         </div>
         <div className="decision-time">
           <span>Today</span>
@@ -511,7 +518,7 @@ export default function App() {
           <>
             <DecisionHeader track={track} status={status} />
             <section className="decision-list" aria-label={`${track} decisions`}>
-              {selected && track === "home" && <HomeDecision notification={selected} onAction={(notification, action, amount) => void act(notification, action, amount)} />}
+              {selected && track === "home" && <HomeDecision capabilities={capabilities} notification={selected} onAction={(notification, action, amount) => void act(notification, action, amount)} />}
               {selected && track === "teams" && <TeamsDecision notification={selected} onAction={(notification, action) => void act(notification, action)} />}
               {track === "home" && <><SecondaryDecision kind="filter" /><SecondaryDecision kind="paper" /></>}
             </section>

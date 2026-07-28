@@ -95,6 +95,9 @@ def main() -> int:
             owner_id=owner,
             expires_at=expires,
         ):
+            # Completion work is database-only and safe to replay before new
+            # triggers, including after a process or deployment restart.
+            WorkflowService(repository).repair_pending_completion_effects()
             if os.getenv("RESTOCK_ENV", "development") == "production":
                 run_production_tick(repository)
             else:

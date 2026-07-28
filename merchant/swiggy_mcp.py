@@ -13,6 +13,8 @@ from typing import Any
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
+from merchant.zepto_mcp import MCP_REMOTE_BINARY
+
 
 SWIGGY_ENDPOINTS = {
     "instamart": "https://mcp.swiggy.com/im",
@@ -46,7 +48,7 @@ class SwiggyMCPClient:
         self.timeout_seconds = timeout_seconds
 
     async def _call_async(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        server = StdioServerParameters(command="npx", args=["--yes", "mcp-remote", self.url])
+        server = StdioServerParameters(command=MCP_REMOTE_BINARY, args=[self.url])
         async with stdio_client(server) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()

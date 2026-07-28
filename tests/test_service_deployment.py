@@ -111,6 +111,27 @@ def test_missing_service_variables_are_reported_by_name() -> None:
         assert validate(service, {}) == sorted(expected)
 
 
+def test_api_contract_rejects_invalid_real_payment_executor_and_mcp_override(
+    tmp_path,
+) -> None:
+    values = {
+        "HOME_MERCHANT_MODE": "real",
+        "HOME_PAYMENT_MODE": "real",
+        "ZEPTO_REAL_PAYMENT_ENABLED": "1",
+        "ZEPTO_CART_PREPARATION_ENABLED": "1",
+        "ZEPTO_DEVICE_ID": "device-reference",
+        "ZEPTO_PAYMENT_ALLOWED_HOSTS": "payments.example",
+        "ZEPTO_PAYMENT_EXECUTOR_PATH": str(tmp_path / "missing-executor"),
+        "MCP_REMOTE_BINARY": str(tmp_path / "unreviewed-mcp-remote"),
+        "RESTOCK_ENV": "production",
+    }
+
+    issues = validate("api", values)
+
+    assert "ZEPTO_PAYMENT_EXECUTOR_PATH_INVALID" in issues
+    assert "MCP_REMOTE_BINARY_IMMUTABLE_IN_PRODUCTION" in issues
+
+
 def test_slack_contract_rejects_wrong_token_shapes_and_insecure_api_url() -> None:
     values = {
         "SLACK_BOT_TOKEN": "bot-token",

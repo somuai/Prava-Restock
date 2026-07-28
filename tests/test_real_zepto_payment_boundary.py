@@ -19,6 +19,10 @@ class FakeZeptoClient:
         self.payment_link = payment_link
         self.calls = []
 
+    def select_saved_address(self, address_id):
+        self.calls.append(("select_saved_address", address_id))
+        return {"selected": address_id}
+
     def create_payment_link(self, address_id):
         self.calls.append(("create_payment_link", address_id))
         if self.create_error:
@@ -28,6 +32,14 @@ class FakeZeptoClient:
             "orderCode": "Z123",
             "paymentLink": self.payment_link,
             "toPay": self.total,
+        }
+
+    def view_cart(self):
+        self.calls.append(("view_cart",))
+        return {
+            "cartItems": [
+                {"productVariantId": "coffee-500g", "quantity": 1}
+            ]
         }
 
     def check_payment_status(self, order_id, *, poll=False):
@@ -68,11 +80,12 @@ def boundary(tmp_path, monkeypatch):
     repository = RestockRepository(database)
     reports = []
     monkeypatch.setenv("HOME_MERCHANT_MODE", "real")
+    monkeypatch.setenv("HOME_PAYMENT_MODE", "real")
     monkeypatch.setenv("ZEPTO_REAL_PAYMENT_ENABLED", "1")
     monkeypatch.setattr(
         prava_client,
         "report_checkout_outcome",
-        lambda session_id, txn_ref_id, status: reports.append(
+        lambda session_id, txn_ref_id, status, amount_paid=None: reports.append(
             (session_id, txn_ref_id, status)
         )
         or {"status": "confirmed"},
@@ -103,14 +116,39 @@ def add_credential(reference="credential-1"):
     return reference
 
 
-def install(repository, client, executor):
+def cart_context(address="address-1", *, amount="412.50", quantity=1):
+    observed_at = datetime(2026, 7, 22, 10, 0, tzinfo=timezone.utc)
+    return zepto_checkout.CheckoutCartContext(
+        merchant_sku_id="coffee-500g",
+        quantity=quantity,
+        merchant_address_ref=address,
+        quoted_amount=Decimal(amount),
+        currency="INR",
+        merchant_context_reference="preview-exact",
+        quote_reference=zepto_checkout._quote_reference(
+            merchant_sku_id="coffee-500g",
+            quantity=quantity,
+            address_ref=address,
+            amount=Decimal(amount),
+            currency="INR",
+            merchant_context_reference="preview-exact",
+            observed_at=observed_at,
+        ),
+        observed_at=observed_at,
+    )
+
+
+def install(repository, client, executor, *, context_address="address-1", provider=None):
     zepto_checkout.configure_real_checkout_runtime(
         zepto_checkout.RealCheckoutRuntime(
             repository=repository,
             client=client,
-            address_id="address-1",
+            address_id="legacy-global-address-must-not-be-used",
             executor=executor,
             redirect_policy=zepto_checkout.PaymentRedirectPolicy(("checkout.juspay.in",)),
+            checkout_context_provider=(
+                provider or (lambda _key: cart_context(context_address))
+            ),
         )
     )
 
@@ -177,6 +215,26 @@ def test_pending_status_is_polled_before_success(boundary):
     assert ("check_payment_status", "zepto-order-1", False) in client.calls
     assert ("check_payment_status", "zepto-order-1", True) in client.calls
     assert reports == [("session-1", "txn-1", "APPROVED")]
+
+
+def test_terminal_report_includes_actual_checkout_amount(boundary, monkeypatch):
+    repository, _reports = boundary
+    captured = []
+    monkeypatch.setattr(
+        prava_client,
+        "report_checkout_outcome",
+        lambda session_id, txn_ref_id, status, amount_paid=None: captured.append(
+            (session_id, txn_ref_id, status, Decimal(str(amount_paid)))
+        )
+        or {"status": "confirmed"},
+    )
+    install(repository, FakeZeptoClient(statuses=["SUCCESS"]), FakeExecutor())
+    add_credential()
+
+    assert checkout()["status"] == "completed"
+    assert captured == [
+        ("session-1", "txn-1", "APPROVED", Decimal("412.50"))
+    ]
 
 
 def test_decline_reports_only_after_executor_used_credential(boundary):
@@ -255,6 +313,55 @@ def test_price_mismatch_stops_before_credential_or_executor(boundary):
     assert reports == []
     assert prava_client._CREDENTIALS["credential-1"]["token"] == "fake-network-token"
     assert repository.get_merchant_checkout_attempt("idem-1")["state"] == "price_changed"
+
+
+def test_checkout_uses_address_bound_to_each_durable_idempotency_context(boundary):
+    repository, _reports = boundary
+    client = FakeZeptoClient(statuses=["SUCCESS"])
+    contexts = {
+        "user-a": cart_context("saved-address-a"),
+        "user-b": cart_context("saved-address-b"),
+    }
+    install(repository, client, FakeExecutor(), provider=contexts.__getitem__)
+    add_credential("credential-a")
+    add_credential("credential-b")
+
+    checkout(reference="credential-a", key="user-a")
+    checkout(reference="credential-b", key="user-b")
+
+    selected = [call[1] for call in client.calls if call[0] == "select_saved_address"]
+    created = [call[1] for call in client.calls if call[0] == "create_payment_link"]
+    assert selected == ["saved-address-a", "saved-address-b"]
+    assert created == ["saved-address-a", "saved-address-b"]
+    assert "legacy-global-address-must-not-be-used" not in selected + created
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("merchant_address_ref", "saved-address-b"),
+        ("quoted_amount", Decimal("400.00")),
+        ("currency", "USD"),
+        ("merchant_context_reference", "different-cart"),
+    ],
+)
+def test_tampered_durable_quote_context_fails_before_confirm_order(
+    boundary, field, value
+):
+    repository, reports = boundary
+    client = FakeZeptoClient()
+    context = cart_context("saved-address-a")
+    tampered = zepto_checkout.CheckoutCartContext(
+        **(context.__dict__ | {field: value})
+    )
+    install(repository, client, FakeExecutor(), provider=lambda _key: tampered)
+    add_credential()
+
+    with pytest.raises(ValueError, match="durable checkout context"):
+        checkout()
+
+    assert client.calls == []
+    assert reports == []
 
 
 def test_ambiguous_browser_failure_uses_order_history_without_false_report(boundary):
@@ -348,7 +455,7 @@ def test_ambiguous_report_is_reconciled_without_duplicate_post(boundary, monkeyp
     add_credential()
     posts = []
 
-    def ambiguous_post(session_id, txn_ref_id, status):
+    def ambiguous_post(session_id, txn_ref_id, status, amount_paid=None):
         posts.append((session_id, txn_ref_id, status))
         raise TimeoutError("response lost after remote commit")
 

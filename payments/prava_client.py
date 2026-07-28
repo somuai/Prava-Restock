@@ -21,6 +21,26 @@ from dotenv import load_dotenv
 
 STUB_MODE = False
 
+
+def configured_mode() -> str:
+    """Return a non-secret truthful label for the configured Prava boundary."""
+
+    load_dotenv(_PROJECT_ROOT / ".env", override=False)
+    api_key = os.getenv("PRAVA_API_KEY", "").strip()
+    api_url = (
+        os.getenv("PRAVA_API_URL", "").strip()
+        or os.getenv("PRAVA_SANDBOX_URL", "").strip()
+    ).rstrip("/")
+    if (
+        api_key.startswith("sk_live_")
+        and api_url == "https://api.prava.space"
+        and os.getenv("PRAVA_PRODUCTION_ENABLED") == "1"
+    ):
+        return "production"
+    if api_key.startswith("sk_test_") and api_url == "https://sandbox.api.prava.space":
+        return "sandbox"
+    return "unconfigured"
+
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _SANDBOX_URL = "https://sandbox.api.prava.space"
 _PRODUCTION_URL = "https://api.prava.space"
@@ -415,6 +435,7 @@ def report_checkout_outcome(
     session_id: str,
     txn_ref_id: str,
     transaction_status: str,
+    amount_paid: Decimal | str | int | float | None = None,
 ) -> dict:
     """Report a known merchant outcome using non-secret Prava references."""
 
@@ -429,6 +450,11 @@ def report_checkout_outcome(
         "txn_ref_id": str(txn_ref_id),
         "txn_status": normalized_status,
     }
+    if amount_paid is not None:
+        normalized_amount = Decimal(str(amount_paid)).quantize(Decimal("0.01"))
+        if normalized_amount <= 0:
+            raise ValueError("amount_paid must be positive")
+        payload["amount_paid"] = float(normalized_amount)
     request = Request(
         f"{base_url}/v1/sessions/{quote(str(session_id), safe='')}/report-status",
         data=json.dumps(payload).encode("utf-8"),

@@ -1,0 +1,9 @@
+{
+  "name": "restock-zepto-mcp-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Locked runtime dependency for Restock's Zepto MCP bridge",
+  "dependencies": {
+    "mcp-remote": "0.1.38"
+  }
+}

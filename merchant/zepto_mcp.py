@@ -7,7 +7,10 @@ explicit method is called.
 
 import asyncio
 import json
+import os
+import time
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from mcp import ClientSession
@@ -15,10 +18,86 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 
 
 ZEPTO_MCP_URL = "https://mcp.zepto.co.in/mcp"
+MCP_REMOTE_VERSION = "0.1.38"
+MCP_REMOTE_PACKAGE = f"mcp-remote@{MCP_REMOTE_VERSION}"
+MCP_REMOTE_BINARY = "/opt/zepto-mcp/node_modules/.bin/mcp-remote"
+MCP_REMOTE_REPO_BINARY = (
+    Path(__file__).resolve().parent / "mcp-runtime" / "node_modules" / ".bin" / "mcp-remote"
+)
+MCP_AUTHORIZATION_VERIFICATION_TTL_SECONDS = 300
+_MCP_AUTHORIZATION_VERIFIED_AT: float | None = None
 
 
 class ZeptoMCPError(RuntimeError):
     pass
+
+
+def resolve_mcp_remote_binary() -> str:
+    """Resolve only the locked bridge; production cannot replace the image binary."""
+
+    image_binary = Path(MCP_REMOTE_BINARY)
+    override = os.getenv("MCP_REMOTE_BINARY", "").strip()
+    production = os.getenv("RESTOCK_ENV", "development") == "production"
+    if production:
+        if override and Path(override) != image_binary:
+            raise ZeptoMCPError(
+                "MCP_REMOTE_BINARY cannot override the immutable production bridge"
+            )
+        candidate = image_binary
+    elif override:
+        candidate = Path(override)
+        if not candidate.is_absolute():
+            raise ZeptoMCPError("development MCP_REMOTE_BINARY must be absolute")
+    elif MCP_REMOTE_REPO_BINARY.is_file():
+        candidate = MCP_REMOTE_REPO_BINARY
+    else:
+        candidate = image_binary
+
+    if not candidate.is_absolute() or not candidate.is_file() or not os.access(candidate, os.X_OK):
+        raise ZeptoMCPError(
+            "locked mcp-remote runtime is unavailable; run npm ci in merchant/mcp-runtime"
+        )
+    return str(candidate)
+
+
+def mcp_remote_runtime_ready() -> bool:
+    """Return local executable readiness without contacting npm, OAuth, or Zepto."""
+
+    try:
+        resolve_mcp_remote_binary()
+    except ZeptoMCPError:
+        return False
+    return True
+
+
+def record_mcp_authorization_success() -> None:
+    """Record a successful initialized provider call for a short local TTL."""
+
+    global _MCP_AUTHORIZATION_VERIFIED_AT
+    _MCP_AUTHORIZATION_VERIFIED_AT = time.monotonic()
+
+
+def clear_mcp_authorization_verification() -> None:
+    """Fail closed after any bridge, authentication, or provider-call failure."""
+
+    global _MCP_AUTHORIZATION_VERIFIED_AT
+    _MCP_AUTHORIZATION_VERIFIED_AT = None
+
+
+def mcp_authorization_verified_recently() -> bool:
+    """Return true only after a recent successful call in this process."""
+
+    if _MCP_AUTHORIZATION_VERIFIED_AT is None:
+        return False
+    raw_ttl = os.getenv(
+        "MCP_AUTHORIZATION_VERIFICATION_TTL_SECONDS",
+        str(MCP_AUTHORIZATION_VERIFICATION_TTL_SECONDS),
+    )
+    try:
+        ttl = int(raw_ttl)
+    except ValueError:
+        return False
+    return ttl > 0 and time.monotonic() - _MCP_AUTHORIZATION_VERIFIED_AT <= ttl
 
 
 def _content_to_payload(result: Any) -> dict[str, Any]:
@@ -48,21 +127,25 @@ class ZeptoMCPClient:
         self.timeout_seconds = timeout_seconds
 
     async def _call_async(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        server = StdioServerParameters(
-            command="npx",
-            args=["--yes", "mcp-remote", ZEPTO_MCP_URL],
-        )
         try:
+            server = StdioServerParameters(
+                command=resolve_mcp_remote_binary(),
+                args=[ZEPTO_MCP_URL],
+            )
             async with stdio_client(server) as (read_stream, write_stream):
                 async with ClientSession(read_stream, write_stream) as session:
                     await session.initialize()
                     result = await session.call_tool(name, arguments)
-        except (OSError, TimeoutError) as exc:
+        except Exception as exc:
+            clear_mcp_authorization_verification()
             raise ZeptoMCPError(f"Zepto MCP call failed: {name}") from exc
         if getattr(result, "isError", False):
+            clear_mcp_authorization_verification()
             payload = _content_to_payload(result)
             raise ZeptoMCPError(f"Zepto tool {name} returned an error: {payload}")
-        return _content_to_payload(result)
+        payload = _content_to_payload(result)
+        record_mcp_authorization_success()
+        return payload
 
     def call(self, name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
         try:
@@ -121,4 +204,3 @@ class ZeptoMCPClient:
 
     def list_order_history(self) -> dict[str, Any]:
         return self.call("list_order_history")
-

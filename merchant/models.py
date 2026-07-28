@@ -41,6 +41,7 @@ class MerchantQuote(MerchantModel):
     stock_status: StockStatus
     quote_reference: str
     observed_at: datetime
+    merchant_context_reference: str | None = None
     execution_mode: ExecutionMode
 
 
@@ -52,6 +53,8 @@ class MerchantCheckoutResult(MerchantModel):
     retryable: bool = False
     execution_mode: ExecutionMode
     error_code: str | None = None
+    credential_exposed: bool = False
+    credential_used: bool = False
 
 
 class MerchantAdapter(Protocol):

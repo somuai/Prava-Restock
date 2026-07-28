@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from common.service_auth import ServiceAuthError, verify_bearer
 from storage import Database, RestockRepository
-from workflow import WorkflowService
+from workflow.factory import build_workflow_service
 
 
 router = APIRouter(prefix="/api/v1/service/slack", tags=["slack-service"])
@@ -55,7 +55,7 @@ def slack_workflow_action(
     repository = get_repository()
     try:
         run = repository.get_workflow(run_id)
-        return WorkflowService(repository).act(
+        return build_workflow_service(repository).act(
             run_id,
             user_id=run["user_id"],
             action=body.action,

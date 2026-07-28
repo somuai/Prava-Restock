@@ -233,6 +233,21 @@ class TransactionRow(Base):
     completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class CompletionEffectsRow(Base):
+    """Exactly-once durable work created with a completed checkout."""
+
+    __tablename__ = "completion_effects"
+
+    run_id: Mapped[str] = mapped_column(
+        ForeignKey("workflow_runs.run_id"), primary_key=True
+    )
+    status: Mapped[str] = mapped_column(String(30), default="pending", index=True)
+    attempts: Mapped[int] = mapped_column(default=0)
+    last_error: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class AuditRow(Base):
     __tablename__ = "audit_entries"
 

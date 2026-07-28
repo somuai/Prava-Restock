@@ -30,3 +30,8 @@ jobs:
         run: npm ci && npm test && npm run build
       - name: Build production container
         run: docker build -t restock-ci .
+      - name: Verify Zepto MCP runtime in production container
+        run: >-
+          docker run --rm --network none
+          --entrypoint /app/scripts/verify_zepto_mcp_runtime.sh
+          restock-ci

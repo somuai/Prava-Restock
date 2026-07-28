@@ -7,6 +7,7 @@ import argparse
 import base64
 from collections.abc import Mapping
 import os
+from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -117,6 +118,37 @@ def validate(service: str, environment: Mapping[str, str]) -> list[str]:
                 issues.append("PRAVA_PRODUCTION_GATE_REQUIRED")
         elif api_key:
             issues.append("PRAVA_API_KEY_INVALID_PREFIX")
+        if environment.get("HOME_MERCHANT_MODE") == "real":
+            if not environment.get("ZEPTO_DEVICE_ID", "").strip():
+                issues.append("ZEPTO_DEVICE_ID_REQUIRED")
+            if environment.get("ZEPTO_CART_PREPARATION_ENABLED") != "1":
+                issues.append("ZEPTO_CART_PREPARATION_GATE_REQUIRED")
+        payment_mode = environment.get("HOME_PAYMENT_MODE", "disclosed_mock")
+        if payment_mode not in {"real", "sandbox", "disclosed_mock"}:
+            issues.append("HOME_PAYMENT_MODE_INVALID")
+        if payment_mode == "real":
+            if environment.get("HOME_MERCHANT_MODE") != "real":
+                issues.append("REAL_PAYMENT_REQUIRES_REAL_CATALOG")
+            if environment.get("ZEPTO_REAL_PAYMENT_ENABLED") != "1":
+                issues.append("ZEPTO_REAL_PAYMENT_GATE_REQUIRED")
+            hosts = [
+                host.strip()
+                for host in environment.get("ZEPTO_PAYMENT_ALLOWED_HOSTS", "").split(",")
+                if host.strip()
+            ]
+            if not hosts:
+                issues.append("ZEPTO_PAYMENT_ALLOWED_HOSTS_REQUIRED")
+            executable = environment.get("ZEPTO_PAYMENT_EXECUTOR_PATH", "").strip()
+            if not executable:
+                issues.append("ZEPTO_PAYMENT_EXECUTOR_PATH_REQUIRED")
+            elif not Path(executable).is_absolute():
+                issues.append("ZEPTO_PAYMENT_EXECUTOR_PATH_MUST_BE_ABSOLUTE")
+            elif not Path(executable).is_file() or not os.access(executable, os.X_OK):
+                issues.append("ZEPTO_PAYMENT_EXECUTOR_PATH_INVALID")
+        mcp_override = environment.get("MCP_REMOTE_BINARY", "").strip()
+        if environment.get("RESTOCK_ENV") == "production" and mcp_override:
+            if Path(mcp_override) != Path("/opt/zepto-mcp/node_modules/.bin/mcp-remote"):
+                issues.append("MCP_REMOTE_BINARY_IMMUTABLE_IN_PRODUCTION")
 
     if service == "slack":
         if environment.get("SLACK_BOT_TOKEN") and not environment["SLACK_BOT_TOKEN"].startswith(

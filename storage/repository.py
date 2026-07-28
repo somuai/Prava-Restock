@@ -18,6 +18,7 @@ from storage.schema import (
     ApprovalDecisionRow,
     ApprovalPolicyRow,
     ConsentRow,
+    CompletionEffectsRow,
     ForecastObservationRow,
     InvitationRow,
     MembershipRow,
@@ -477,26 +478,41 @@ class RestockRepository:
         modes: dict,
         idempotency_key: str,
     ) -> dict[str, Any]:
-        with self.database.session() as session:
-            item_row = session.get(TrackedItemRow, item_id)
-            tenant_id = item_row.tenant_id if item_row else None
-        row = WorkflowRunRow(
-            user_id=user_id,
-            tenant_id=tenant_id,
-            item_id=item_id,
-            state="triggered",
-            active_item_key=item_id,
-            trigger_reason=trigger_reason,
-            proposed_amount=proposed_amount,
-            currency=currency,
-            merchant=merchant,
-            proposed_action=proposed_action,
-            quote=quote,
-            idempotency_key=idempotency_key,
-            modes=modes,
-        )
         try:
             with self.database.session() as session:
+                item_row = session.get(TrackedItemRow, item_id)
+                tenant_id = item_row.tenant_id if item_row else None
+                pending_effect = session.scalar(
+                    select(CompletionEffectsRow.run_id)
+                    .join(
+                        WorkflowRunRow,
+                        WorkflowRunRow.run_id == CompletionEffectsRow.run_id,
+                    )
+                    .where(
+                        WorkflowRunRow.item_id == item_id,
+                        CompletionEffectsRow.status == "pending",
+                    )
+                    .limit(1)
+                )
+                if pending_effect is not None:
+                    raise ValueError(
+                        "completion effects are pending for this item; retry after recovery"
+                    )
+                row = WorkflowRunRow(
+                    user_id=user_id,
+                    tenant_id=tenant_id,
+                    item_id=item_id,
+                    state="triggered",
+                    active_item_key=item_id,
+                    trigger_reason=trigger_reason,
+                    proposed_amount=proposed_amount,
+                    currency=currency,
+                    merchant=merchant,
+                    proposed_action=proposed_action,
+                    quote=quote,
+                    idempotency_key=idempotency_key,
+                    modes=modes,
+                )
                 session.add(row)
                 session.flush()
                 result = _row_dict(row)
@@ -511,6 +527,17 @@ class RestockRepository:
                 raise KeyError(f"unknown run_id: {run_id}")
             return _row_dict(row)
 
+    def workflow_for_checkout_key(self, idempotency_key: str) -> dict[str, Any]:
+        with self.database.session() as session:
+            row = session.scalar(
+                select(WorkflowRunRow).where(
+                    WorkflowRunRow.idempotency_key == idempotency_key
+                )
+            )
+            if row is None:
+                raise KeyError(f"unknown checkout idempotency key: {idempotency_key}")
+            return _row_dict(row)
+
     def list_workflows(self, user_id: str) -> list[dict[str, Any]]:
         with self.database.session() as session:
             rows = session.scalars(
@@ -519,6 +546,16 @@ class RestockRepository:
                 .order_by(WorkflowRunRow.created_at.desc())
             ).all()
             return [_row_dict(row) for row in rows]
+
+    def latest_workflow_for_item(self, item_id: str) -> dict[str, Any] | None:
+        with self.database.session() as session:
+            row = session.scalar(
+                select(WorkflowRunRow)
+                .where(WorkflowRunRow.item_id == item_id)
+                .order_by(WorkflowRunRow.created_at.desc())
+                .limit(1)
+            )
+            return _row_dict(row) if row else None
 
     def transition(
         self,
@@ -903,12 +940,194 @@ class RestockRepository:
             session.flush()
             return _row_dict(row)
 
+    def complete_checkout_atomically(
+        self,
+        *,
+        run_id: str,
+        expected_state: str,
+        item_id: str,
+        mandate_ref: str,
+        merchant_order_id: str,
+        amount: Decimal,
+        currency: str,
+        execution_mode: str,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Create-or-verify one transaction and terminalize its run atomically."""
+
+        immutable = {
+            "item_id": item_id,
+            "mandate_ref": mandate_ref,
+            "merchant_order_id": merchant_order_id,
+            "amount": Decimal(str(amount)).quantize(Decimal("0.01")),
+            "currency": currency,
+            "execution_mode": execution_mode,
+        }
+        with self.database.session() as session:
+            if self.database.engine.dialect.name == "sqlite":
+                # SQLite has no row-level FOR UPDATE; serialize this narrow local
+                # test/dev boundary so the unique transaction check remains CAS-like.
+                session.execute(text("BEGIN IMMEDIATE"))
+            statement = select(WorkflowRunRow).where(WorkflowRunRow.run_id == run_id)
+            if self.database.engine.dialect.name == "postgresql":
+                statement = statement.with_for_update()
+            run = session.scalar(statement)
+            if run is None:
+                raise KeyError(f"unknown run_id: {run_id}")
+            locked_amount = Decimal(str(run.proposed_amount)).quantize(Decimal("0.01"))
+            if immutable["amount"] != locked_amount or currency != run.currency:
+                raise ValueError(
+                    "merchant outcome amount/currency does not match the locked workflow"
+                )
+            transaction = session.scalar(
+                select(TransactionRow).where(TransactionRow.run_id == run_id)
+            )
+            if transaction is not None:
+                matches = (
+                    transaction.item_id == immutable["item_id"]
+                    and transaction.mandate_ref == immutable["mandate_ref"]
+                    and transaction.merchant_order_id == immutable["merchant_order_id"]
+                    and Decimal(str(transaction.amount)).quantize(Decimal("0.01"))
+                    == immutable["amount"]
+                    and transaction.currency == immutable["currency"]
+                    and transaction.execution_mode == immutable["execution_mode"]
+                )
+                if not matches or run.state != "completed":
+                    raise ValueError(
+                        "existing checkout transaction does not match terminal workflow"
+                    )
+                if session.get(CompletionEffectsRow, run_id) is None:
+                    session.add(CompletionEffectsRow(run_id=run_id, status="pending"))
+                    session.flush()
+                return _row_dict(run), _row_dict(transaction)
+            if run.state != expected_state:
+                raise ValueError(
+                    f"workflow {run_id} is {run.state}; expected {expected_state}"
+                )
+            transaction = TransactionRow(
+                run_id=run_id,
+                item_id=item_id,
+                tenant_id=run.tenant_id,
+                mandate_ref=mandate_ref,
+                merchant_order_id=merchant_order_id,
+                amount=immutable["amount"],
+                currency=currency,
+                status="completed",
+                execution_mode=execution_mode,
+            )
+            session.add(transaction)
+            run.state = "completed"
+            run.active_item_key = None
+            run.error_code = None
+            run.version += 1
+            run.updated_at = datetime.now(timezone.utc)
+            session.add(CompletionEffectsRow(run_id=run_id, status="pending"))
+            session.flush()
+            return _row_dict(run), _row_dict(transaction)
+
     def transaction_for_run(self, run_id: str) -> dict[str, Any] | None:
         with self.database.session() as session:
             row = session.scalar(
                 select(TransactionRow).where(TransactionRow.run_id == run_id)
             )
             return _row_dict(row) if row else None
+
+    def completion_effects_for_run(self, run_id: str) -> dict[str, Any] | None:
+        with self.database.session() as session:
+            row = session.get(CompletionEffectsRow, run_id)
+            return _row_dict(row) if row else None
+
+    def pending_completion_run_ids(self, *, limit: int = 100) -> list[str]:
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        with self.database.session() as session:
+            rows = session.scalars(
+                select(CompletionEffectsRow.run_id)
+                .where(CompletionEffectsRow.status == "pending")
+                .order_by(CompletionEffectsRow.created_at)
+                .limit(limit)
+            ).all()
+            return list(rows)
+
+    def apply_completion_effects(
+        self,
+        *,
+        run_id: str,
+        item_payload: dict[str, Any] | None,
+        forecast: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Apply the required completion audit and optional Home learning once."""
+
+        with self.database.session() as session:
+            if self.database.engine.dialect.name == "sqlite":
+                session.execute(text("BEGIN IMMEDIATE"))
+            statement = select(CompletionEffectsRow).where(
+                CompletionEffectsRow.run_id == run_id
+            )
+            if self.database.engine.dialect.name == "postgresql":
+                statement = statement.with_for_update()
+            work = session.scalar(statement)
+            if work is None:
+                raise KeyError(f"completion effects are missing for run: {run_id}")
+            if work.status == "completed":
+                return _row_dict(work)
+            run = session.get(WorkflowRunRow, run_id)
+            transaction = session.scalar(
+                select(TransactionRow).where(TransactionRow.run_id == run_id)
+            )
+            if run is None or run.state != "completed" or transaction is None:
+                raise ValueError("completion effects require a terminal run and transaction")
+
+            audit_payload = {
+                "transaction_id": transaction.transaction_id,
+                "amount": str(transaction.amount),
+                "currency": transaction.currency,
+            }
+            _assert_sanitized(audit_payload)
+            existing_audit = session.scalar(
+                select(AuditRow).where(
+                    AuditRow.run_id == run_id,
+                    AuditRow.event_type == "transaction_completed",
+                )
+            )
+            if existing_audit is None:
+                session.add(
+                    AuditRow(
+                        run_id=run_id,
+                        user_id=run.user_id,
+                        tenant_id=run.tenant_id,
+                        item_id=run.item_id,
+                        event_type="transaction_completed",
+                        payload=audit_payload,
+                        modes=run.modes,
+                    )
+                )
+            # Before this outbox existed, the completion audit was written only
+            # after cadence/forecast updates. Its presence is therefore the
+            # compatibility marker that all legacy effects already ran.
+            apply_domain_effects = existing_audit is None
+            if apply_domain_effects and item_payload is not None:
+                item = session.get(TrackedItemRow, run.item_id)
+                if item is None:
+                    raise KeyError(f"unknown item_id: {run.item_id}")
+                item.payload = item_payload
+                item.updated_at = datetime.now(timezone.utc)
+            if apply_domain_effects and forecast is not None:
+                consent = session.scalar(
+                    select(ConsentRow).where(
+                        ConsentRow.tenant_id == forecast["tenant_id"],
+                        ConsentRow.user_id == forecast["user_id"],
+                        ConsentRow.kind == "forecasting",
+                        ConsentRow.granted.is_(True),
+                    )
+                )
+                if consent is not None:
+                    session.add(ForecastObservationRow(**forecast))
+            work.status = "completed"
+            work.attempts += 1
+            work.last_error = None
+            work.updated_at = datetime.now(timezone.utc)
+            session.flush()
+            return _row_dict(work)
 
     def monthly_spend(self, user_id: str) -> Decimal:
         now = datetime.now(timezone.utc)
@@ -925,6 +1144,23 @@ class RestockRepository:
             )
             return Decimal(str(value or 0))
 
+    def active_workflow_commitments(
+        self, user_id: str, *, exclude_run_id: str | None = None
+    ) -> Decimal:
+        """Return amounts reserved by nonterminal workflows for cap decisions."""
+
+        with self.database.session() as session:
+            query = select(
+                func.coalesce(func.sum(WorkflowRunRow.proposed_amount), 0)
+            ).where(
+                WorkflowRunRow.user_id == user_id,
+                WorkflowRunRow.active_item_key.is_not(None),
+            )
+            if exclude_run_id is not None:
+                query = query.where(WorkflowRunRow.run_id != exclude_run_id)
+            value = session.scalar(query)
+            return Decimal(str(value or 0))
+
     def acquire_lease(
         self,
         *,
@@ -934,24 +1170,66 @@ class RestockRepository:
     ) -> bool:
         now = datetime.now(timezone.utc)
         with self.database.session() as session:
-            row = session.get(SchedulerLeaseRow, lease_name)
-            if row is not None:
-                current_expiry = row.expires_at
-                if current_expiry.tzinfo is None:
-                    current_expiry = current_expiry.replace(tzinfo=timezone.utc)
-                if current_expiry > now and row.owner_id != owner_id:
-                    return False
-            if row is None:
-                row = SchedulerLeaseRow(
+            claimed = session.execute(
+                update(SchedulerLeaseRow)
+                .where(
+                    SchedulerLeaseRow.lease_name == lease_name,
+                    (SchedulerLeaseRow.expires_at <= now)
+                    | (SchedulerLeaseRow.owner_id == owner_id),
+                )
+                .values(owner_id=owner_id, expires_at=expires_at)
+            )
+            if claimed.rowcount == 1:
+                return True
+        try:
+            with self.database.session() as session:
+                session.add(SchedulerLeaseRow(
                     lease_name=lease_name,
                     owner_id=owner_id,
                     expires_at=expires_at,
+                ))
+                session.flush()
+                return True
+        except IntegrityError:
+            return False
+
+    def release_lease(self, *, lease_name: str, owner_id: str) -> bool:
+        """Release only the caller's lease; never delete another owner's claim."""
+
+        with self.database.session() as session:
+            result = session.execute(
+                delete(SchedulerLeaseRow).where(
+                    SchedulerLeaseRow.lease_name == lease_name,
+                    SchedulerLeaseRow.owner_id == owner_id,
                 )
-            else:
-                row.owner_id = owner_id
-                row.expires_at = expires_at
-            session.add(row)
-            return True
+            )
+            return result.rowcount == 1
+
+    def renew_lease(
+        self,
+        *,
+        lease_name: str,
+        owner_id: str,
+        expires_at: datetime,
+    ) -> bool:
+        """Renew only an unexpired lease still owned by the caller.
+
+        Refusing resurrection after expiry is the fencing boundary: once a
+        later owner can acquire the name, an earlier operation cannot resume.
+        """
+
+        now = datetime.now(timezone.utc)
+        with self.database.session() as session:
+            result = session.execute(
+                update(SchedulerLeaseRow)
+                .where(
+                    SchedulerLeaseRow.lease_name == lease_name,
+                    SchedulerLeaseRow.owner_id == owner_id,
+                    SchedulerLeaseRow.expires_at > now,
+                )
+                .values(expires_at=expires_at)
+            )
+            return result.rowcount == 1
 
     def audit(
         self,

@@ -51,6 +51,16 @@ API only:
   the sandbox URL.
 - Other provider credentials and execution-mode flags only for integrations
   deliberately activated in that environment.
+- `HOME_MERCHANT_MODE=real` enables real Zepto catalog/cart/quote calls without
+  enabling payment. Keep `HOME_PAYMENT_MODE=disclosed_mock` until the controlled
+  live-money boundary is ready. Real payment additionally requires
+  `HOME_PAYMENT_MODE=real`, `ZEPTO_REAL_PAYMENT_ENABLED=1`, an exact
+  `ZEPTO_PAYMENT_ALLOWED_HOSTS` list observed and approved by the operator, and
+  an absolute reviewed `ZEPTO_PAYMENT_EXECUTOR_PATH`. The executor receives the
+  consume-once fields only over stdin and must return sanitized JSON.
+- `ZEPTO_DEVICE_ID` is runtime-only; tracked items persist only an opaque saved
+  address reference. `ZEPTO_ADDRESS_ID` is retained solely for the explicit
+  local integration harness and is not the production workflow source.
 
 Worker only:
 
@@ -65,6 +75,26 @@ Under its database lease it identifies due item IDs, then asks the API process t
 load canonical user/item data and begin the workflow. The database's unique active
 workflow constraint suppresses a repeated trigger request, and the API independently
 re-checks that the item is active and due before creating the Prava session.
+
+The production image includes the Node.js 24 runtime and installs the Zepto
+bridge's `mcp-remote@0.1.38` dependency at image-build time from a committed npm
+lockfile with integrity hashes. Runtime calls execute that image-local binary and
+never download code through npm/npx; CI verifies it in a container with networking
+disabled. This makes the executable reproducible, but it does not provision Zepto
+authorization. `mcp-remote` stores OAuth state in
+`MCP_REMOTE_CONFIG_DIR` (defaulted by the image to `/home/restock/.mcp-auth`). Before
+enabling live Zepto calls on Railway, attach a persistent encrypted volume at that
+path and complete the interactive OAuth/mobile-OTP flow through an operator-controlled
+session. An ephemeral filesystem will lose authorization on redeploy. Never copy the
+local OAuth cache into the image, repository, logs, or Railway variables.
+`MCP_REMOTE_BINARY` must remain unset in production: the image rejects any
+override of its integrity-locked `/opt/zepto-mcp/node_modules/.bin/mcp-remote`.
+The public capability response labels cache presence `configured_unverified`.
+Only a successful MCP initialize/tool call in the current process produces the
+short-lived `verified_recently` state required for real-money readiness; it
+expires after `MCP_AUTHORIZATION_VERIFICATION_TTL_SECONDS` (300 seconds by
+default) and is cleared by a later bridge, authorization, or provider-call
+failure.
 
 Slack only:
 

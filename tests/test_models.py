@@ -44,6 +44,8 @@ def predicted_item_data() -> dict:
         "sensitive_flag": False,
         "preferred_merchant": "zepto",
         "merchant_sku_id": "coffee-500g",
+        "merchant_address_ref": "saved-address-home-1",
+        "quantity": 1,
         "currency": "INR",
         "status": "active",
         "typical_cadence_days": 14.0,
@@ -91,6 +93,8 @@ def test_valid_tracked_items_cover_both_trigger_tracks() -> None:
         )
     )
     assert predicted.price_threshold == Decimal("400.00")
+    assert predicted.merchant_address_ref == "saved-address-home-1"
+    assert predicted.quantity == 1
     assert predicted.renewal_date is None
     assert TrackedItem(**known_date_item_data()).typical_cadence_days is None
 
@@ -112,6 +116,37 @@ def test_known_date_item_requires_its_trigger_fields() -> None:
 def test_known_date_item_rejects_predicted_price_fields() -> None:
     with pytest.raises(ValidationError):
         TrackedItem(**(known_date_item_data() | {"price_threshold": "400.00"}))
+
+
+def test_legacy_predicted_item_may_omit_real_quote_context() -> None:
+    data = predicted_item_data()
+    data.pop("merchant_address_ref")
+    data.pop("quantity")
+    item = TrackedItem(**data)
+    assert item.merchant_address_ref is None
+    assert item.quantity is None
+
+
+@pytest.mark.parametrize("quantity", [0, -1, True])
+def test_predicted_item_rejects_invalid_quantity(quantity: object) -> None:
+    with pytest.raises(ValidationError):
+        TrackedItem(**(predicted_item_data() | {"quantity": quantity}))
+
+
+def test_known_date_item_rejects_home_quote_context() -> None:
+    with pytest.raises(ValidationError):
+        TrackedItem(
+            **(
+                known_date_item_data()
+                | {"merchant_address_ref": "saved-address-home-1", "quantity": 1}
+            )
+        )
+
+
+@pytest.mark.parametrize("forbidden_field", ["address", "phone", "device_id"])
+def test_tracked_item_rejects_raw_merchant_context(forbidden_field: str) -> None:
+    with pytest.raises(ValidationError):
+        TrackedItem(**(predicted_item_data() | {forbidden_field: "must-not-persist"}))
 
 
 def test_valid_intent() -> None:

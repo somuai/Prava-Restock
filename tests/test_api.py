@@ -1,11 +1,14 @@
 import json
 import os
+from datetime import datetime, timezone
+from uuid import UUID
 
 from fastapi.testclient import TestClient
 
-from common import notification_store, password_auth
+from common import audit_store, notification_store, password_auth
 from demo.seed_reset import demo_user, load_seed_items
 from merchant import zepto_checkout
+from payments.models import AuditLogEntry
 from storage import Database, RestockRepository
 from ui import api
 from scripts.validate_service_env import validate as validate_service_environment
@@ -25,6 +28,7 @@ def test_hello_world_and_health_endpoints(monkeypatch) -> None:
     assert payload["mode"] == "mixed"
     assert payload["capabilities"]["prava_mode"] == "sandbox_unconfigured"
     assert payload["capabilities"]["home_merchant_mode"] == "disclosed_mock"
+    assert payload["capabilities"]["home_payment_mode"] == "disclosed_mock"
     assert payload["capabilities"]["real_money_enabled"] is False
     assert client.get("/health").json() == {"status": "healthy"}
     assert client.get("/capabilities").json()["real_money_enabled"] is False
@@ -77,8 +81,15 @@ def test_runtime_modes_require_complete_slack_and_environment_bound_prava(monkey
     assert api.runtime_modes()["real_money_enabled"] is False
 
     monkeypatch.setenv("PRAVA_PRODUCTION_ENABLED", "1")
+    monkeypatch.setenv("RESTOCK_ENV", "production")
+    monkeypatch.setenv("RESTOCK_DEMO_MODE", "0")
     monkeypatch.setenv("HOME_MERCHANT_MODE", "real")
+    monkeypatch.setenv("HOME_PAYMENT_MODE", "real")
     monkeypatch.setenv("ZEPTO_REAL_PAYMENT_ENABLED", "1")
+    monkeypatch.setenv("ZEPTO_CART_PREPARATION_ENABLED", "1")
+    monkeypatch.setenv("ZEPTO_DEVICE_ID", "device-reference")
+    monkeypatch.setattr(api, "mcp_remote_runtime_ready", lambda: True)
+    monkeypatch.setattr(api, "_zepto_oauth_status", lambda: "verified_recently")
     monkeypatch.delattr(zepto_checkout, "real_payment_runtime_ready", raising=False)
     assert api.runtime_modes()["real_money_enabled"] is False
     assert api.runtime_modes()["home_checkout_runtime_configured"] is False
@@ -93,9 +104,12 @@ def test_runtime_modes_require_complete_slack_and_environment_bound_prava(monkey
 def test_production_readiness_fails_closed_without_real_checkout_runtime(monkeypatch) -> None:
     monkeypatch.setenv("RESTOCK_ENV", "production")
     monkeypatch.setenv("HOME_MERCHANT_MODE", "real")
+    monkeypatch.setenv("HOME_PAYMENT_MODE", "real")
     monkeypatch.setenv("ZEPTO_REAL_PAYMENT_ENABLED", "1")
     monkeypatch.delattr(zepto_checkout, "real_payment_runtime_ready", raising=False)
     monkeypatch.setattr(api, "validate_service_environment", lambda service, env: [])
+    monkeypatch.setattr(api, "mcp_remote_runtime_ready", lambda: True)
+    monkeypatch.setattr(api, "_zepto_oauth_status", lambda: "verified_recently")
 
     assert api.production_configuration_issues() == [
         "ZEPTO_REAL_CHECKOUT_RUNTIME_UNAVAILABLE"
@@ -103,13 +117,91 @@ def test_production_readiness_fails_closed_without_real_checkout_runtime(monkeyp
     assert client.get("/ready").status_code == 503
 
 
-def test_audit_log_endpoint_reads_json_file(tmp_path, monkeypatch) -> None:
-    audit_path = tmp_path / "audit.json"
-    audit_path.write_text(json.dumps([{"event_type": "transaction_completed"}]))
+def test_capabilities_fail_closed_for_invalid_checkout_executor(monkeypatch) -> None:
+    monkeypatch.setenv("HOME_MERCHANT_MODE", "real")
+    monkeypatch.setenv("HOME_PAYMENT_MODE", "real")
+    monkeypatch.setenv("ZEPTO_REAL_PAYMENT_ENABLED", "1")
+    monkeypatch.setenv("ZEPTO_PAYMENT_EXECUTOR_PATH", "/missing/restock-executor")
+
+    response = client.get("/capabilities")
+
+    assert response.status_code == 200
+    assert response.json()["real_money_enabled"] is False
+    assert response.json()["home_checkout_runtime_configured"] is False
+    assert response.json()["home_checkout_runtime_status"] == "invalid_configuration"
+
+
+def test_real_money_requires_cart_device_mcp_and_oauth_prerequisites(monkeypatch) -> None:
+    monkeypatch.setenv("RESTOCK_ENV", "production")
+    monkeypatch.setenv("RESTOCK_DEMO_MODE", "0")
+    monkeypatch.setenv("PRAVA_API_KEY", "sk_live_runtime")
+    monkeypatch.setenv("PRAVA_API_URL", "https://api.prava.space")
+    monkeypatch.setenv("PRAVA_PRODUCTION_ENABLED", "1")
+    monkeypatch.setenv("HOME_MERCHANT_MODE", "real")
+    monkeypatch.setenv("HOME_PAYMENT_MODE", "real")
+    monkeypatch.setenv("ZEPTO_REAL_PAYMENT_ENABLED", "1")
+    monkeypatch.setattr(zepto_checkout, "real_payment_runtime_ready", lambda: True)
+    monkeypatch.setattr(api, "mcp_remote_runtime_ready", lambda: True)
+    monkeypatch.setattr(api, "_zepto_oauth_status", lambda: "configured_unverified")
+
+    monkeypatch.delenv("ZEPTO_CART_PREPARATION_ENABLED", raising=False)
+    monkeypatch.delenv("ZEPTO_DEVICE_ID", raising=False)
+    assert api.runtime_modes()["real_money_enabled"] is False
+
+    monkeypatch.setenv("ZEPTO_CART_PREPARATION_ENABLED", "1")
+    assert api.runtime_modes()["real_money_enabled"] is False
+
+    monkeypatch.setenv("ZEPTO_DEVICE_ID", "device-reference")
+    assert api.runtime_modes()["real_money_enabled"] is False
+
+    monkeypatch.setattr(api, "_zepto_oauth_status", lambda: "verified_recently")
+    assert api.runtime_modes()["real_money_enabled"] is True
+
+    monkeypatch.setattr(api, "mcp_remote_runtime_ready", lambda: False)
+    assert api.runtime_modes()["real_money_enabled"] is False
+
+
+def test_configured_unverified_oauth_allows_readiness_but_not_money(monkeypatch) -> None:
+    monkeypatch.setenv("RESTOCK_ENV", "production")
+    monkeypatch.setenv("HOME_PAYMENT_MODE", "real")
+    monkeypatch.setenv("ZEPTO_REAL_PAYMENT_ENABLED", "1")
+    monkeypatch.setattr(api, "validate_service_environment", lambda service, env: [])
+    monkeypatch.setattr(api, "_merchant_runtime_status", lambda: (True, "configured"))
+    monkeypatch.setattr(api, "mcp_remote_runtime_ready", lambda: True)
+    monkeypatch.setattr(api, "_zepto_oauth_status", lambda: "configured_unverified")
+
+    assert api.production_configuration_issues() == []
+    assert api.runtime_modes()["real_money_enabled"] is False
+
+
+def test_zepto_oauth_capability_reports_presence_without_verification(
+    tmp_path, monkeypatch
+) -> None:
+    cache = tmp_path / "mcp-auth"
+    monkeypatch.setenv("MCP_REMOTE_CONFIG_DIR", str(cache))
+    monkeypatch.setattr(api, "mcp_authorization_verified_recently", lambda: False)
+    assert api.runtime_modes()["zepto_oauth_status"] == "unknown"
+
+    cache.mkdir()
+    (cache / "oauth-state.json").write_text("not inspected")
+    assert api.runtime_modes()["zepto_oauth_status"] == "configured_unverified"
+
+    monkeypatch.setattr(api, "mcp_authorization_verified_recently", lambda: True)
+    assert api.runtime_modes()["zepto_oauth_status"] == "verified_recently"
+
+
+def test_audit_log_endpoint_reads_sqlite_store(tmp_path, monkeypatch) -> None:
+    audit_path = tmp_path / "audit.db"
     monkeypatch.setattr(api, "AUDIT_LOG_PATH", audit_path)
-    assert client.get("/audit-log", headers=AUTH_HEADERS).json() == [
-        {"event_type": "transaction_completed"}
-    ]
+    entry = AuditLogEntry(
+        log_id=UUID("00000000-0000-0000-0000-000000000088"),
+        user_id=UUID(api.DEFAULT_USER_ID),
+        event_type="transaction_completed",
+        payload={"amount": "380.00"},
+        timestamp=datetime.now(timezone.utc),
+    )
+    expected = audit_store.append(entry, audit_path)
+    assert client.get("/audit-log", headers=AUTH_HEADERS).json() == [expected]
 
 
 def test_pending_notifications_endpoint_returns_only_pending_store(

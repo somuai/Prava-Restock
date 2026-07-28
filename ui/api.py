@@ -25,8 +25,13 @@ from channels import whatsapp
 from channels.slack_routes import router as slack_service_router
 from workflow.service_routes import router as worker_service_router
 from merchant import swiggy_checkout, zepto_checkout
+from merchant.zepto_mcp import (
+    mcp_authorization_verified_recently,
+    mcp_remote_runtime_ready,
+)
 from storage import Database, RestockRepository
 from workflow import WorkflowService
+from workflow.factory import build_workflow_service, configure_merchant_runtime
 from scripts.validate_service_env import validate as validate_service_environment
 
 
@@ -105,7 +110,44 @@ def get_repository() -> RestockRepository:
     return REPOSITORY
 
 
+def _merchant_runtime_status() -> tuple[bool, str]:
+    """Compose local dependencies without leaking paths or provider details."""
+
+    executable = os.getenv("ZEPTO_PAYMENT_EXECUTOR_PATH", "").strip()
+    if executable:
+        path = Path(executable)
+        if not path.is_absolute() or not path.is_file() or not os.access(path, os.X_OK):
+            zepto_checkout.configure_real_checkout_runtime(None)
+            return False, "invalid_configuration"
+    try:
+        configure_merchant_runtime(get_repository())
+    except (OSError, RuntimeError, ValueError):
+        zepto_checkout.configure_real_checkout_runtime(None)
+        return False, "invalid_configuration"
+    ready_check = getattr(zepto_checkout, "real_payment_runtime_ready", None)
+    ready = bool(callable(ready_check) and ready_check())
+    return ready, "configured" if ready else "unavailable"
+
+
+def _zepto_oauth_status() -> str:
+    """Report cache presence only; cached authorization is never claimed verified."""
+
+    if mcp_authorization_verified_recently():
+        return "verified_recently"
+    config_dir = Path(
+        os.getenv("MCP_REMOTE_CONFIG_DIR", str(Path.home() / ".mcp-auth"))
+    ).expanduser()
+    try:
+        configured = config_dir.is_dir() and any(entry.is_file() for entry in config_dir.iterdir())
+    except OSError:
+        configured = False
+    return "configured_unverified" if configured else "unknown"
+
+
 def runtime_modes() -> dict[str, str | bool]:
+    # Composition is local and side-effect-free: it does not contact Zepto.
+    # This makes readiness truthful before the first workflow request.
+    zepto_runtime_ready, zepto_runtime_status = _merchant_runtime_status()
     prava_key = os.getenv("PRAVA_API_KEY", "").strip()
     prava_url = (
         os.getenv("PRAVA_API_URL", "").strip()
@@ -136,22 +178,36 @@ def runtime_modes() -> dict[str, str | bool]:
             "RESTOCK_PUBLIC_APP_URL",
         )
     )
-    runtime_ready_check = getattr(zepto_checkout, "real_payment_runtime_ready", None)
-    zepto_runtime_ready = bool(
-        callable(runtime_ready_check) and runtime_ready_check()
+    oauth_status = _zepto_oauth_status()
+    mcp_runtime_ready = mcp_remote_runtime_ready()
+    production = os.getenv("RESTOCK_ENV", "development") == "production"
+    demo_disabled = os.getenv("RESTOCK_DEMO_MODE", "1") == "0"
+    cart_ready = (
+        os.getenv("ZEPTO_CART_PREPARATION_ENABLED") == "1"
+        and bool(os.getenv("ZEPTO_DEVICE_ID", "").strip())
     )
     return {
         "prava_mode": prava_mode,
         "home_merchant_mode": zepto_checkout.merchant_mode().value,
+        "home_payment_mode": zepto_checkout.payment_mode().value,
         "swiggy_payment_mode": swiggy_checkout.payment_mode().value,
         "teams_billing_mode": "disclosed_mock",
         "real_money_enabled": (
             zepto_checkout.merchant_mode().value == "real"
+            and zepto_checkout.payment_mode().value == "real"
             and os.getenv("ZEPTO_REAL_PAYMENT_ENABLED") == "1"
             and prava_mode == "production_configured"
             and zepto_runtime_ready
+            and mcp_runtime_ready
+            and cart_ready
+            and production
+            and demo_disabled
+            and oauth_status == "verified_recently"
         ),
         "home_checkout_runtime_configured": zepto_runtime_ready,
+        "home_checkout_runtime_status": zepto_runtime_status,
+        "zepto_mcp_runtime_configured": mcp_runtime_ready,
+        "zepto_oauth_status": oauth_status,
         "slack_configured": slack_configured,
         "whatsapp_configured": all(
             os.getenv(name, "").strip()
@@ -171,13 +227,25 @@ def production_configuration_issues() -> list[str]:
     if os.getenv("RESTOCK_ENV", "development") != "production":
         return []
     issues = validate_service_environment("api", os.environ)
+    zepto_runtime_ready, zepto_runtime_status = _merchant_runtime_status()
     if (
-        zepto_checkout.merchant_mode().value == "real"
+        zepto_checkout.payment_mode().value == "real"
         and os.getenv("ZEPTO_REAL_PAYMENT_ENABLED") == "1"
     ):
-        runtime_ready_check = getattr(zepto_checkout, "real_payment_runtime_ready", None)
-        if not callable(runtime_ready_check) or not runtime_ready_check():
+        if not zepto_runtime_ready:
             issues.append("ZEPTO_REAL_CHECKOUT_RUNTIME_UNAVAILABLE")
+        if zepto_runtime_status == "invalid_configuration":
+            issues.append("ZEPTO_PAYMENT_EXECUTOR_INVALID")
+        if not mcp_remote_runtime_ready():
+            issues.append("ZEPTO_MCP_RUNTIME_UNAVAILABLE")
+        oauth_status = _zepto_oauth_status()
+        if oauth_status == "unknown":
+            issues.append("ZEPTO_OAUTH_NOT_CONFIGURED")
+        # A configured cache is sufficient for process readiness. Actual money
+        # remains disabled until this API process completes a successful MCP
+        # call and upgrades the capability to ``verified_recently``. Treating
+        # that runtime verification as a startup error would deadlock the first
+        # quote behind Railway's readiness gate.
     return sorted(set(issues))
 
 
@@ -634,7 +702,7 @@ def workflow_action(
     repository: RestockRepository = Depends(get_repository),
 ) -> dict[str, Any]:
     try:
-        return WorkflowService(repository).act(
+        return build_workflow_service(repository).act(
             run_id,
             user_id=user_id,
             action=body.action,
@@ -656,7 +724,7 @@ def approval_url(
     if run["user_id"] != user_id:
         raise HTTPException(status_code=403, detail="workflow belongs to a different user")
     try:
-        return {"approval_url": WorkflowService(repository).approval_url(run_id)}
+        return {"approval_url": build_workflow_service(repository).approval_url(run_id)}
     except RuntimeError as exc:
         raise HTTPException(status_code=410, detail=str(exc)) from exc
 
@@ -671,7 +739,7 @@ def resume_workflow(
     if run["user_id"] != user_id:
         raise HTTPException(status_code=403, detail="workflow belongs to a different user")
     try:
-        return WorkflowService(repository).resume_after_passkey(run_id)
+        return build_workflow_service(repository).resume_after_passkey(run_id)
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -686,7 +754,7 @@ def reconcile_checkout(
     if run["user_id"] != user_id:
         raise HTTPException(status_code=403, detail="workflow belongs to a different user")
     try:
-        return WorkflowService(repository).reconcile_checkout(run_id)
+        return build_workflow_service(repository).reconcile_checkout(run_id)
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -719,7 +787,7 @@ async def whatsapp_webhook(
             processed.append({"run_id": action["run_id"], "status": "open_adjust_ui"})
             continue
         run = repository.get_workflow(action["run_id"])
-        WorkflowService(repository).act(
+        build_workflow_service(repository).act(
             action["run_id"],
             user_id=run["user_id"],
             action=action["action"],

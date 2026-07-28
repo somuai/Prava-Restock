@@ -3,6 +3,7 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+from merchant.models import MerchantQuote
 from payments import prava_client
 from payments.models import TrackedItem, User
 from storage import Database, RestockRepository
@@ -93,6 +94,95 @@ def test_worker_service_route_rechecks_trigger_condition(tmp_path, monkeypatch) 
     assert repository.list_workflows(str(item.user_id)) == []
 
 
+def test_worker_uses_fresh_exact_quote_for_prava_amount(tmp_path, monkeypatch) -> None:
+    repository = RestockRepository(Database(f"sqlite:///{tmp_path / 'service.db'}"))
+    repository.create_schema()
+    item = persisted_item(repository)
+    monkeypatch.setattr(service_routes, "REPOSITORY", repository)
+    monkeypatch.setenv("RESTOCK_WORKER_SERVICE_TOKEN", SERVICE_TOKEN)
+    amounts = []
+
+    class FakeProvider:
+        def __call__(self, canonical_item):
+            assert canonical_item.item_id == item.item_id
+            return MerchantQuote(
+                merchant="zepto",
+                merchant_sku_id=canonical_item.merchant_sku_id,
+                product_name=canonical_item.name,
+                amount="415",
+                currency="INR",
+                stock_status="in_stock",
+                quote_reference="exact-cart-quote",
+                observed_at=datetime.now(timezone.utc),
+                execution_mode="real",
+            )
+
+    monkeypatch.setattr(
+        service_routes,
+        "build_home_quote_provider",
+        lambda repository: FakeProvider(),
+    )
+    monkeypatch.setattr(
+        prava_client,
+        "create_intent",
+        lambda merchant, amount, description, constraints: amounts.append(amount) or "intent",
+    )
+
+    response = TestClient(app).post(
+        f"/api/v1/service/worker/items/{item.item_id}/trigger",
+        headers={"Authorization": f"Bearer {SERVICE_TOKEN}"},
+    )
+
+    assert response.status_code == 200
+    assert amounts == [415]
+    run = repository.list_workflows(str(item.user_id))[0]
+    assert str(run["proposed_amount"]) == "415.00"
+    assert run["quote"]["merchant_sku_id"] == item.merchant_sku_id
+
+
+def test_worker_swiggy_item_never_touches_zepto_quote_provider(tmp_path, monkeypatch) -> None:
+    repository = RestockRepository(Database(f"sqlite:///{tmp_path / 'service.db'}"))
+    repository.create_schema()
+    original = persisted_item(repository)
+    item = TrackedItem.model_validate(
+        original.model_dump() | {
+            "item_id": uuid4(),
+            "name": "Seeded printer paper",
+            "preferred_merchant": "swiggy",
+            "merchant_sku_id": "swiggy-paper-exact",
+        }
+    )
+    repository.upsert_item(item)
+    monkeypatch.setattr(service_routes, "REPOSITORY", repository)
+    monkeypatch.setenv("RESTOCK_WORKER_SERVICE_TOKEN", SERVICE_TOKEN)
+    monkeypatch.setenv("HOME_MERCHANT_MODE", "real")
+    monkeypatch.setattr(
+        service_routes,
+        "build_home_quote_provider",
+        lambda repository: type(
+            "ZeptoOnlyProvider",
+            (),
+            {
+                "supports": staticmethod(lambda candidate: False),
+                "__call__": lambda self, candidate: (_ for _ in ()).throw(
+                    AssertionError("Swiggy item touched Zepto")
+                ),
+            },
+        )(),
+    )
+    monkeypatch.setattr(prava_client, "create_intent", lambda *_args, **_kwargs: "intent")
+
+    response = TestClient(app).post(
+        f"/api/v1/service/worker/items/{item.item_id}/trigger",
+        headers={"Authorization": f"Bearer {SERVICE_TOKEN}"},
+    )
+
+    assert response.status_code == 200
+    run = repository.list_workflows(str(item.user_id))[0]
+    assert run["state"] == "notified"
+    assert run["quote"] is None
+
+
 def test_worker_service_route_fails_closed_without_secure_token(monkeypatch) -> None:
     monkeypatch.delenv("RESTOCK_WORKER_SERVICE_TOKEN", raising=False)
 
@@ -103,3 +193,40 @@ def test_worker_service_route_fails_closed_without_secure_token(monkeypatch) -> 
 
     assert response.status_code == 503
     assert response.json() == {"detail": "worker service authentication is not configured"}
+
+
+def test_worker_quote_failure_cooldown_avoids_repeated_merchant_calls(
+    tmp_path, monkeypatch
+) -> None:
+    repository = RestockRepository(Database(f"sqlite:///{tmp_path / 'service.db'}"))
+    repository.create_schema()
+    item = persisted_item(repository)
+    run = repository.create_workflow(
+        user_id=str(item.user_id),
+        item_id=str(item.item_id),
+        trigger_reason="predicted_depletion",
+        proposed_amount="380",
+        currency="INR",
+        merchant="zepto",
+        proposed_action=None,
+        quote=None,
+        modes={"prava": "sandbox", "home_payment": "real"},
+        idempotency_key=f"cooldown-{uuid4().hex}",
+    )
+    repository.transition(
+        run["run_id"],
+        expected={"triggered"},
+        state="failed",
+        error_code="HOME_QUOTE_FAILED",
+    )
+    monkeypatch.setattr(service_routes, "REPOSITORY", repository)
+    monkeypatch.setenv("RESTOCK_WORKER_SERVICE_TOKEN", SERVICE_TOKEN)
+
+    response = TestClient(app).post(
+        f"/api/v1/service/worker/items/{item.item_id}/trigger",
+        headers={"Authorization": f"Bearer {SERVICE_TOKEN}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "quote_cooldown"
+    assert len(repository.list_workflows(str(item.user_id))) == 1

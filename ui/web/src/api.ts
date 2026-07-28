@@ -1,6 +1,7 @@
 export type Capabilities = {
   prava_mode: string;
   home_merchant_mode: string;
+  home_payment_mode: string;
   teams_billing_mode: string;
   real_money_enabled: boolean;
   slack_configured: boolean;
