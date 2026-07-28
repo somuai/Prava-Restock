@@ -1,80 +1,60 @@
----
-name: restock-trigger-math
-description: Stateless utility service for agents that need a simple depletion-date calculation or a transparent subscription-renewal recommendation. Use when an agent needs to predict when a household consumable will run out, or when comparing two subscription plan prices.
-version: 1.0.0
-license: MIT
----
+# Restock Trigger Math
 
-# Service Name: Restock Trigger Math
+Stateless utility service for agents that calculate replenishment dates and compare two subscription prices.
 
-## Description
+https://restock-trigger-math-production.up.railway.app
 
-A stateless, side-effect-free utility that exposes two calculations useful to any AI agent managing recurring purchases or subscription renewals:
+## GET /health
 
-1. **Depletion prediction** — given a last-purchase date and a typical reorder cadence, returns the predicted depletion date and days remaining.
-2. **Renewal evaluation** — given a current plan amount and an alternate plan amount, recommends the cheaper option and reports the exact savings.
+Confirms that the public service is available.
 
-No user data, no credentials, no payment logic. Pure math, deliberately generic so any agent could call it.
+```bash
+curl -sS https://restock-trigger-math-production.up.railway.app/health
+```
 
-## Web Address
+Example response:
 
-https://restock-trigger-math.up.railway.app
+```json
+{"status":"healthy"}
+```
 
-## Endpoints
+## POST /predict-depletion
 
-- **GET /health**: Liveness probe.
-  - **Response:**
-    ```json
-    {"status": "healthy"}
-    ```
+Calculates an expected depletion date and days remaining from a last-purchase date and a positive cadence.
 
-- **POST /predict-depletion**: Calculate the predicted depletion date.
-  - **Headers:** `Content-Type: application/json`
-  - **Body:**
-    ```json
-    {
-      "last_purchased_at": "2026-07-10",
-      "typical_cadence_days": 14
-    }
-    ```
-  - **Response:**
-    ```json
-    {
-      "predicted_depletion_date": "2026-07-24",
-      "days_until_depletion": 0
-    }
-    ```
-  - **Validation:** `typical_cadence_days` must be > 0. Returns HTTP 422 on invalid input.
+```bash
+curl -sS -X POST https://restock-trigger-math-production.up.railway.app/predict-depletion \
+  -H 'Content-Type: application/json' \
+  -d '{"last_purchased_at":"2026-07-10","typical_cadence_days":14}'
+```
 
-- **POST /evaluate-renewal**: Compare two subscription plan prices.
-  - **Headers:** `Content-Type: application/json`
-  - **Body:**
-    ```json
-    {
-      "current_plan_amount": "2400.00",
-      "alternate_plan_amount": "2200.00"
-    }
-    ```
-  - **Response:**
-    ```json
-    {
-      "recommended_action": "switch_to_alternate",
-      "savings_amount": "200.00"
-    }
-    ```
-  - **Validation:** Both amounts must be > 0. Returns HTTP 422 on invalid input.
+Example response:
 
-## Usage Steps
+```json
+{"predicted_depletion_date":"2026-07-24","days_until_depletion":0}
+```
 
-1. **Step 1 — Health Check:** Send `GET /health` to verify the service is available.
-2. **Step 2 — Predict Depletion:** Construct a JSON payload with `last_purchased_at` (ISO 8601 date) and `typical_cadence_days` (positive number). Send `POST /predict-depletion`.
-3. **Step 3 — Interpret Result:** Use `predicted_depletion_date` to schedule a reminder. Use `days_until_depletion` to assess urgency (≤ 2 = imminent).
-4. **Step 4 — Evaluate Renewal:** Construct a JSON payload with `current_plan_amount` and `alternate_plan_amount` (decimal strings). Send `POST /evaluate-renewal`.
-5. **Step 5 — Act on Recommendation:** If `recommended_action` is `switch_to_alternate`, present the savings to the user. Always obtain explicit user approval before changing a plan.
+## POST /evaluate-renewal
 
-## Security & Best Practices
+Compares a current plan price with an alternate price and returns the cheaper recommended action plus savings.
 
-- **Stateless:** No data is stored. No authentication required.
-- **No sensitive data:** Do not send credentials, payment details, user identity, or any PII. The service has no merchant or payment side effects.
-- **Rate limits:** Standard Railway platform limits apply.
-- **Error handling:** HTTP 422 for validation errors, HTTP 500 for unexpected errors. All error responses include a `detail` field.
+```bash
+curl -sS -X POST https://restock-trigger-math-production.up.railway.app/evaluate-renewal \
+  -H 'Content-Type: application/json' \
+  -d '{"current_plan_amount":"2400.00","alternate_plan_amount":"2200.00"}'
+```
+
+Example response:
+
+```json
+{"recommended_action":"switch_to_alternate","savings_amount":"200.00"}
+```
+
+## Agent usage steps
+
+1. Call `GET /health` before relying on the service.
+2. Call `POST /predict-depletion` only when you know the ISO 8601 last-purchase date and a positive cadence in days.
+3. Use the returned date and days remaining as a calculation, not proof that the user wants a purchase.
+4. Call `POST /evaluate-renewal` when you have two positive prices in the same currency.
+5. Treat `switch_to_alternate` as a recommendation; obtain explicit user approval before changing any plan.
+6. Never send credentials, payment data, identity, or other sensitive data. This service is stateless and makes no merchant or payment calls.
