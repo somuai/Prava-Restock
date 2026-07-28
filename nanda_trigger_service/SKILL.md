@@ -12,8 +12,7 @@ Confirms that the public service is available.
 curl -sS https://restock-trigger-math-production.up.railway.app/health
 ```
 
-Illustrative response captured on 24 July 2026 (the `days_until_depletion`
-value is evaluated on the day of each request):
+Example response:
 
 ```json
 {"status":"healthy"}
@@ -21,15 +20,18 @@ value is evaluated on the day of each request):
 
 ## POST /predict-depletion
 
-Calculates an expected depletion date and days remaining from a last-purchase date and a positive cadence.
+Calculates an expected depletion date and days remaining from a last-purchase
+date and a positive cadence. `as_of_date` is optional; supply it when a
+deterministic calendar-day result matters, otherwise the service uses its
+current server date.
 
 ```bash
 curl -sS -X POST https://restock-trigger-math-production.up.railway.app/predict-depletion \
   -H 'Content-Type: application/json' \
-  -d '{"last_purchased_at":"2026-07-10","typical_cadence_days":14}'
+  -d '{"last_purchased_at":"2026-07-10","typical_cadence_days":14,"as_of_date":"2026-07-24"}'
 ```
 
-Example response:
+Deterministic response for the supplied `as_of_date`:
 
 ```json
 {"predicted_depletion_date":"2026-07-24","days_until_depletion":0}

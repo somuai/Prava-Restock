@@ -33,6 +33,22 @@ def test_predict_depletion_rejects_non_positive_cadence() -> None:
     assert response.status_code == 422
 
 
+def test_predict_depletion_accepts_deterministic_as_of_date() -> None:
+    response = client.post(
+        "/predict-depletion",
+        json={
+            "last_purchased_at": "2026-07-10",
+            "typical_cadence_days": 14,
+            "as_of_date": "2026-07-24",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "predicted_depletion_date": "2026-07-24",
+        "days_until_depletion": 0,
+    }
+
+
 def test_evaluate_renewal_recommends_switch_and_reports_savings() -> None:
     response = client.post(
         "/evaluate-renewal",

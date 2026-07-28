@@ -34,6 +34,7 @@ app = FastAPI(
 class DepletionRequest(BaseModel):
     last_purchased_at: date
     typical_cadence_days: float = Field(gt=0)
+    as_of_date: date | None = None
 
 
 class DepletionResponse(BaseModel):
@@ -70,6 +71,7 @@ def predict_depletion(request: DepletionRequest) -> DepletionResponse:
     depletion_date, remaining_days = predict_depletion_math(
         request.last_purchased_at,
         request.typical_cadence_days,
+        today=request.as_of_date,
     )
     return DepletionResponse(
         predicted_depletion_date=depletion_date,
