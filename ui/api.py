@@ -476,11 +476,19 @@ def metrics() -> dict[str, float]:
 
 @app.get("/audit-log")
 def legacy_audit_log(_: str = Depends(require_user)) -> list[dict[str, Any]]:
+    if os.getenv("RESTOCK_ENV", "development") == "production":
+        # This compatibility table predates tenant-scoped workflow storage.
+        # Production callers must use the user-scoped /api/v1/audit endpoint.
+        raise HTTPException(status_code=404, detail="not found")
     return _read_audit_log()
 
 
 @app.get("/notifications/pending")
 def legacy_pending_notifications(_: str = Depends(require_user)) -> list[dict[str, Any]]:
+    if os.getenv("RESTOCK_ENV", "development") == "production":
+        # This compatibility table has no user/tenant ownership column.
+        # Production callers must use /api/v1/notifications/pending.
+        raise HTTPException(status_code=404, detail="not found")
     return notification_store.get_pending()
 
 

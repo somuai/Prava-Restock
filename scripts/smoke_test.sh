@@ -25,12 +25,15 @@ done
 auth_token="${RESTOCK_SMOKE_AUTH_TOKEN:-}"
 for path in /audit-log /notifications/pending; do
   if [[ -n "${auth_token}" ]]; then
-    if curl --fail --silent --show-error --max-time 15 \
+    status_code="$(curl --silent --show-error --max-time 15 \
       --header "Authorization: Bearer ${auth_token}" \
-      --output /dev/null "${base_url}${path}"; then
+      --output /dev/null --write-out '%{http_code}' "${base_url}${path}")"
+    if [[ "${status_code}" == "200" ]]; then
       echo "PASS ${path} (authenticated)"
+    elif [[ "${status_code}" == "404" ]]; then
+      echo "PASS ${path} (legacy compatibility endpoint disabled)"
     else
-      echo "FAIL ${path} (authenticated)" >&2
+      echo "FAIL ${path} (authenticated; got ${status_code})" >&2
       failed=1
     fi
     continue

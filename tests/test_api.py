@@ -5,7 +5,7 @@ from uuid import UUID
 
 from fastapi.testclient import TestClient
 
-from common import audit_store, notification_store, password_auth
+from common import audit_store, notification_store, password_auth, session_auth
 from demo.seed_reset import demo_user, load_seed_items
 from merchant import zepto_checkout
 from payments.models import AuditLogEntry
@@ -191,6 +191,7 @@ def test_zepto_oauth_capability_reports_presence_without_verification(
 
 
 def test_audit_log_endpoint_reads_sqlite_store(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("RESTOCK_ENV", "development")
     audit_path = tmp_path / "audit.db"
     monkeypatch.setattr(api, "AUDIT_LOG_PATH", audit_path)
     entry = AuditLogEntry(
@@ -207,6 +208,7 @@ def test_audit_log_endpoint_reads_sqlite_store(tmp_path, monkeypatch) -> None:
 def test_pending_notifications_endpoint_returns_only_pending_store(
     tmp_path, monkeypatch
 ) -> None:
+    monkeypatch.setenv("RESTOCK_ENV", "development")
     monkeypatch.setattr(
         notification_store, "NOTIFICATION_STORE_PATH", tmp_path / "notifications.json"
     )
@@ -220,6 +222,33 @@ def test_pending_notifications_endpoint_returns_only_pending_store(
     )
 
     assert client.get("/notifications/pending", headers=AUTH_HEADERS).json() == [created]
+
+
+def test_production_disables_unscoped_legacy_stores(monkeypatch) -> None:
+    """An authenticated production user cannot read cross-user compatibility data."""
+
+    secret = "production-session-secret-used-only-for-this-test"
+    user_id = "00000000-0000-0000-0000-000000000099"
+    token = session_auth.mint(user_id, secret)
+    monkeypatch.setenv("RESTOCK_ENV", "production")
+    monkeypatch.setenv("RESTOCK_SESSION_SECRET", secret)
+
+    def compatibility_store_must_not_be_read(*_args, **_kwargs):
+        raise AssertionError("production touched an unscoped compatibility store")
+
+    monkeypatch.setattr(api, "_read_audit_log", compatibility_store_must_not_be_read)
+    monkeypatch.setattr(
+        notification_store, "get_pending", compatibility_store_must_not_be_read
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+
+    audit_response = client.get("/audit-log", headers=headers)
+    notifications_response = client.get("/notifications/pending", headers=headers)
+
+    assert audit_response.status_code == 404
+    assert notifications_response.status_code == 404
+    assert audit_response.json() == {"detail": "not found"}
+    assert notifications_response.json() == {"detail": "not found"}
 
 
 def test_behavioral_endpoints_require_authentication() -> None:
