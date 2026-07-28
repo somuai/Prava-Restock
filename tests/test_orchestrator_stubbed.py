@@ -22,7 +22,7 @@ from agent.orchestrator import (
     request_prava_intent,
     spend_cap_guardrail,
 )
-from common import notification_store
+from common import audit_store, notification_store
 from payments import prava_client
 from payments.models import TrackedItem, User
 
@@ -114,7 +114,7 @@ def test_full_stubbed_cycle_notifies_and_logs_transaction(tmp_path) -> None:
     assert notification_store.get_pending()[0]["status"] == "pending"
     assert context.transactions[0].amount == Decimal("450")
     assert context.audit_entries[-1].event_type.value == "transaction_completed"
-    persisted = json.loads(context.audit_log_path.read_text())
+    persisted = audit_store.get_all(context.audit_log_path)
     assert persisted[-1]["event_type"] == "transaction_completed"
 
 

@@ -7,12 +7,14 @@ the busy-timeout configuration prevent data loss when two writers collide.
 
 import threading
 from datetime import datetime, timezone
+import json
 from uuid import uuid4
 
 import pytest
 
 from common import audit_store, notification_store
 from payments.models import AuditLogEntry
+from scripts.migrate_to_sqlite import migrate
 
 
 @pytest.fixture(autouse=True)
@@ -141,3 +143,42 @@ def test_concurrent_update_status_is_serialized() -> None:
     assert len(terminal) == 1
     assert terminal[0] in {"approved", "skipped"}
     assert notification_store.get_pending() == []
+
+
+def test_json_history_migration_preserves_notification_and_audit_records(
+    tmp_path, monkeypatch
+) -> None:
+    """The idempotent migration retains IDs, timestamps, and all source rows."""
+    database = tmp_path / "restock.db"
+    notifications_json = tmp_path / "notifications.json"
+    audit_json = tmp_path / "audit_log.json"
+    notification = {
+        "notification_id": str(uuid4()),
+        "item_id": "coffee-500g",
+        "message": "Coffee is due.",
+        "actions": ["approve", "skip"],
+        "status": "pending",
+        "created_at": "2026-07-28T00:00:00+00:00",
+        "updated_at": "2026-07-28T00:00:00+00:00",
+    }
+    audit = _audit_entry().model_dump(mode="json")
+    notifications_json.write_text(json.dumps([notification]), encoding="utf-8")
+    audit_json.write_text(json.dumps([audit]), encoding="utf-8")
+
+    assert migrate(
+        notification_json=notifications_json,
+        audit_json=audit_json,
+        database=database,
+    ) == (1, 1)
+    monkeypatch.setattr(notification_store, "NOTIFICATION_STORE_PATH", database)
+    monkeypatch.setattr(audit_store, "AUDIT_STORE_PATH", database)
+    assert notification_store.get_pending() == [notification]
+    assert audit_store.get_all(database) == [audit]
+
+    # Re-running keeps primary keys stable rather than duplicating history.
+    assert migrate(
+        notification_json=notifications_json,
+        audit_json=audit_json,
+        database=database,
+    ) == (1, 1)
+    assert len(audit_store.get_all(database)) == 1

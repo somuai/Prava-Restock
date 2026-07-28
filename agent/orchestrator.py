@@ -23,7 +23,7 @@ from agents import (
 )
 from pydantic import BaseModel
 
-from common import notification_store
+from common import audit_store, notification_store
 from merchant import mock_subscription_checkout, zepto_checkout
 from payments import prava_client
 from payments.models import (
@@ -43,7 +43,9 @@ from triggers import consumption_model, renewal_model
 
 
 ORCHESTRATOR_MODEL = "gpt-5.4-mini"
-DEFAULT_AUDIT_LOG_PATH = Path(__file__).resolve().parents[1] / "logs" / "audit_log.json"
+# ``audit_log_path`` is retained on ``OrchestratorContext`` for callers that
+# configure an isolated audit store.  It now points to SQLite, not JSON.
+DEFAULT_AUDIT_LOG_PATH = audit_store.AUDIT_STORE_PATH
 
 
 class SpendCapExceeded(ValueError):
@@ -201,9 +203,9 @@ def _request_prava_intent(
 
 
 def _persist_audit_log(context: OrchestratorContext) -> None:
-    context.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
-    serialized = [entry.model_dump(mode="json") for entry in context.audit_entries]
-    context.audit_log_path.write_text(json.dumps(serialized, indent=2) + "\n")
+    """Persist only the new entry; primary-key insertion makes retries safe."""
+    if context.audit_entries:
+        audit_store.append(context.audit_entries[-1], context.audit_log_path)
 
 
 def _log_event(

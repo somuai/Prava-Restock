@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from common import notification_store
+from common import audit_store, notification_store
 from common import password_auth
 from common import session_auth
 from channels import whatsapp
@@ -31,7 +31,7 @@ from scripts.validate_service_env import validate as validate_service_environmen
 
 
 ROOT = Path(__file__).resolve().parents[1]
-AUDIT_LOG_PATH = ROOT / "logs" / "audit_log.json"
+AUDIT_LOG_PATH = audit_store.AUDIT_STORE_PATH
 DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000001"
 LOCAL_DEMO_TOKEN = "restock-local-demo-token"
 REPOSITORY: RestockRepository | None = None
@@ -303,12 +303,7 @@ class ApprovalDecisionRequest(BaseModel):
 
 
 def _read_audit_log() -> list[dict[str, Any]]:
-    if not AUDIT_LOG_PATH.exists():
-        return []
-    data = json.loads(AUDIT_LOG_PATH.read_text())
-    if not isinstance(data, list):
-        raise ValueError("audit log must contain a JSON array")
-    return data
+    return audit_store.get_all(AUDIT_LOG_PATH)
 
 
 @app.get("/")

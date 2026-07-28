@@ -5,14 +5,14 @@ import json
 from pathlib import Path
 from uuid import UUID
 
-from common import notification_store
+from common import audit_store, notification_store
 from payments.models import TrackedItem, TriggerType, User
 from storage import Database, RestockRepository
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SEED_PATH = ROOT / "triggers" / "seed_data.json"
-AUDIT_LOG_PATH = ROOT / "logs" / "audit_log.json"
+AUDIT_LOG_PATH = audit_store.AUDIT_STORE_PATH
 
 
 def demo_user() -> User:
@@ -43,7 +43,7 @@ def load_seed_items(today: date | None = None) -> list[TrackedItem]:
 
 
 def reset_demo_state(today: date | None = None) -> list[TrackedItem]:
-    AUDIT_LOG_PATH.write_text("[]\n")
+    audit_store.reset(AUDIT_LOG_PATH)
     notification_store.reset()
     return load_seed_items(today)
 
