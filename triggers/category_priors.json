@@ -1,6 +1,32 @@
 {
-  "_source": "Instacart Market Basket Analysis Kaggle mirror (2017); data card lists CC0, original-source terms require separate review",
-  "_note": "Category-level median days-between-reorders. Seeds cold-start estimates only; per-user EWMA recalibration replaces these after the first completed purchase.",
-  "grocery": 11.0,
-  "health": 18.0
+  "_input_sha256": {
+    "departments.csv": "e6829cea3da95ec22eeb4e0294094a68b929f3bcfda48fdd7d1e33403110fc43",
+    "order_products__prior.csv": "27b59dc9cf0d485f55e64e0bc9c5d6fb077ae167f8dfeab9246a03b5b0186359",
+    "orders.csv": "92a60ced67ac33bd82271f66ff9675374f69482d17a0e1442ba42caa8b3bff89",
+    "products.csv": "abc61fdd748003d280ae49cc5d71b65380805ab1ca55dba96fd9a49295ea78b9"
+  },
+  "_method": "For each prior-order line with reordered=1, aggregate that order's days_since_prior_order by mapped product department. This is a basket-interval proxy, not an exact same-SKU reorder interval.",
+  "_source": "Kaggle dataset mirror psparks/instacart-market-basket-analysis, version 1; data card lists CC0-1.0",
+  "_statistics": {
+    "grocery": {
+      "average_days": 10.2085,
+      "departments": [
+        "beverages",
+        "pantry",
+        "snacks"
+      ],
+      "median_days": 7.0,
+      "sample_count": 4066166
+    },
+    "health": {
+      "average_days": 10.6572,
+      "departments": [
+        "personal care"
+      ],
+      "median_days": 7.0,
+      "sample_count": 143584
+    }
+  },
+  "grocery": 7.0,
+  "health": 7.0
 }

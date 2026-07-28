@@ -55,7 +55,7 @@ def _cold_start_item(category: str, cadence: float | None) -> TrackedItem:
 def test_new_known_category_item_seeds_from_lookup_table() -> None:
     """A new item in a known category ignores its estimate for the public prior."""
     item = _cold_start_item("grocery", cadence=20.0)
-    assert item.typical_cadence_days == 11.0
+    assert item.typical_cadence_days == 7.0
     assert item.last_purchased_at is None
     assert consumption_model.trigger_condition(item) is False
 
@@ -75,7 +75,7 @@ def test_no_prior_and_no_estimate_raises() -> None:
 def test_health_category_seeds_from_lookup_table() -> None:
     """Health category uses the personal-care derived prior."""
     cadence = consumption_model.seed_cadence_from_priors("health")
-    assert cadence == 18.0
+    assert cadence == 7.0
 
 
 def test_cold_start_price_signal_can_propose_without_purchase_history() -> None:
@@ -89,8 +89,8 @@ def test_cold_start_price_signal_can_propose_without_purchase_history() -> None:
 
 def test_recalibration_converges_regardless_of_seed_source() -> None:
     """EWMA recalibration converges correctly whether seeded from priors or user estimate."""
-    # Item seeded from category prior (grocery = 11.0 days)
-    prior_item = _predicted_item(category="grocery", cadence=11.0)
+    # Item seeded from the checked-in grocery prior (7.0 days).
+    prior_item = _predicted_item(category="grocery", cadence=7.0)
     # Item seeded from user estimate (stationery fallback = 45.0 days)
     user_item = _predicted_item(category="stationery", cadence=45.0)
 
@@ -104,7 +104,7 @@ def test_recalibration_converges_regardless_of_seed_source() -> None:
     assert prior_item.typical_cadence_days is not None
     assert user_item.typical_cadence_days is not None
     # Both converge toward 14 — closer than their starting points
-    assert abs(prior_item.typical_cadence_days - true_interval) < abs(11.0 - true_interval)
+    assert abs(prior_item.typical_cadence_days - true_interval) < abs(7.0 - true_interval)
     assert abs(user_item.typical_cadence_days - true_interval) < abs(45.0 - true_interval)
     # And both are within 1 day of the true interval after 10 cycles
     assert abs(prior_item.typical_cadence_days - true_interval) < 1.0

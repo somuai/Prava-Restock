@@ -4,13 +4,24 @@ This module intentionally does not import Restock persistence, payment, merchant
 or user-identity code.  Its two calculations can be called by any agent.
 """
 
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
+
+try:
+    from nanda_trigger_service.trigger_math_core import (
+        evaluate_renewal as evaluate_renewal_math,
+    )
+    from nanda_trigger_service.trigger_math_core import (
+        predict_depletion as predict_depletion_math,
+    )
+except ModuleNotFoundError:  # Standalone Docker context runs app.py at /service.
+    from trigger_math_core import evaluate_renewal as evaluate_renewal_math
+    from trigger_math_core import predict_depletion as predict_depletion_math
 
 
 app = FastAPI(
@@ -56,21 +67,21 @@ def serve_skill_md() -> str:
 @app.post("/predict-depletion", response_model=DepletionResponse)
 def predict_depletion(request: DepletionRequest) -> DepletionResponse:
     """Predict the next depletion date from a purchase date and cadence."""
-    # Timedelta accepts fractional days; returning a date keeps the public API
-    # deterministic and deliberately simple for agent callers.
-    depletion_date = request.last_purchased_at + timedelta(days=request.typical_cadence_days)
+    depletion_date, remaining_days = predict_depletion_math(
+        request.last_purchased_at,
+        request.typical_cadence_days,
+    )
     return DepletionResponse(
         predicted_depletion_date=depletion_date,
-        days_until_depletion=(depletion_date - date.today()).days,
+        days_until_depletion=remaining_days,
     )
 
 
 @app.post("/evaluate-renewal", response_model=RenewalResponse)
 def evaluate_renewal(request: RenewalRequest) -> RenewalResponse:
     """Recommend the cheaper plan, with the exact amount saved if switching."""
-    if request.alternate_plan_amount < request.current_plan_amount:
-        return RenewalResponse(
-            recommended_action="switch_to_alternate",
-            savings_amount=request.current_plan_amount - request.alternate_plan_amount,
-        )
-    return RenewalResponse(recommended_action="renew_as_is", savings_amount=Decimal("0"))
+    action, savings = evaluate_renewal_math(
+        request.current_plan_amount,
+        request.alternate_plan_amount,
+    )
+    return RenewalResponse(recommended_action=action, savings_amount=savings)

@@ -14,17 +14,33 @@ is required before any broader use.
 
 ### What was extracted
 
-Median days-between-reorders at the department/category level, mapped to
-Restock's `Category` enum. The checked-in values are the only derived output;
-the raw dataset is neither checked in nor loaded by the application:
+For every `order_products__prior.csv` line marked `reordered=1`, the extractor
+uses that order's `days_since_prior_order` and groups the interval by the
+product's mapped department. This is an order-basket interval attached to a
+reordered line item, not an exact same-SKU survival interval. It is adequate
+only as a weak, transparent cold-start prior.
 
-| Restock Category | Instacart Department(s) | Median Reorder Interval |
-|---|---|---|
-| `grocery` | beverages, snacks, pantry | 11.0 days |
-| `health` | personal care | 18.0 days |
-| `stationery` | (no match) | — |
-| `saas_subscription` | N/A | — |
-| `other` | (no match) | — |
+The checked-in values are the only derived output; the raw dataset is neither
+checked in nor loaded by the application:
+
+| Restock Category | Instacart Department(s) | Reordered lines | Average | Median used as prior |
+|---|---|---:|---:|---:|
+| `grocery` | beverages, snacks, pantry | 4,066,166 | 10.2085 days | 7.0 days |
+| `health` | personal care | 143,584 | 10.6572 days | 7.0 days |
+| `stationery` | (no match) | — | — | — |
+| `saas_subscription` | N/A | — | — | — |
+| `other` | (no match) | — | — | — |
+
+The result is reproducible with:
+
+```bash
+python scripts/extract_category_priors.py /path/to/unmodified-instacart-csvs
+```
+
+The four input SHA-256 hashes, exact sample counts, averages, medians, dataset
+reference, version, and method are stored beside the lookup values in
+`triggers/category_priors.json`. The extraction script uses only the Python
+standard library.
 
 ### How it is used
 
@@ -34,8 +50,8 @@ offline extraction producing a small static lookup table — **not** a trained
 model.
 
 - The prior is used only when a new item is created with no purchase history.
-- Per-user EWMA recalibration (α = 0.3) replaces the prior after the first
-  completed purchase cycle.
+- Per-user EWMA recalibration (α = 0.3) progressively replaces the prior after
+  completed purchase cycles.
 - The prior does not personalize per user — it is a category-level aggregate.
 
 See `TECHNICAL_PRD.md` §6.1 for the recalibration formula and `PRD.md` §27

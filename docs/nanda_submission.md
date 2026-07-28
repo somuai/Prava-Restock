@@ -1,4 +1,4 @@
-# NANDA Town service submission
+# NANDA Town utility and Prava-track submission boundary
 
 The standalone **Restock Trigger Math** service is hosted at
 <https://restock-trigger-math-production.up.railway.app>. Its agent-facing
@@ -6,17 +6,18 @@ instructions are served at
 <https://restock-trigger-math-production.up.railway.app/skill.md> and tracked
 in [nanda_trigger_service/SKILL.md](../nanda_trigger_service/SKILL.md).
 
-The official Phase 2 format requires a plain Markdown `SKILL.md` containing a
-title and one-sentence purpose, base URL, each endpoint with its method/path,
-description, example `curl` and example response, followed by numbered agent
-usage steps. The official submission mechanism is the form on
-<https://nandatown.projectnanda.org/skills>, where the service link, hosted
-`SKILL.md`/GitHub URL, and one full public URL per endpoint are supplied.
+This utility is not the submission required for the current **Best Prava
+Adapter for NANDA Town** track. The official track page requires a reusable
+NANDA Town payments-layer plugin implementing quote, pay, verify, and refund;
+a real Prava sandbox connection; at least one successful sandbox transaction;
+at least one failure case; a scenario and test; a pull request to
+`projnanda/nandatown`; and the pull request linked from the Devfolio entry.
 
-No NANDA Town submission has been made from this repository. The official
-NandaHack deadline displayed on the event site was 11 July 2026; this service
-is therefore prepared as a public generic utility, not represented as an
-on-time hackathon entry. If the owner chooses to submit it later, first verify
-that `/health`, `/predict-depletion`, `/evaluate-renewal`, and `/skill.md`
-respond publicly, then use the registry form. Do not submit without the
-owner’s explicit confirmation.
+No NANDA submission or pull request has been made from this repository. The
+payments adapter, scenario, tests, and pull request are intentionally reserved
+for meaningful new work inside the official hackathon window. The hosted
+trigger-math service remains a separate generic utility and must not be
+represented as satisfying the Prava adapter prize requirements.
+
+Authoritative requirements:
+<https://nandatown.projectnanda.org/pravahack>

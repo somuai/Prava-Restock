@@ -1,10 +1,11 @@
 """Deterministic predicted-depletion trigger for Restock Home."""
 
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 import json
 from pathlib import Path
 
+from nanda_trigger_service.trigger_math_core import predict_depletion
 from payments.models import TrackedItem, TriggerType
 
 
@@ -56,12 +57,24 @@ def predicted_depletion_date(item: TrackedItem) -> date:
     if item.last_purchased_at is None:
         raise ValueError("cold-start items have no predicted depletion date before a purchase")
     assert item.typical_cadence_days is not None
-    return item.last_purchased_at + timedelta(days=item.typical_cadence_days)
+    predicted, _ = predict_depletion(
+        item.last_purchased_at,
+        item.typical_cadence_days,
+    )
+    return predicted
 
 
 def days_until_depletion(item: TrackedItem, today: date | None = None) -> int:
-    effective_today = today or date.today()
-    return (predicted_depletion_date(item) - effective_today).days
+    _require_predicted(item)
+    if item.last_purchased_at is None:
+        raise ValueError("cold-start items have no predicted depletion date before a purchase")
+    assert item.typical_cadence_days is not None
+    _, remaining_days = predict_depletion(
+        item.last_purchased_at,
+        item.typical_cadence_days,
+        today=today,
+    )
+    return remaining_days
 
 
 def trigger_condition(

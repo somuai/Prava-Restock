@@ -10,6 +10,9 @@
 - UCI Online Retail II is CC BY 4.0 but is labeled weak and benchmark-only.
 - dunnhumby is blocked pending an explicit training-license review; its source page
   describes household data but does not itself establish the required license.
-- Instacart 2017 data is blocked until an authoritative current training/redistribution
-  license is located.
+- The specific Kaggle mirror used for two static category priors is labeled
+  CC0-1.0 on its data card; the checked-in result includes a reproducible
+  extractor, hashes, method, and aggregate counts. Raw-data redistribution and
+  model training remain blocked until the original-source terms receive
+  authoritative review.
 - No unrelated retail dataset is represented as a production human-behavior model.

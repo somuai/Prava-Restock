@@ -12,7 +12,8 @@ Confirms that the public service is available.
 curl -sS https://restock-trigger-math-production.up.railway.app/health
 ```
 
-Example response:
+Illustrative response captured on 24 July 2026 (the `days_until_depletion`
+value is evaluated on the day of each request):
 
 ```json
 {"status":"healthy"}

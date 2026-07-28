@@ -2,6 +2,7 @@
 
 from datetime import date
 
+from nanda_trigger_service.trigger_math_core import evaluate_renewal
 from payments.models import TrackedItem, TriggerType
 
 
@@ -31,9 +32,11 @@ def proposed_action(item: TrackedItem) -> str:
     _require_known_date(item)
     assert item.current_plan_amount is not None
     assert item.alternate_plan_amount is not None
-    if item.alternate_plan_amount >= item.current_plan_amount:
-        return "renew_as_is"
-    return "switch_to_alternate"
+    action, _ = evaluate_renewal(
+        item.current_plan_amount,
+        item.alternate_plan_amount,
+    )
+    return action
 
 
 def should_fire(item: TrackedItem) -> bool:
