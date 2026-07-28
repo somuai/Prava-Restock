@@ -1,6 +1,7 @@
 # Phase 4 Agents SDK Review
 
-Date reviewed: 2026-07-14; model configuration updated: 2026-07-15
+Date reviewed: 2026-07-14; model configuration updated: 2026-07-15;
+current-state correction: 2026-07-29
 Original review scope: findings only; model section later aligned with the implemented single-model decision.
 
 ## 1. Installed SDK compatibility
@@ -16,13 +17,18 @@ pytest tests/test_orchestrator_stubbed.py \
 7 passed
 ```
 
-No deprecated call is currently evidenced. The main compatibility risk is that `pyproject.toml` specifies an unpinned dependency:
+No deprecated call is currently evidenced. The reviewed dependency is now
+pinned reproducibly in `pyproject.toml`:
 
 ```toml
-"openai-agents",
+"openai-agents==0.18.2",
 ```
 
-A future clean installation can therefore select a newer SDK than the reviewed `0.18.2`. Re-run this review after any dependency upgrade. The current implementation also matches the official Agents SDK descriptions of [function-tool guardrails](https://openai.github.io/openai-agents-python/guardrails/) and [human-in-the-loop approval](https://openai.github.io/openai-agents-python/human_in_the_loop/).
+A clean installation therefore resolves the same SDK version reviewed here.
+Re-run this review after any deliberate dependency upgrade. The current
+implementation also matches the official Agents SDK descriptions of
+[function-tool guardrails](https://openai.github.io/openai-agents-python/guardrails/)
+and [human-in-the-loop approval](https://openai.github.io/openai-agents-python/human_in_the_loop/).
 
 ## 2. Spend caps are enforced by a real SDK tool guardrail
 
@@ -60,7 +66,7 @@ if context.monthly_spend + amount > context.user.monthly_cap:
     raise SpendCapExceeded(...)
 ```
 
-The deterministic pre-hackathon path applies the same policy before the stub call:
+The deterministic executor applies the same policy before the Prava client call:
 
 ```python
 enforce_spend_caps(context, amount)
@@ -68,7 +74,15 @@ enforce_spend_caps(context, amount)
 intent_ref = prava_client.create_intent(merchant, amount, item.name, constraints)
 ```
 
-`tests/test_orchestrator_stubbed.py` verifies the attached SDK guardrail produces `raise_exception`, and separately monkeypatches `prava_client.create_intent` to prove neither a per-item nor monthly-cap breach reaches the client. The system prompt also describes the limits, but it is not the enforcement mechanism.
+`tests/test_orchestrator_stubbed.py` verifies the attached SDK guardrail produces
+`raise_exception`, and separately monkeypatches `prava_client.create_intent` to
+prove neither a per-item nor monthly-cap breach reaches the client. The system
+prompt also describes the limits, but it is not the enforcement mechanism.
+
+This review establishes only the completed spend-cap SDK Guardrail. Exact-SKU
+substitution refusal, price-deviation reapproval, mandate gating, and
+idempotency are deterministic workflow policies and require their own Phase 8
+boundary evidence; they are not additional Agents SDK Guardrails.
 
 ## 3. Passkey approval uses the SDK HITL flag
 
@@ -105,15 +119,20 @@ tools=[
 
 Runtime inspection returns these same six tool names; no required tool is missing.
 
-## 5. Stubbed orchestrator tests make no live network calls
+## 5. Deterministic orchestrator tests make no live network calls
 
-`tests/test_orchestrator_stubbed.py` contains no OpenAI or Prava endpoint, HTTP client, socket call, or `Runner.run` invocation. Its full-cycle test calls:
+`tests/test_orchestrator_stubbed.py` is retained under its historical filename.
+It contains no OpenAI or Prava endpoint, HTTP client, socket call, or
+`Runner.run` invocation. Its full-cycle test calls:
 
 ```python
 trace = RestockOrchestrator(context).run_cycle(item)
 ```
 
-`run_cycle` invokes the local deterministic helpers and the Phase 3 fake clients. `payments/prava_client.py` and both merchant implementations used by the test are explicitly offline stubs. The SDK guardrail test calls `spend_cap_guardrail.run(...)` locally; it does not run an agent or model.
+`run_cycle` invokes local deterministic helpers. Tests monkeypatch or inject
+payment and merchant boundaries, so the now real-capable
+`payments/prava_client.py` cannot make a network call. The SDK guardrail test
+calls `spend_cap_guardrail.run(...)` locally; it does not run an agent or model.
 
 The production SDK tools `notify_user` and the Teams branch of `request_prava_intent` do contain `Runner.run(...)` calls, but the stubbed tests do not invoke those tool bodies. All seven focused tests pass without `OPENAI_API_KEY` or `PRAVA_API_KEY`.
 
@@ -146,4 +165,8 @@ The official OpenAI model catalog lists [`gpt-5.4-mini`](https://developers.open
 
 ## Conclusion
 
-Phase 4 is compatible with the installed Agents SDK and meets the requested guardrail, approval, tool-surface, model-string, and offline-test requirements. The remaining operational follow-up is to pin or deliberately upgrade the SDK before a reproducible release; authenticated access to the sole configured model is covered by the local verifier.
+Phase 4 is compatible with the pinned Agents SDK and meets the requested
+spend-cap guardrail, approval, tool-surface, model-string, and deterministic-test
+requirements. Authenticated access to the sole configured model is covered by
+the local verifier. Merchant safety policies remain separately evidenced at
+their workflow/integration boundaries.

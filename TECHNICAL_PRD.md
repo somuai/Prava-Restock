@@ -1,13 +1,20 @@
 # Restock — Technical PRD
 
 **Version 1.0 · Prava Agentic Commerce Hackathon, Jul 31–Aug 2, 2026**
-**Status:** Pre-build design spec. Companion to `PRD.md` (product rationale) and `SKILL.md` (build guide for coding agents).
+**Status:** Implemented architecture and remaining activation gates. Companion
+to `PRD.md` (product rationale), `SKILL.md` (build guide), and the runtime
+`/capabilities` disclosure.
 
 ---
 
 ## 1. Purpose and scope
 
-This document specifies the system Restock actually is: components, data contracts, sequence flow, and the non-functional bar it needs to clear. `PRD.md` answers *why*; this answers *exactly how*. Anyone picking up implementation should read this before writing code, and should treat §9 (external integration contracts) as provisional pending a live check against Prava's current SDK reference.
+This document specifies the system Restock actually is: components, data
+contracts, sequence flow, and the non-functional bar it needs to clear.
+`PRD.md` answers *why*; this answers *exactly how*. The repository contains a
+production-oriented pre-event foundation. Git history records that work;
+anything judged as official-window work must be disclosed separately rather
+than treating the existing implementation as newly built during the event.
 
 ## 2. System context
 
@@ -15,13 +22,17 @@ Four external actors, one system:
 
 - **User** — approves every purchase via passkey; sets spend caps once at onboarding.
 - **Restock backend** — the system this document specifies: consumption tracking, orchestration, audit logging.
-- **Prava** — payment intent, passkey challenge, mandate issuance, one-time credential. Restock never stores a card number; Prava is the only component that ever sees payment instrument data.
-- **Merchant (Zepto / Swiggy, via Prava's published MCP skill)** — receives the one-time credential and fulfills the order.
+- **Prava** — Session creation, passkey challenge, one-time mandate/credential
+  issuance, payment-result polling, and terminal status reporting. Restock never
+  stores a card number. Token/CVV/expiry values temporarily enter only the
+  consume-once server-side payment boundary and are never persisted or logged.
+- **Merchant** — Zepto/Swiggy MCP supplies catalog/cart/quote/order operations;
+  a separate Playwright boundary handles card-form execution.
 
 ```
-User <──approve/adjust/skip──> Restock Backend <──intent/mandate──> Prava
+User <──approve/adjust/skip──> Restock Backend <──session/polling──> Prava
                                       │
-                                      └──credential──> Merchant (Zepto/Swiggy MCP)
+                                      └──consume-once credential──> Browser payment boundary
 ```
 
 ## 3. Component architecture
@@ -30,18 +41,23 @@ User <──approve/adjust/skip──> Restock Backend <──intent/mandate─�
 |---|---|---|
 | **Trigger engine** | Two interchangeable trigger sources feeding the same downstream pipeline: **predicted** (consumption forecast, Restock Home) and **known-date** (subscription renewal date, Restock Teams) | Deterministic, no ML model for v1 — see §6 |
 | **Orchestrator agent** | Tool-using loop (OpenAI Agents SDK) deciding what/when to propose, handling approve/adjust/skip, sequencing the Prava + merchant calls | Runs on a schedule tick; not a chat-request handler; trigger-type-agnostic |
-| **Prava client** | Thin wrapper around Prava's SDK — intent creation, mandate status polling, credential retrieval | Isolate all Prava-specific code behind this interface so a real SDK-signature mismatch only requires changing one file |
-| **Merchant client** | Wraps the Zepto/Swiggy MCP checkout skill (Home) and a disclosed mock subscription-billing checkout (Teams) | Same isolation principle as the Prava client; both implement the same `complete_checkout(...)` contract — see §9.2 |
-| **Audit/notification store** | Persists Intents, Mandates (references only, never raw credentials), Transactions, and the user-facing audit log | See §5 for schemas |
+| **Prava client** | Implements the documented server-side Session REST API, payment-result polling, consume-once credential custody, and report-status | Prava has no Python SDK for this path; the browser package owns passkey UI |
+| **Merchant client** | Zepto/Swiggy MCP catalog/cart/quote operations plus a separate browser-payment executor; one-time invoice support for Teams | Catalog truth and final-payment execution are independently mode-tagged |
+| **Workflow and compatibility stores** | SQLite for local/demo; Postgres-compatible SQLAlchemy repositories with Alembic migrations through `20260722_07` for production | Persist references/state only; never raw credentials, approval URLs, or payment links |
 | **UI (chat surface)** | Displays proactive notifications, approve/adjust/skip controls, and the audit/savings log | The guaranteed surface is the disclosed WhatsApp-style/Slack-style PWA. A real single-workspace Slack Bolt adapter and a Meta test-number webhook/template adapter are implemented; whether the external accounts are configured is exposed at runtime. Meta publishes template review guidance of up to 24 hours, but no fixed business-verification SLA is claimed. |
 
 See `PRD.md` §10, "Distribution and surface," for why these user-facing surfaces remain independent of the merchant apps that Restock calls at the backend.
 
 ## 4. Design principles
 
-1. **Payment data never touches our storage.** Every field we persist about a transaction is a reference (mandate ID, credential reference, transaction ID) — never a card number, never raw passkey material.
+1. **Payment data never touches durable storage.** Every persisted field is a
+reference. A one-time token, dynamic CVV, and expiry may exist briefly in
+server memory at the payment executor, is consumed once, and is then deleted.
 2. **Every autonomous action is reversible or bounded.** Spend caps are hard limits enforced before a Prava intent is even created, not just checked afterward.
-3. **The orchestrator proposes; it never silently substitutes.** A price or availability change beyond a configured tolerance always routes back to the user, never auto-resolves.
+3. **The orchestrator proposes; it never silently substitutes.** Spend caps are
+the completed Agents SDK Guardrail. Exact-SKU checks, price-deviation
+reapproval, substitution refusal, and checkout idempotency are code-owned
+workflow policies whose live merchant-boundary proof remains Phase 8 work.
 4. **Idempotency by construction.** Every merchant checkout call carries the originating `intent_id` as an idempotency key — a retried network call must not double-charge.
 
 ## 5. Data model
@@ -59,6 +75,7 @@ User
 TrackedItem                     # base entity — both tracks share this shape
   item_id             UUID (pk)
   user_id             UUID (fk -> User)
+  tenant_id           UUID | null
   name                string
   track               enum(home, teams)          # which product surface this belongs to
   trigger_type        enum(predicted, known_date) # see §6 — determines which fields below apply
@@ -68,6 +85,7 @@ TrackedItem                     # base entity — both tracks share this shape
   merchant_sku_id      string
   merchant_address_ref string | null  # opaque saved-address ID; never a raw address/phone
   quantity             integer | null # positive exact quantity for Home quotes
+  currency             string         # ISO 4217
   status               enum(active, paused, deleted)
 
   # populated only when trigger_type = predicted (Restock Home)
@@ -92,6 +110,7 @@ Intent
   item_id             UUID (fk -> TrackedItem)
   proposed_amount     decimal
   proposed_merchant   string
+  currency            string
   status              enum(pending_approval, approved, adjusted, rejected, expired)
   created_at          timestamp
 
@@ -110,6 +129,7 @@ Transaction
   item_id              UUID (fk -> TrackedItem)
   merchant_order_id    string
   amount               decimal
+  currency             string
   status               enum(completed, failed, disputed)
   completed_at         timestamp
 
@@ -122,6 +142,14 @@ AuditLogEntry
   payload              JSON          # minimal — item name/amount/merchant, never payment data
   timestamp            timestamp
 ```
+
+This is the public-domain compatibility model, not the complete production
+database diagram. The durable schema additionally includes tenants,
+memberships, invitations, consent, workflow runs, quotes, notification
+actions, idempotency records, delivery outboxes, checkout attempts, leases,
+and completion effects. The authoritative production schema is the Alembic
+chain through `20260722_07`; Pydantic models and migrations must evolve
+together.
 
 ## 6. Trigger sources (v1 — deliberately simple, both implement the same interface)
 
@@ -145,7 +173,7 @@ typical_cadence_days_new = ALPHA * observed_interval_days
 
 **First-time items** seed `typical_cadence_days` from a transparent category prior or a user-provided estimate at onboarding. Personal EWMA observations replace the prior as completed purchases accumulate.
 
-**Cold-start priors:** Cold-start estimates are seeded from public aggregate reorder-interval data (Instacart Market Basket Kaggle mirror) at the category level, not personalized — per-user recalibration via EWMA remains the mechanism that adapts to actual behavior. Categories with a direct Instacart mapping (`grocery` → 11.0 days, `health` → 18.0 days) use the dataset median; categories without a match (`stationery`, `saas_subscription`, `other`) fall back to the user-provided estimate. The specific mirror’s data card lists CC0, while original-source terms require separate review; no raw records are redistributed and the priors do not clear a trained production model. This is deliberately not a trained model — see `PRD.md` §27 for why a real forecasting model is post-hackathon scope.
+**Cold-start priors:** Cold-start estimates are seeded from public aggregate reorder-interval data (Instacart Market Basket Kaggle mirror) at the category level, not personalized — per-user recalibration via EWMA remains the mechanism that adapts to actual behavior. The reproducible extractor associates each reordered line with its basket's `days_since_prior_order`; it is a weak basket-interval proxy, not an exact same-SKU survival interval. Categories with a direct mapping (`grocery` and `health`) currently use the extracted 7.0-day median; categories without a match (`stationery`, `saas_subscription`, `other`) fall back to the user-provided estimate. Exact sample counts, averages, medians, method, dataset version, and input SHA-256 hashes are stored in `triggers/category_priors.json`, with reproduction instructions in `docs/data_sources.md`. The specific mirror’s data card lists CC0, while original-source terms require separate review; no raw records are redistributed and the priors do not clear a trained production model. This is deliberately not a trained model — see `PRD.md` §27 for why a real forecasting model is post-hackathon scope.
 
 If depletion and price conditions become true in the same check, `propose(item)` emits one notification containing both reasons. In `HOME_MERCHANT_MODE=real`, the Phase 8 Zepto adapter queries Zepto's live MCP search for the tracked product's exact product-variant ID, converts the returned minor-unit price to INR, and refuses a nearby result rather than silently substituting it. `HOME_PAYMENT_MODE` is independent: it can remain `disclosed_mock` while catalog/cart/quote operations are real, and capabilities plus audit events report the two modes separately. Seeded/offline tests retain the deterministic adapter.
 
@@ -169,12 +197,24 @@ This is deliberately the simpler of the two trigger sources — there's no forec
 
 Built on OpenAI's **Agents SDK** (not Agent Builder — deprecated June 2026). Runs as a scheduled tool-using loop, not a request/response chat handler. Single agent, not multi-agent — confirmed against the brief's own language ("an AI agent," "an agent," singular both times), not just a 48-hour scope call.
 
-**Single-model decision:** use **`gpt-5.4-mini`** for the full orchestrator loop, including `notify_user` copy and the Restock Teams plan-comparison decision (renew-as-is vs. switch-to-alternate). This is not only a cost choice: one model already verified against the project account removes a constrained-quota dependency that could break the live demo. The two apparent judgment calls are narrow and structured, while spend caps, no-silent-substitution, and explicit approval for plan switches are enforced by code-level Guardrails and human-in-the-loop controls rather than relying on greater model capability.
+**Single-model decision:** use **`gpt-5.4-mini`** for the full orchestrator
+loop, including `notify_user` copy and the Restock Teams plan comparison. One
+verified model removes a constrained-quota dependency. Spend caps use the SDK
+Guardrail; the other safety decisions are bounded by deterministic workflow
+policies and explicit approval rather than model capability.
 
-**Guardrails and human-in-the-loop — named SDK primitives, not hand-rolled checks:**
+**Guardrails and human-in-the-loop — named SDK primitives, not prompt promises:**
 
-- Spend caps and the "never silently substitute" rule are implemented as the Agents SDK's **Guardrails** primitive — single-purpose tripwires that validate tool inputs/outputs concurrently with the agent, not something the model self-polices via its instructions. A guardrail rejecting an out-of-cap `request_prava_intent` call happens in code the model doesn't control, regardless of what the model decided.
-- The passkey-approval pause is the SDK's built-in **human-in-the-loop** mechanism (resumable approval flow), not a custom polling loop — `await_passkey_approval` is where the run pauses for the real-world passkey callback before resuming.
+- Spend caps are implemented as the Agents SDK's **tool-input Guardrail**. A
+  per-item, per-transaction, or monthly-cap rejection occurs before the Prava
+  Session request and cannot be overridden by model output.
+- Exact-SKU/no-substitution, price deviation, plan-switch approval, mandate
+  gating, and idempotency are deterministic workflow policies. They are not
+  represented as extra SDK Guardrails, and their live merchant proof belongs
+  to Phase 8.
+- The passkey-approval pause is the SDK's built-in **human-in-the-loop**
+  mechanism. After the user completes the Prava browser flow, Restock resumes
+  by polling Prava; no mandate webhook is assumed.
 
 **Tool surface:**
 
@@ -185,8 +225,8 @@ check_trigger_status() -> list[TrackedItem]
 
 request_prava_intent(merchant: str, amount: decimal, item_id: UUID,
                       constraints: dict) -> Intent
-    # creates local Intent (status=pending_approval), calls Prava intent API — see §9.1
-    # gated by a Guardrail checking per_item_cap / monthly_cap before the call proceeds
+    # creates local Intent (status=pending_approval), calls Prava Session API — see §9.1
+    # gated by a Guardrail checking all spend caps before the call proceeds
 
 notify_user(item_id: UUID, message: str,
             actions: list[str] = ["approve", "adjust", "skip"]) -> None
@@ -195,8 +235,7 @@ notify_user(item_id: UUID, message: str,
     # generated by the same gpt-5.4-mini configuration as the trigger loop
 
 await_passkey_approval(intent_id: UUID) -> MandateResult
-    # blocks on Prava's passkey callback/webhook via the SDK's human-in-the-loop
-    # resumable-approval mechanism — see §9.1
+    # resumable SDK approval boundary, followed by Prava payment-result polling
 
 complete_merchant_checkout(mandate_id: str, item_id: UUID) -> Transaction
     # calls the merchant client (§9.2) using the Prava-issued credential
@@ -205,7 +244,8 @@ log_event(event_type: str, payload: dict) -> None
     # writes an AuditLogEntry — payload must never include raw payment data
 ```
 
-**Guardrail constraints — enforced in code, not just stated in the system prompt:**
+**Policy constraints — spend caps are complete; live merchant safeguards remain
+Phase 8 proof items:**
 
 - Never call `complete_merchant_checkout` without a `MandateResult` showing passkey approval.
 - Never propose an amount exceeding `per_item_cap` or that would exceed `monthly_cap` for the period — a Guardrail on `request_prava_intent`, not a prompt instruction the model could get wrong.
@@ -215,12 +255,17 @@ log_event(event_type: str, payload: dict) -> None
 ## 8. End-to-end sequence (autonomous purchase, happy path)
 
 1. Scheduler tick calls `check_depletion_status()`.
-2. For each triggered item, orchestrator calls `request_prava_intent(...)` → local `Intent` created (`pending_approval`), Prava intent request sent.
+2. For each triggered item, orchestrator calls `request_prava_intent(...)` →
+local `Intent` created (`pending_approval`), then a Prava Session is created.
 3. Orchestrator calls `notify_user(...)` — proactive message with item, amount, merchant, and Approve/Adjust/Skip.
-4. User taps **Approve** → device-side passkey challenge (Prava's client flow) → Prava registers a `Mandate` and returns a one-time credential reference via callback.
-5. `await_passkey_approval` resolves; local `Mandate` record stored (credential *reference* only).
-6. Orchestrator calls `complete_merchant_checkout(...)` with the mandate reference; merchant client invokes the Zepto/Swiggy MCP skill.
-7. Merchant confirms order → local `Transaction` created (`completed`); `TrackedItem.last_purchased_at` and `typical_cadence_days` updated per §6.
+4. User taps **Approve** and completes Prava's device-side passkey flow.
+5. The backend polls the Session payment-result endpoint until credential
+creation, rejection, expiry, or timeout. It creates an opaque local reference;
+raw one-time values stay only in the consume-once server boundary.
+6. Merchant MCP creates/revalidates the exact cart; the separate Playwright
+executor consumes the credential for the payment-form attempt.
+7. The terminal result is reconciled and reported to Prava. Only a completed
+Home purchase updates cadence.
 8. `log_event` appends the full trail; UI shows the updated audit/savings log.
 
 **Branch — Skip:** `Intent.status = rejected`; re-check deferred by a configurable cooldown (default 3 days); no `Transaction` created.
@@ -229,34 +274,56 @@ log_event(event_type: str, payload: dict) -> None
 
 ## 9. External integration contracts
 
-### 9.1 Prava (conceptual — verify exact method signatures at build time)
+### 9.1 Prava Session API
 
-Conceptually: **Session → Passkey → Mandate → one-time credential.** Do not hardcode API paths or class names from this document — pull the current `PravaSDK` class reference and session API reference from the `prava-sdk-integration` skill folder in `Prava-Payments/prava-skills`, and use their documented sandbox test cards for all development. Treat this section as an interface contract our own `Prava client` component must satisfy, not a literal API spec. Prava does not expose a mandate webhook; poll to fetch successful credential creation (Prava's exact words: "polling to fetch successful credential creation; that's the reliable way to integrate"):
+The implemented server contract is **Session → Passkey → payment-result
+polling → one-time credential → report status**. Prava does not publish a
+Python SDK for this server path and does not expose a mandate webhook. Restock
+uses the documented REST endpoints; exact response validation lives in
+`payments/prava_client.py`.
 
 ```
-create_session(merchant, amount, item_description, constraints) -> session_ref
-    # Prava's term is Session; what we previously called Intent maps directly
-    # to this — no separate object exists on their side.
-await_mandate(session_ref) -> { mandate_id, credential_reference, scope, approved_at } | rejected | expired
-    # Polling only — Prava does not expose a mandate webhook. Poll to fetch
-    # successful credential creation; that's the reliable way to integrate.
+create_session(user_id, user_email, total_amount, currency, merchant_name,
+               merchant_url, merchant_country_iso2, product_description,
+               unit_price, product_id=None, quantity=1,
+               effective_until_minutes=15)
+    -> { session_id, session_token, iframe_url, order_id, expires_at }
+    # create_intent(...) remains as a compatibility wrapper. Intent is
+    # Restock's proposal record; Prava's external object is the Session.
+await_mandate(session_ref)
+    -> { mandate_id, txn_ref_id, credential_reference, scope, approved_at }
+       | rejected | expired
+    # Polling only.
+report_status(session_ref, txn_ref_id, txn_status,
+              authorization_code=None, response_code=None) -> result
+    # Required after every terminal merchant payment attempt.
 ```
 
 **Known platform fact for production planning:** Prava requires a Visa card issued in the US, Canada, Hong Kong, or Singapore for any real card used in the flow, whether in sandbox or production. Prava's own documented sandbox test cards are unaffected and complete a full simulated flow with no geography restriction; use those for all hackathon build and demo work. See the resolved merchant-access and real-card-testing entries in `PRD.md` §21, "Risks and mitigations."
 
-### 9.2 Merchant / billing checkout (Zepto / Swiggy for Home; mocked billing for Teams)
+### 9.2 Merchant / billing execution
 
-Reuse Prava's own published checkout skills (`prava-merchants-checkout/` in the same repo) for Restock Home rather than hand-rolling merchant integration. Contract every implementation must satisfy — same interface regardless of what's behind it:
+Restock reuses published merchant MCP tools for catalog/cart/order work. Those
+tools do not perform browser card entry. The public compatibility contract
+remains:
 
 ```
 complete_checkout(credential_reference, merchant_sku_id, amount, idempotency_key) -> { status, merchant_order_id, charged_amount, currency, retryable, execution_mode }
 ```
 
-**Restock Home implementation:** the official Zepto MCP integration now covers OAuth, saved-address selection, product/cart tools, exact-price preview, and payment-status reconciliation. Zepto publishes no dedicated merchant payment sandbox, so the final live-money payment-link execution defaults to `disclosed_mock`. Real execution is a separate operator-controlled mode requiring a compatible card and controllable browser; it is never silently enabled. The Prava sandbox approval and Zepto merchant integration are real, while the final charge boundary is disclosed.
+**Restock Home implementation:** Zepto/Swiggy MCP covers OAuth where required,
+saved-address selection, product/cart tools, exact-price preview, and status
+reconciliation. The final card-form attempt is a separate Playwright boundary.
+Merchant/catalog mode and payment mode are disclosed independently. The public
+deployment currently configures both as `disclosed_mock`; a real mode requires
+fresh provider authorization and explicit operator enablement.
 
 Real Home proposals must be based on a fresh exact-cart quote for the tracked `merchant_sku_id`, positive `quantity`, and opaque `merchant_address_ref`. Initial quoting prepares and verifies the exact cart before preview; pre-checkout revalidation previews the already-prepared cart again. The Zepto device ID is supplied only through deployment configuration (`ZEPTO_DEVICE_ID`) and must never be persisted in `TrackedItem`, logs, or API payloads. Merchant clients remain injected so credential-free tests cannot make live calls by accident.
 
-**Restock Teams:** real OAuth into a SaaS vendor's billing portal (Stripe Billing, Chargebee, etc.) isn't realistic in 48 hours regardless of sandbox access, so `merchant/mock_subscription_checkout.py` is the intended implementation from the start, not a fallback — implement it against the same `complete_checkout(...)` contract so the orchestrator and Prava mandate flow genuinely don't know or care which track they're serving. Disclose this plainly in the submission: the renewal date and the Prava mandate are real, the billing-portal call is simulated.
+**Restock Teams:** one-time hosted-invoice quoting is implemented. Unattended
+final invoice payment remains disclosed simulation. Prava currently supports
+one-time mandates only, so recurring Teams charging is disabled rather than
+approximated.
 
 ### 9.3 OpenAI Agents SDK
 
@@ -269,9 +336,9 @@ Standard tool-calling loop; no fine-tuning required for the hackathon scope. Mod
 | Notification-to-confirmation latency (excluding user response time) | < 5s |
 | Mandate creation success rate (sandbox) | ≥ 99% across test runs |
 | End-to-end success definition | (1) session created, (2) credential generated, (3) credential populated into real checkout form, (4) Pay attempt fails due to test-card status — not due to a bug in steps 1–3 |
-| Unauthorized transactions (no valid passkey-approved mandate) | 0 — hard guardrail, not a target |
+| Unauthorized transactions (no valid passkey-approved mandate) | 0 — code-owned gate, pending live-boundary proof |
 | Spend-cap breaches | 0 — hard guardrail |
-| Idempotent merchant checkout | Every call keyed by `intent_id`; retried calls must not double-charge |
+| Idempotent merchant checkout | Every call keyed by `intent_id`; live-boundary proof required |
 | Secrets handling | Prava/OpenAI keys in environment variables only; never committed to the repo |
 
 ## 11. Error handling and edge cases
@@ -292,11 +359,22 @@ Standard tool-calling loop; no fine-tuning required for the hackathon scope. Mod
 
 ## 13. Privacy and data handling
 
-Full detail in `PRD.md` §14 — summary: payment data privacy is structural (Prava never lets us see a card number); behavioral data (consumption patterns) gets explicit data minimization, purpose limitation, a visible "what we track + delete" screen, sensitive-item flagging, and a bounded retention window on the audit log. Designed toward India's DPDP Act even though full enforcement doesn't land until May 2027.
+Full detail in `PRD.md` §20. Restock never receives or stores a card number.
+Prava's one-time token/CVV set is visible only to the transient server-side
+payment executor and is consumed once. Behavioral data gets minimization,
+purpose limitation, export/deletion, sensitive-item handling, and bounded
+retention.
 
 ## 14. Deployment for the hackathon
 
-The implementation now separates the FastAPI web process from a leased scheduler worker and persists the resumable workflow through a Postgres-compatible SQLAlchemy repository with Alembic migrations. SQLite remains the zero-cost local/demo default. Sandbox credentials only; the real-money Zepto path is disabled unless an operator explicitly enables it. Railway/Render configuration must keep the worker separate from web replicas and store all secrets in platform configuration.
+The implementation separates the FastAPI web process from a leased scheduler
+worker and persists resumable workflows through a Postgres-compatible
+SQLAlchemy repository with Alembic migrations through `20260722_07`. SQLite
+remains the local/demo default. The public Railway service is an unactivated
+demo: `demo_mode=true`, Prava sandbox unconfigured, channels unconfigured,
+real money disabled, and merchant/billing execution disclosed as simulation.
+`/capabilities` is authoritative. Provider credentials, managed Postgres, a
+separate worker, and the restore drill remain production activation gates.
 
 ## 15. Observability
 
@@ -316,15 +394,30 @@ Every durable state transition writes a sanitized domain-audit entry with run, u
 ## 17. Open questions — verify before/during build
 
 - [x] **RESOLVED** — Model selection for the orchestrator: one verified-reliable model, `gpt-5.4-mini`, for the full loop including notification copy and the Teams plan-comparison decision. This removes a constrained-quota live-demo dependency; hard constraints stay in code-level Guardrails. See §7.
-- [ ] Exact `PravaSDK` method signatures for intent creation and mandate polling payload shape.
+- [x] **RESOLVED** — Prava has no Python SDK for the server path. Restock
+  implements the documented Session REST endpoints and normalizes the polling
+  payload in `payments/prava_client.py`.
 - [x] **RESOLVED — Zepto merchant contract:** the official skill uses `mcp-remote https://mcp.zepto.co.in/mcp` with OAuth/mobile OTP and publishes tools for saved addresses, product search, cart mutation/view, payment methods, online-order preview/creation, payment status, and order history. Final payment-link execution is operator-controlled because no merchant sandbox is documented.
-- [ ] Location of Prava's sandbox test-card/test-data reference in `prava-skills`.
-- [ ] Whether Prava mandates expose a configurable TTL/expiry we should set explicitly on `Intent` creation, or whether it's fixed by Prava.
+- [x] **RESOLVED** — Prava's documented sandbox test data was used for the
+  Session/passkey proof. Its expected real-merchant decline is part of the
+  disclosed success criterion, not a completed charge.
+- [x] **RESOLVED** — Restock sends `effective_until_minutes` on Session
+  creation (15 minutes by default) and treats expiry as terminal.
 - [x] **RESOLVED — platform fact:** Prava requires a Visa card issued in the US, Canada, Hong Kong, or Singapore for any real card used in the flow, whether in sandbox or production. Prava's own documented sandbox test cards are unaffected and complete a full simulated flow with no geography restriction; use those for the hackathon. For production, Prava has offered: "reach out to us and we'll sort you out with a compatible card".
-- [x] **RESOLVED — CONFIRMED UNAVAILABLE:** Prava confirmed (Shubham Kukreti, Discord, 22–23 July 2026) that standing or recurring mandates are not live yet for use — neither in sandbox nor production. Treat everything as one-time per mandate. Restock Teams proceeds on Path B (pay the hosted invoice via one-time credential) or the disclosed mock only, permanently for this hackathon, not pending any answer.
+- [x] **RESOLVED FOR HACKATHON SCOPE — CONFIRMED UNAVAILABLE:** Prava
+  confirmed (Shubham Kukreti, Discord, 22–23 July 2026) that standing or
+  recurring mandates are not live in the applicable hackathon flow. The
+  broader client-SDK pages now describe `frequency` and `useLimit`, but that
+  does not prove access or compatibility with the server-side Session API used
+  here. Treat every hackathon Session as one-time. Restock Teams uses Path B
+  (pay the hosted invoice via one-time credential) or the disclosed mock; any
+  post-event recurring implementation requires fresh environment-specific
+  provider confirmation and integration tests.
 
 ## 18. Glossary
 
 - **Intent** — our internal record of a proposed purchase, before user approval.
 - **Mandate** — Prava's record of user-approved, scoped permission to charge a specific merchant a bounded amount.
-- **Credential reference** — the opaque, one-time token our system holds in place of any real payment instrument.
+- **Credential reference** — Restock’s opaque handle for a one-time token/CVV
+  set. Raw values are held only in the consume-once server payment boundary and
+  are never persisted or logged.
