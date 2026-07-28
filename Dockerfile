@@ -12,7 +12,11 @@ WORKDIR /opt/zepto-mcp
 COPY merchant/mcp-runtime/package.json merchant/mcp-runtime/package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts
 
-FROM python:3.12-slim
+# Keep the browser runtime aligned with the pinned Python Playwright package.
+# The upstream Playwright image already contains Chromium and its native OS
+# dependencies. Installing them at build time from a moving Debian slim image
+# caused builds to fail when distro package names changed.
+FROM mcr.microsoft.com/playwright/python:v1.52.0-jammy
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -27,8 +31,7 @@ COPY . .
 COPY --from=web /web/dist /app/ui/web/dist
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-runtime /opt/zepto-mcp /opt/zepto-mcp
-RUN python -m pip install --no-cache-dir . \
-    && python -m playwright install --with-deps chromium
+RUN python -m pip install --no-cache-dir .
 
 # Runtime data is the only application-owned writable path. Keeping the source
 # tree read-only and dropping root privileges limits the impact of a compromise.
