@@ -10,7 +10,7 @@ from enum import Enum
 from functools import lru_cache
 import json
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -205,6 +205,7 @@ class Intent(RestockModel):
 
 class Mandate(RestockModel):
     mandate_id: str
+    txn_ref_id: str = Field(min_length=1)
     intent_id: UUID
     credential_reference: str
     scope_merchant: str
@@ -229,4 +230,6 @@ class AuditLogEntry(RestockModel):
     user_id: UUID
     event_type: AuditEventType
     payload: dict[str, Any]
+    execution_mode: Literal["real", "sandbox", "disclosed_mock"] | None = None
+    reason: str | None = None
     timestamp: datetime

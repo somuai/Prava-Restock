@@ -138,12 +138,21 @@ def cart_context(address="address-1", *, amount="412.50", quantity=1):
     )
 
 
-def install(repository, client, executor, *, context_address="address-1", provider=None):
+def install(
+    repository,
+    client,
+    executor,
+    *,
+    context_address="address-1",
+    provider=None,
+    health_check=None,
+):
     zepto_checkout.configure_real_checkout_runtime(
         zepto_checkout.RealCheckoutRuntime(
             repository=repository,
             client=client,
             address_id="legacy-global-address-must-not-be-used",
+            merchant_health_check=health_check or (lambda _url: True),
             executor=executor,
             redirect_policy=zepto_checkout.PaymentRedirectPolicy(("checkout.juspay.in",)),
             checkout_context_provider=(
@@ -299,6 +308,91 @@ def test_duplicate_idempotency_returns_existing_terminal_result(boundary):
     assert reports == [("session-1", "txn-1", "APPROVED")]
 
 
+def test_existing_terminal_idempotency_wins_during_merchant_outage(
+    boundary,
+    monkeypatch,
+):
+    repository, reports = boundary
+    client = FakeZeptoClient(statuses=["SUCCESS"])
+    health = {"available": True}
+    install(
+        repository,
+        client,
+        FakeExecutor(),
+        health_check=lambda _url: health["available"],
+    )
+    add_credential()
+
+    first = checkout()
+    health["available"] = False
+    monkeypatch.setenv(
+        zepto_checkout.MERCHANT_UNAVAILABLE_FALLBACK_ENV,
+        "1",
+    )
+    second = checkout(reference="already-consumed")
+
+    assert first == second
+    assert second["execution_mode"] == "real"
+    assert second.get("disclosure_reason") is None
+    assert [call[0] for call in client.calls].count("create_payment_link") == 1
+    assert reports == [("session-1", "txn-1", "APPROVED")]
+
+
+def test_merchant_outage_uses_mock_only_when_explicitly_configured(
+    boundary,
+    monkeypatch,
+):
+    repository, reports = boundary
+    client = FakeZeptoClient()
+    executor = FakeExecutor()
+    install(
+        repository,
+        client,
+        executor,
+        health_check=lambda _url: False,
+    )
+    add_credential()
+    monkeypatch.setenv(
+        zepto_checkout.MERCHANT_UNAVAILABLE_FALLBACK_ENV,
+        "1",
+    )
+
+    result = checkout()
+
+    assert result["status"] == "completed"
+    assert result["execution_mode"] == "disclosed_mock"
+    assert result["disclosure_reason"] == "merchant_unavailable"
+    assert client.calls == []
+    assert executor.calls == []
+    assert reports == []
+    assert "credential-1" in prava_client._CREDENTIALS
+
+
+def test_merchant_outage_fails_visibly_without_mock_configuration(boundary):
+    repository, reports = boundary
+    client = FakeZeptoClient()
+    executor = FakeExecutor()
+    install(
+        repository,
+        client,
+        executor,
+        health_check=lambda _url: False,
+    )
+    add_credential()
+
+    result = checkout()
+
+    assert result["status"] == "failed"
+    assert result["error_code"] == "MERCHANT_UNAVAILABLE"
+    assert result["execution_mode"] == "real"
+    assert result["disclosure_reason"] == "merchant_unavailable"
+    assert result["retryable"] is True
+    assert client.calls == []
+    assert executor.calls == []
+    assert reports == []
+    assert "credential-1" in prava_client._CREDENTIALS
+
+
 def test_price_mismatch_stops_before_credential_or_executor(boundary):
     repository, reports = boundary
     client = FakeZeptoClient(total="500.00")
@@ -364,7 +458,10 @@ def test_tampered_durable_quote_context_fails_before_confirm_order(
     assert reports == []
 
 
-def test_ambiguous_browser_failure_uses_order_history_without_false_report(boundary):
+def test_automation_failure_never_silently_falls_back_to_mock(
+    boundary,
+    monkeypatch,
+):
     repository, reports = boundary
     client = FakeZeptoClient(
         statuses=["PENDING", "PENDING"],
@@ -372,10 +469,16 @@ def test_ambiguous_browser_failure_uses_order_history_without_false_report(bound
     )
     install(repository, client, FakeExecutor(error=True))
     add_credential()
+    monkeypatch.setenv(
+        zepto_checkout.MERCHANT_UNAVAILABLE_FALLBACK_ENV,
+        "1",
+    )
 
     result = checkout()
 
     assert result["status"] == "pending"
+    assert result["execution_mode"] == "real"
+    assert result["disclosure_reason"] == "automation_failure"
     assert ("list_order_history",) in client.calls
     assert reports == []
     attempt = repository.get_merchant_checkout_attempt("idem-1")
@@ -480,6 +583,38 @@ def test_ambiguous_report_is_reconciled_without_duplicate_post(boundary, monkeyp
     attempt = repository.get_merchant_checkout_attempt("idem-1")
     assert attempt["report_state"] == "confirmed"
     assert attempt["prava_reported"] is True
+
+
+def test_mandate_expired_requires_new_explicit_approval_without_auto_session(
+    boundary,
+    monkeypatch,
+):
+    repository, _reports = boundary
+    install(repository, FakeZeptoClient(statuses=["SUCCESS"]), FakeExecutor())
+    add_credential()
+    monkeypatch.setattr(
+        prava_client,
+        "report_checkout_outcome",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            prava_client.MandateExpiredError(message="Register a new intent.")
+        ),
+    )
+    monkeypatch.setattr(
+        prava_client,
+        "create_session",
+        lambda *_args, **_kwargs: pytest.fail(
+            "report expiry must not silently create a differently scoped session"
+        ),
+    )
+
+    result = checkout()
+
+    assert result["status"] == "completed"
+    attempt = repository.get_merchant_checkout_attempt("idem-1")
+    assert attempt["report_state"] == "mandate_expired"
+    assert attempt["last_error"] == "MANDATE_EXPIRED"
+    assert attempt["prava_reported"] is False
+    assert "credential-1" not in prava_client._CREDENTIALS
 
 
 def test_checkout_attempt_state_transition_is_compare_and_swap(boundary):

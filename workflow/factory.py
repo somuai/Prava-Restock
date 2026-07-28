@@ -6,6 +6,7 @@ import os
 
 from merchant import zepto_checkout
 from merchant.payment_executor import SubprocessBrowserPaymentExecutor
+from merchant.health_check import check_merchant_availability
 from merchant.quote_provider import build_home_quote_provider
 from merchant.quote_provider import build_checkout_context_provider
 from merchant.zepto_mcp import ZeptoMCPClient
@@ -37,6 +38,7 @@ def configure_merchant_runtime(repository: RestockRepository) -> ZeptoMCPClient:
             repository=repository,
             client=client,
             address_id="",
+            merchant_health_check=check_merchant_availability,
             executor=executor,
             redirect_policy=policy,
             checkout_context_provider=build_checkout_context_provider(repository),

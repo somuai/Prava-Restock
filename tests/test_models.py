@@ -180,6 +180,7 @@ def test_invalid_intent(field: str, value: object) -> None:
 def mandate_data() -> dict:
     return {
         "mandate_id": "mandate_demo_1",
+        "txn_ref_id": "txn_ref_demo_1",
         "intent_id": INTENT_ID,
         "credential_reference": "cred_one_time_demo",
         "scope_merchant": "zepto",
@@ -193,7 +194,14 @@ def test_valid_mandate() -> None:
     assert Mandate(**mandate_data()).mandate_id == "mandate_demo_1"
 
 
-@pytest.mark.parametrize(("field", "value"), [("scope_max_amount", -1), ("intent_id", "not-a-uuid")])
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("scope_max_amount", -1),
+        ("intent_id", "not-a-uuid"),
+        ("txn_ref_id", ""),
+    ],
+)
 def test_invalid_mandate(field: str, value: object) -> None:
     with pytest.raises(ValidationError):
         Mandate(**(mandate_data() | {field: value}))
@@ -234,6 +242,21 @@ def audit_data() -> dict:
 
 def test_valid_audit_log_entry() -> None:
     assert AuditLogEntry(**audit_data()).payload["item"] == "Coffee"
+
+
+def test_audit_log_entry_has_explicit_mode_and_reason() -> None:
+    entry = AuditLogEntry(
+        **(
+            audit_data()
+            | {
+                "execution_mode": "disclosed_mock",
+                "reason": "merchant_unavailable",
+            }
+        )
+    )
+
+    assert entry.execution_mode == "disclosed_mock"
+    assert entry.reason == "merchant_unavailable"
 
 
 @pytest.mark.parametrize(("field", "value"), [("event_type", "card_saved"), ("payload", ["raw-card-data"])])

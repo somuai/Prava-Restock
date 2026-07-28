@@ -922,6 +922,7 @@ class RestockRepository:
         amount: Decimal,
         currency: str,
         execution_mode: str,
+        disclosure_reason: str | None = None,
     ) -> dict[str, Any]:
         run = self.get_workflow(run_id)
         row = TransactionRow(
@@ -951,6 +952,7 @@ class RestockRepository:
         amount: Decimal,
         currency: str,
         execution_mode: str,
+        disclosure_reason: str | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Create-or-verify one transaction and terminalize its run atomically."""
 
@@ -1018,6 +1020,11 @@ class RestockRepository:
             run.state = "completed"
             run.active_item_key = None
             run.error_code = None
+            run_modes = dict(run.modes)
+            run_modes["home_payment"] = execution_mode
+            if disclosure_reason:
+                run_modes["home_payment_reason"] = disclosure_reason
+            run.modes = run_modes
             run.version += 1
             run.updated_at = datetime.now(timezone.utc)
             session.add(CompletionEffectsRow(run_id=run_id, status="pending"))

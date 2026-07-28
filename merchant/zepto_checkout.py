@@ -9,6 +9,7 @@ from typing import Any, Callable, Protocol
 from urllib.parse import urlparse
 
 from merchant import mock_checkout
+from merchant.health_check import check_merchant_availability
 from merchant.models import CheckoutStatus, ExecutionMode, MerchantCheckoutResult, MerchantQuote, StockStatus
 from merchant.zepto_mcp import ZeptoMCPClient, ZeptoMCPError
 from payments import prava_client
@@ -19,6 +20,8 @@ HOME_MERCHANT_MODE_ENV = "HOME_MERCHANT_MODE"
 HOME_PAYMENT_MODE_ENV = "HOME_PAYMENT_MODE"
 REAL_PAYMENT_MODE_ENV = "ZEPTO_REAL_PAYMENT_ENABLED"
 CART_PREPARATION_MODE_ENV = "ZEPTO_CART_PREPARATION_ENABLED"
+MERCHANT_UNAVAILABLE_FALLBACK_ENV = "ZEPTO_MERCHANT_UNAVAILABLE_FALLBACK_ENABLED"
+ZEPTO_HEALTH_URL = "https://www.zeptonow.com"
 
 _PRICE_CHECK_COUNTS: dict[str, int] = {}
 _STUB_BASE_PRICES = {
@@ -110,6 +113,7 @@ class RealCheckoutRuntime:
     repository: RestockRepository
     client: Any
     address_id: str
+    merchant_health_check: Callable[[str], bool]
     executor: BrowserPaymentExecutor | None = None
     redirect_policy: PaymentRedirectPolicy | None = None
     checkout_context_provider: Callable[[str], CheckoutCartContext] | None = None
@@ -210,6 +214,7 @@ def _checkout_result(
     amount: Decimal | None,
     retryable: bool = False,
     error_code: str | None = None,
+    disclosure_reason: str | None = None,
     credential_exposed: bool = False,
     credential_used: bool = False,
 ) -> dict[str, Any]:
@@ -221,6 +226,7 @@ def _checkout_result(
         retryable=retryable,
         execution_mode=ExecutionMode.REAL,
         error_code=error_code,
+        disclosure_reason=disclosure_reason,
         credential_exposed=credential_exposed,
         credential_used=credential_used,
     ).model_dump(mode="json")
@@ -354,6 +360,18 @@ def _deliver_prava_report(
                 else None
             ),
         )
+    except prava_client.MandateExpiredError:
+        # Terminal provider state: a new user-authorized session is required.
+        # Never auto-create one here because the new scope must be reviewed.
+        attempt = repository.update_merchant_checkout_attempt(
+            claimed["idempotency_key"],
+            expected_report_states={"sending"},
+            report_state="mandate_expired",
+            last_error="MANDATE_EXPIRED",
+        )
+        if credential_reference:
+            prava_client.retire_credential(credential_reference)
+        return attempt
     except Exception:
         return repository.update_merchant_checkout_attempt(
             claimed["idempotency_key"],
@@ -444,6 +462,11 @@ def _resume_existing_attempt(
             merchant_order_id=order_id,
             amount=None,
             error_code=attempt.get("last_error") or state.upper(),
+            disclosure_reason=(
+                "merchant_unavailable"
+                if attempt.get("last_error") == "MERCHANT_UNAVAILABLE"
+                else None
+            ),
             **exposure,
         )
     if not order_id:
@@ -459,12 +482,13 @@ def _resume_existing_attempt(
         )
     outcome = _reconcile_order(runtime.client, str(order_id))
     if outcome == "pending":
+        pending_error = str(attempt.get("last_error") or "PAYMENT_PENDING")
         try:
             runtime.repository.update_merchant_checkout_attempt(
                 attempt["idempotency_key"],
                 expected_states={state},
                 state="pending",
-                last_error="PAYMENT_PENDING",
+                last_error=pending_error,
             )
         except ValueError:
             pass
@@ -473,7 +497,12 @@ def _resume_existing_attempt(
             merchant_order_id=str(order_id),
             amount=None,
             retryable=True,
-            error_code="PAYMENT_PENDING",
+            error_code=pending_error,
+            disclosure_reason=(
+                "automation_failure"
+                if pending_error == "AUTOMATION_FAILURE"
+                else "payment_result_ambiguous"
+            ),
             **exposure,
         )
     attempt = _persist_terminal_outcome(runtime.repository, attempt, outcome)
@@ -958,6 +987,28 @@ def complete_checkout(credential_reference, merchant_sku_id, amount, idempotency
             runtime, existing, str(credential_reference)
         )
 
+    if not runtime.merchant_health_check(ZEPTO_HEALTH_URL):
+        if os.getenv(MERCHANT_UNAVAILABLE_FALLBACK_ENV) == "1":
+            response = mock_checkout.complete_checkout(
+                credential_reference,
+                merchant_sku_id,
+                expected_amount,
+                idempotency_key,
+            )
+            return {
+                **response,
+                "execution_mode": ExecutionMode.DISCLOSED_MOCK.value,
+                "disclosure_reason": "merchant_unavailable",
+            }
+        return _checkout_result(
+            CheckoutStatus.FAILED,
+            merchant_order_id=None,
+            amount=None,
+            retryable=True,
+            error_code="MERCHANT_UNAVAILABLE",
+            disclosure_reason="merchant_unavailable",
+        )
+
     assert runtime.checkout_context_provider is not None
     context = runtime.checkout_context_provider(str(idempotency_key))
     if (
@@ -1118,7 +1169,7 @@ def complete_checkout(credential_reference, merchant_sku_id, amount, idempotency
             str(idempotency_key),
             expected_states={"executing"},
             state="ambiguous",
-            last_error="BROWSER_EXECUTION_AMBIGUOUS",
+            last_error="AUTOMATION_FAILURE",
         )
 
     attempt = runtime.repository.get_merchant_checkout_attempt(str(idempotency_key))

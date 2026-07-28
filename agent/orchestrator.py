@@ -218,6 +218,8 @@ def _log_event(
         user_id=context.user.user_id,
         event_type=event_type,
         payload=payload,
+        execution_mode=payload.get("execution_mode"),
+        reason=payload.get("reason"),
         timestamp=datetime.now(timezone.utc),
     )
     context.audit_entries.append(entry)
@@ -263,6 +265,7 @@ def _await_passkey_approval(
     approved_at = datetime.fromisoformat(result["approved_at"])
     mandate = Mandate(
         mandate_id=result["mandate_id"],
+        txn_ref_id=result["txn_ref_id"],
         intent_id=intent_id,
         credential_reference=result["credential_reference"],
         scope_merchant=result["scope"]["merchant"],
@@ -331,7 +334,12 @@ def _complete_merchant_checkout(
         _log_event(
             context,
             AuditEventType.TRANSACTION_FAILED.value,
-            {"item": item.name, "merchant": item.preferred_merchant.value, "reason": response["status"]},
+            {
+                "item": item.name,
+                "merchant": item.preferred_merchant.value,
+                "reason": response.get("disclosure_reason") or response["status"],
+                "execution_mode": response.get("execution_mode"),
+            },
         )
         raise MerchantCheckoutFailed(response["status"])
 
@@ -354,6 +362,8 @@ def _complete_merchant_checkout(
             "merchant": item.preferred_merchant.value,
             "amount": str(transaction.amount),
             "transaction_id": str(transaction.transaction_id),
+            "execution_mode": response.get("execution_mode"),
+            "reason": response.get("disclosure_reason"),
         },
     )
     return transaction

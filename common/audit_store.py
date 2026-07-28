@@ -38,10 +38,20 @@ def _connect(database_path: Path | None = None) -> sqlite3.Connection:
                 )
             ),
             payload TEXT NOT NULL,
+            execution_mode TEXT,
+            reason TEXT,
             timestamp TEXT NOT NULL
         )
         """
     )
+    columns = {
+        str(row["name"])
+        for row in connection.execute(f"PRAGMA table_info({_TABLE})").fetchall()
+    }
+    if "execution_mode" not in columns:
+        connection.execute(f"ALTER TABLE {_TABLE} ADD COLUMN execution_mode TEXT")
+    if "reason" not in columns:
+        connection.execute(f"ALTER TABLE {_TABLE} ADD COLUMN reason TEXT")
     connection.execute(
         f"CREATE INDEX IF NOT EXISTS ix_{_TABLE}_timestamp "
         f"ON {_TABLE}(timestamp, log_id)"
@@ -55,6 +65,8 @@ def _decode(row: sqlite3.Row) -> dict[str, Any]:
         "user_id": str(row["user_id"]),
         "event_type": str(row["event_type"]),
         "payload": json.loads(str(row["payload"])),
+        "execution_mode": row["execution_mode"],
+        "reason": row["reason"],
         "timestamp": str(row["timestamp"]),
     }
 
@@ -66,14 +78,17 @@ def append(entry: AuditLogEntry, database_path: Path | None = None) -> dict[str,
         connection.execute("BEGIN IMMEDIATE")
         connection.execute(
             f"""
-            INSERT OR IGNORE INTO {_TABLE} (log_id, user_id, event_type, payload, timestamp)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT OR IGNORE INTO {_TABLE}
+                (log_id, user_id, event_type, payload, execution_mode, reason, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record["log_id"],
                 record["user_id"],
                 record["event_type"],
                 json.dumps(record["payload"], separators=(",", ":")),
+                record["execution_mode"],
+                record["reason"],
                 record["timestamp"],
             ),
         )

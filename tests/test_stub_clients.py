@@ -1,5 +1,7 @@
 import json
+from io import BytesIO
 from inspect import signature
+from urllib.error import HTTPError
 
 import pytest
 
@@ -8,8 +10,9 @@ from payments import prava_client
 
 
 class FakeResponse:
-    def __init__(self, payload: dict):
+    def __init__(self, payload: dict, *, headers: dict | None = None):
         self._body = json.dumps(payload).encode("utf-8")
+        self.headers = headers or {}
 
     def __enter__(self):
         return self
@@ -26,6 +29,11 @@ def test_prava_contract_signatures_are_exact() -> None:
         "(merchant, amount, item_description, constraints)"
     )
     assert str(signature(prava_client.await_mandate)) == "(intent_ref)"
+    assert str(signature(prava_client.get_payment_result)) == "(session_id)"
+    assert str(signature(prava_client.report_status)) == (
+        "(session_id, txn_ref_id, txn_status, authorization_code=None, "
+        "response_code=None, amount_paid=None)"
+    )
 
 
 def test_prava_configuration_is_environment_bound_and_live_is_gated(monkeypatch) -> None:
@@ -60,6 +68,7 @@ def test_prava_client_normalizes_approved_result_without_exposing_tokens(
         [
             {
                 "session_id": "sess_unit_approved",
+                "session_token": "session-token-unit",
                 "iframe_url": "https://sandbox.collect.prava.space/unit",
                 "order_id": "ord_unit",
                 "expires_at": "2099-12-31T23:59:59Z",
@@ -99,6 +108,7 @@ def test_prava_client_normalizes_approved_result_without_exposing_tokens(
     mandate = prava_client.await_mandate(intent_ref)
     assert intent_ref == "sess_unit_approved"
     assert mandate["status"] == "approved"
+    assert mandate["txn_ref_id"] == "txn_ref_unit"
     assert mandate["scope"] == {"merchant": "Zepto", "max_amount": "450.00"}
     assert mandate["credential_reference"].startswith("prava_credential_")
     serialized = json.dumps(mandate)
@@ -106,11 +116,173 @@ def test_prava_client_normalizes_approved_result_without_exposing_tokens(
     assert "unit-cvv" not in serialized
 
 
+def test_create_session_uses_documented_request_contract(monkeypatch) -> None:
+    monkeypatch.setenv("PRAVA_API_KEY", "sk_test_unit_key")
+    monkeypatch.setenv("PRAVA_SANDBOX_URL", "https://sandbox.api.prava.space")
+    captured = {}
+
+    def fake_urlopen(request, **kwargs):
+        captured["url"] = request.full_url
+        captured["method"] = request.method
+        captured["authorization"] = request.headers["Authorization"]
+        captured["timeout"] = kwargs["timeout"]
+        captured["payload"] = json.loads(request.data)
+        return FakeResponse(
+            {
+                "session_id": "sess_contract",
+                "session_token": "session-token-contract",
+                "iframe_url": "https://sandbox.collect.prava.space/contract",
+                "order_id": "ord_contract",
+                "expires_at": "2099-12-31T23:59:59Z",
+            }
+        )
+
+    monkeypatch.setattr(prava_client, "urlopen", fake_urlopen)
+
+    result = prava_client.create_session(
+        "user-1",
+        "user@example.com",
+        "450.00",
+        "inr",
+        "Zepto",
+        "https://www.zeptonow.com",
+        "in",
+        "Coffee",
+        "450.00",
+        product_id="coffee-500g",
+    )
+
+    assert captured["url"] == "https://sandbox.api.prava.space/v1/sessions"
+    assert captured["method"] == "POST"
+    assert captured["authorization"] == "Bearer sk_test_unit_key"
+    assert captured["timeout"] == 20
+    assert len(captured["payload"]["purchase_context"]) == 1
+    context = captured["payload"]["purchase_context"][0]
+    assert context["merchant_details"]["country_code_iso2"] == "IN"
+    assert context["product_details"] == [
+        {
+            "description": "Coffee",
+            "unit_price": "450.00",
+            "quantity": 1,
+            "product_id": "coffee-500g",
+        }
+    ]
+    assert result["session_token"] == "session-token-contract"
+
+
+def test_get_payment_result_uses_documented_request_contract(monkeypatch) -> None:
+    monkeypatch.setenv("PRAVA_API_KEY", "sk_test_unit_key")
+    monkeypatch.setenv("PRAVA_SANDBOX_URL", "https://sandbox.api.prava.space")
+    captured = {}
+
+    def fake_urlopen(request, **kwargs):
+        captured["url"] = request.full_url
+        captured["method"] = request.method
+        captured["authorization"] = request.headers["Authorization"]
+        return FakeResponse(
+            {"session_id": "session/unsafe", "status": "pending", "transactions": []}
+        )
+
+    monkeypatch.setattr(prava_client, "urlopen", fake_urlopen)
+
+    result = prava_client.get_payment_result("session/unsafe")
+
+    assert captured["url"].endswith(
+        "/v1/sessions/session%2Funsafe/payment-result"
+    )
+    assert captured["method"] == "GET"
+    assert captured["authorization"] == "Bearer sk_test_unit_key"
+    assert result["status"] == "pending"
+
+
+def test_report_status_uses_documented_optional_fields(monkeypatch) -> None:
+    monkeypatch.setenv("PRAVA_API_KEY", "sk_test_unit_key")
+    monkeypatch.setenv("PRAVA_SANDBOX_URL", "https://sandbox.api.prava.space")
+    captured = {}
+
+    def fake_urlopen(request, **_kwargs):
+        captured["url"] = request.full_url
+        captured["payload"] = json.loads(request.data)
+        return FakeResponse(
+            {
+                "status": "confirmed",
+                "txn_ref_id": "txn-contract",
+                "txn_status": "APPROVED",
+                "visa_confirmation": "SUCCESS",
+            }
+        )
+
+    monkeypatch.setattr(prava_client, "urlopen", fake_urlopen)
+
+    prava_client.report_status(
+        "session-contract",
+        "txn-contract",
+        "APPROVED",
+        authorization_code="AUTH42",
+        response_code="00",
+        amount_paid="450.00",
+    )
+
+    assert captured["url"].endswith(
+        "/v1/sessions/session-contract/report-status"
+    )
+    assert captured["payload"] == {
+        "txn_ref_id": "txn-contract",
+        "txn_status": "APPROVED",
+        "authorization_code": "AUTH42",
+        "response_code": "00",
+        "amount_paid": "450.00",
+    }
+
+
+def test_mandate_expired_is_typed_and_never_creates_a_new_session(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("PRAVA_API_KEY", "sk_test_unit_key")
+    monkeypatch.setenv("PRAVA_SANDBOX_URL", "https://sandbox.api.prava.space")
+    monkeypatch.setattr(
+        prava_client,
+        "create_session",
+        lambda *_args, **_kwargs: pytest.fail(
+            "MANDATE_EXPIRED must require a new explicit user approval"
+        ),
+    )
+
+    def expired(*_args, **_kwargs):
+        body = BytesIO(
+            json.dumps(
+                {
+                    "error": {
+                        "code": "MANDATE_EXPIRED",
+                        "message": "Register a new intent.",
+                    }
+                }
+            ).encode("utf-8")
+        )
+        raise HTTPError(
+            "https://sandbox.api.prava.space/v1/sessions/session/report-status",
+            400,
+            "Bad Request",
+            {"X-Response-ID": "response-expired"},
+            body,
+        )
+
+    monkeypatch.setattr(prava_client, "urlopen", expired)
+
+    with pytest.raises(prava_client.MandateExpiredError) as exc_info:
+        prava_client.report_status("session", "txn", "APPROVED")
+
+    assert exc_info.value.code == "MANDATE_EXPIRED"
+    assert exc_info.value.response_id == "response-expired"
+    assert "Register a new intent." in str(exc_info.value)
+
+
 def test_prava_client_normalizes_failed_session_as_rejected(monkeypatch) -> None:
     responses = iter(
         [
             {
                 "session_id": "sess_unit_rejected",
+                "session_token": "session-token-unit",
                 "iframe_url": "https://sandbox.collect.prava.space/unit",
                 "order_id": "ord_unit",
                 "expires_at": "2099-12-31T23:59:59Z",
@@ -153,6 +325,7 @@ def test_completed_prava_session_never_reissues_checkout_credentials(monkeypatch
         [
             {
                 "session_id": "sess_unit_completed",
+                "session_token": "session-token-unit",
                 "iframe_url": "https://sandbox.collect.prava.space/unit",
                 "order_id": "ord_unit",
                 "expires_at": "2099-12-31T23:59:59Z",

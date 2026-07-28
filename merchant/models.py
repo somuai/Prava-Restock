@@ -53,6 +53,7 @@ class MerchantCheckoutResult(MerchantModel):
     retryable: bool = False
     execution_mode: ExecutionMode
     error_code: str | None = None
+    disclosure_reason: str | None = None
     credential_exposed: bool = False
     credential_used: bool = False
 

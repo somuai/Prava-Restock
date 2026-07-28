@@ -10,16 +10,17 @@ Because it depends on unversioned merchant checkout DOM (fragile by nature),
 it explicitly distinguishes automation failures (selector not found, page-
 structure change) from expected payment failures (test-card decline).
 
-If browser automation proves too fragile within the hackathon's time budget,
-the accepted fallback is a clearly disclosed simulated/recorded version of
-this step — same disclosure standard as every other mock in this project.
-Do not silently degrade to a fake without labeling it.
+The only automatic simulation permitted here is the explicitly configured
+merchant-unavailable path.  A reachable merchant plus broken automation is an
+application bug and always fails visibly.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+
+from merchant.health_check import check_merchant_availability
 
 
 class AutomationFailure(Exception):
@@ -30,6 +31,14 @@ class AutomationFailure(Exception):
     These need different handling and different messaging in the demo than a
     legitimate payment decline.
     """
+
+    reason = "automation_failure"
+
+
+class MerchantUnavailable(AutomationFailure):
+    """The merchant could not be reached and no disclosed fallback was enabled."""
+
+    reason = "merchant_unavailable"
 
 
 class PaymentDecline(Exception):
@@ -60,6 +69,8 @@ class PaymentResult:
     error_code: str | None
     automation_failure: bool
     visited_urls: list[str]
+    execution_mode: str
+    disclosure_reason: str | None
 
 
 async def complete_payment_via_browser(
@@ -72,6 +83,9 @@ async def complete_payment_via_browser(
     expiry_month_selector: str | None = None,
     expiry_year_selector: str | None = None,
     pay_button_selector: str = 'button[type="submit"], button:has-text("Pay"), button:has-text("pay")',
+    success_selector: str | None = None,
+    merchant_health_url: str | None = None,
+    allow_disclosed_mock_on_merchant_unavailable: bool = False,
     timeout_ms: int = 30_000,
 ) -> PaymentResult:
     """Navigate to a merchant checkout page and fill the payment form.
@@ -86,6 +100,20 @@ async def complete_payment_via_browser(
     does not match expectations. This is distinct from PaymentDecline, which
     is the expected outcome with test cards.
     """
+    health_url = merchant_health_url or checkout_url
+    if not check_merchant_availability(health_url):
+        if allow_disclosed_mock_on_merchant_unavailable:
+            return PaymentResult(
+                success=True,
+                declined_by_merchant=False,
+                error_code=None,
+                automation_failure=False,
+                visited_urls=[],
+                execution_mode="disclosed_mock",
+                disclosure_reason="merchant_unavailable",
+            )
+        raise MerchantUnavailable("merchant is unavailable; checkout was not attempted")
+
     try:
         from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
     except ImportError:
@@ -179,25 +207,50 @@ async def complete_payment_via_browser(
                 indicator in page_text.lower() for indicator in decline_indicators
             )
 
-            await browser.close()
-
             if is_declined:
+                await browser.close()
                 return PaymentResult(
                     success=False,
                     declined_by_merchant=True,
                     error_code="PAYMENT_DECLINED_TEST_CARD",
                     automation_failure=False,
                     visited_urls=visited_urls,
+                    execution_mode="real",
+                    disclosure_reason="merchant_declined",
                 )
 
-            # If we get here without a decline, the payment may have succeeded
-            # (unexpected with test cards) or the result page is ambiguous
+            # Absence of decline text is not evidence of success. Require an
+            # operator-reviewed success selector or leave the result ambiguous for
+            # authoritative merchant order-status reconciliation.
+            success_proven = False
+            if success_selector:
+                try:
+                    success_element = page.locator(success_selector).first
+                    await success_element.wait_for(
+                        state="visible", timeout=timeout_ms // 3
+                    )
+                    success_proven = True
+                except (PlaywrightTimeout, Exception):
+                    success_proven = False
+            await browser.close()
+            if not success_proven:
+                return PaymentResult(
+                    success=False,
+                    declined_by_merchant=False,
+                    error_code="PAYMENT_RESULT_AMBIGUOUS",
+                    automation_failure=False,
+                    visited_urls=visited_urls,
+                    execution_mode="real",
+                    disclosure_reason="payment_result_ambiguous",
+                )
             return PaymentResult(
                 success=True,
                 declined_by_merchant=False,
                 error_code=None,
                 automation_failure=False,
                 visited_urls=visited_urls,
+                execution_mode="real",
+                disclosure_reason=None,
             )
 
     except AutomationFailure:

@@ -57,6 +57,64 @@ _SENSITIVE_CREDENTIAL_FIELDS = (
 )
 
 
+class PravaAPIError(RuntimeError):
+    """Structured Prava API failure without leaking credentials or response bodies."""
+
+    def __init__(
+        self,
+        *,
+        status_code: int,
+        code: str,
+        message: str,
+        response_id: str | None = None,
+    ) -> None:
+        self.status_code = status_code
+        self.code = code
+        self.response_id = response_id
+        suffix = f" (X-Response-ID: {response_id})" if response_id else ""
+        super().__init__(f"Prava API {status_code} {code}: {message}{suffix}")
+
+
+class MandateExpiredError(PravaAPIError):
+    """Terminal report failure requiring a newly user-authorized session.
+
+    Callers must surface this state for a fresh approval.  The client deliberately
+    does not create another session because doing so could silently change amount,
+    merchant, product, or expiry scope.
+    """
+
+    def __init__(
+        self,
+        *,
+        message: str,
+        response_id: str | None = None,
+    ) -> None:
+        super().__init__(
+            status_code=400,
+            code="MANDATE_EXPIRED",
+            message=message,
+            response_id=response_id,
+        )
+
+
+def _api_error(exc: HTTPError, default_message: str) -> PravaAPIError:
+    try:
+        error = json.loads(exc.read().decode("utf-8")).get("error", {})
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        error = {}
+    code = str(error.get("code") or "HTTP_ERROR")
+    message = str(error.get("message") or default_message)
+    response_id = exc.headers.get("X-Response-ID") if exc.headers is not None else None
+    if exc.code == 400 and code == "MANDATE_EXPIRED":
+        return MandateExpiredError(message=message, response_id=response_id)
+    return PravaAPIError(
+        status_code=exc.code,
+        code=code,
+        message=message,
+        response_id=response_id,
+    )
+
+
 def _load_prava_config() -> tuple[str, str]:
     load_dotenv(_PROJECT_ROOT / ".env", override=False)
     api_key = os.getenv("PRAVA_API_KEY", "").strip()
@@ -98,15 +156,106 @@ def _load_sandbox_config() -> tuple[str, str]:
     return api_key, base_url
 
 
+def create_session(
+    user_id,
+    user_email,
+    total_amount,
+    currency,
+    merchant_name,
+    merchant_url,
+    merchant_country_iso2,
+    product_description,
+    unit_price,
+    product_id=None,
+    quantity=1,
+    effective_until_minutes=15,
+):
+    """Create one official Prava checkout session and return its full response."""
+
+    parsed_total = Decimal(str(total_amount)).quantize(Decimal("0.01"))
+    parsed_unit = Decimal(str(unit_price)).quantize(Decimal("0.01"))
+    if parsed_total <= 0 or parsed_unit <= 0:
+        raise ValueError("total_amount and unit_price must be positive")
+    if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity <= 0:
+        raise ValueError("quantity must be a positive integer")
+    if (
+        isinstance(effective_until_minutes, bool)
+        or not isinstance(effective_until_minutes, int)
+        or effective_until_minutes <= 0
+    ):
+        raise ValueError("effective_until_minutes must be a positive integer")
+
+    product = {
+        "description": str(product_description),
+        "unit_price": format(parsed_unit, "f"),
+        "quantity": quantity,
+    }
+    if product_id is not None:
+        product["product_id"] = str(product_id)
+    payload = {
+        "user_id": str(user_id),
+        "user_email": str(user_email),
+        "total_amount": format(parsed_total, "f"),
+        "currency": str(currency).upper(),
+        "integration_type": "full_checkout",
+        "purchase_context": [
+            {
+                "merchant_details": {
+                    "name": str(merchant_name),
+                    "url": str(merchant_url),
+                    "country_code_iso2": str(merchant_country_iso2).upper(),
+                },
+                "product_details": [product],
+                "effective_until_minutes": effective_until_minutes,
+            }
+        ],
+    }
+    api_key, base_url = _load_prava_config()
+    request = Request(
+        f"{base_url}/v1/sessions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=20) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        raise _api_error(exc, "Prava session creation failed") from exc
+    except TimeoutError as exc:
+        raise RuntimeError("Prava session creation timed out") from exc
+    except URLError as exc:
+        raise RuntimeError(
+            "Prava session creation could not reach the configured API"
+        ) from exc
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise RuntimeError("Prava session creation returned an invalid response") from exc
+
+    required = {
+        "session_id",
+        "session_token",
+        "iframe_url",
+        "order_id",
+        "expires_at",
+    }
+    missing = required.difference(result)
+    if missing:
+        raise RuntimeError(
+            f"Prava session response missing required fields: {sorted(missing)}"
+        )
+    return {key: result[key] for key in required}
+
+
 def create_intent(merchant, amount, item_description, constraints):
-    """Create a Prava session in the explicitly configured environment."""
+    """Backward-compatible Phase-3 wrapper around :func:`create_session`."""
     parsed_amount = Decimal(str(amount))
     if parsed_amount <= 0:
         raise ValueError("amount must be positive")
 
     constraints = dict(constraints)
-    api_key, base_url = _load_prava_config()
-
     merchant_key = str(merchant).strip().lower()
     merchant_defaults = {
         "zepto": ("Zepto", "https://www.zeptonow.com", "IN"),
@@ -128,79 +277,20 @@ def create_intent(merchant, amount, item_description, constraints):
     if effective_until_minutes <= 0:
         raise ValueError("effective_until_minutes must be positive")
 
-    payload = {
-        "user_id": constraints.get("user_id", "restock-sandbox-user"),
-        "user_email": constraints.get(
-            "user_email", "restock-sandbox@example.com"
-        ),
-        "total_amount": amount_string,
-        "currency": str(currency).upper(),
-        "external_order_ref": constraints.get(
-            "external_order_ref", f"restock-{uuid4().hex}"
-        ),
-        "description": str(item_description),
-        "integration_type": constraints.get("integration_type", "full_checkout"),
-        "purchase_context": [
-            {
-                "merchant_details": {
-                    "name": merchant_name,
-                    "url": merchant_url,
-                    "country_code_iso2": str(merchant_country).upper(),
-                    "category_code": constraints.get("category_code", "5411"),
-                    "category": constraints.get("category", "General merchandise"),
-                },
-                "product_details": [
-                    {
-                        "description": str(item_description),
-                        "unit_price": amount_string,
-                        "product_id": constraints.get("product_id"),
-                        "quantity": int(constraints.get("quantity", 1)),
-                    }
-                ],
-                "effective_until_minutes": effective_until_minutes,
-            }
-        ],
-    }
-    if payload["purchase_context"][0]["product_details"][0]["product_id"] is None:
-        del payload["purchase_context"][0]["product_details"][0]["product_id"]
-    callback_url = constraints.get("callback_url")
-    if callback_url:
-        payload["callback_url"] = callback_url
-
-    request = Request(
-        f"{base_url}/v1/sessions",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
+    result = create_session(
+        constraints.get("user_id", "restock-sandbox-user"),
+        constraints.get("user_email", "restock-sandbox@example.com"),
+        amount_string,
+        str(currency).upper(),
+        merchant_name,
+        merchant_url,
+        str(merchant_country).upper(),
+        str(item_description),
+        amount_string,
+        product_id=constraints.get("product_id"),
+        quantity=int(constraints.get("quantity", 1)),
+        effective_until_minutes=effective_until_minutes,
     )
-    try:
-        with urlopen(
-            request,
-            timeout=float(constraints.get("request_timeout_seconds", 20)),
-        ) as response:
-            result = json.loads(response.read().decode("utf-8"))
-    except HTTPError as exc:
-        try:
-            error = json.loads(exc.read().decode("utf-8")).get("error", {})
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            error = {}
-        code = error.get("code", "HTTP_ERROR")
-        message = error.get("message", "Prava session creation failed")
-        raise RuntimeError(f"Prava API {exc.code} {code}: {message}") from exc
-    except TimeoutError as exc:
-        raise RuntimeError("Prava session creation timed out") from exc
-    except URLError as exc:
-        raise RuntimeError("Prava session creation could not reach the configured API") from exc
-
-    required = {"session_id", "iframe_url", "expires_at"}
-    missing = required.difference(result)
-    if missing:
-        raise RuntimeError(
-            f"Prava session response missing required fields: {sorted(missing)}"
-        )
 
     intent_ref = str(result["session_id"])
     _INTENTS[intent_ref] = {
@@ -209,6 +299,7 @@ def create_intent(merchant, amount, item_description, constraints):
         "item_description": str(item_description),
         "constraints": constraints,
         "iframe_url": result["iframe_url"],
+        "session_token": result["session_token"],
         "expires_at": result["expires_at"],
         "order_id": result.get("order_id"),
     }
@@ -243,6 +334,37 @@ def register_intent_context(
     )
 
 
+def get_payment_result(session_id):
+    """Return one authoritative Prava payment-result response without polling."""
+
+    if not session_id:
+        raise ValueError("session_id is required")
+    api_key, base_url = _load_prava_config()
+    request = Request(
+        f"{base_url}/v1/sessions/{quote(str(session_id), safe='')}/payment-result",
+        headers={"Authorization": f"Bearer {api_key}"},
+        method="GET",
+    )
+    try:
+        with urlopen(request, timeout=20) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        raise _api_error(exc, "Prava payment-result request failed") from exc
+    except (TimeoutError, URLError) as exc:
+        raise RuntimeError(
+            "Prava payment-result could not reach the configured API"
+        ) from exc
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise RuntimeError("Prava payment-result returned an invalid response") from exc
+
+    status = str(result.get("status", "")).lower()
+    if status not in {"pending", "awaiting_result", "completed", "failed"}:
+        raise RuntimeError("Prava payment-result returned an unknown status")
+    if str(result.get("session_id") or session_id) != str(session_id):
+        raise RuntimeError("Prava payment-result session reference does not match")
+    return result
+
+
 def await_mandate(intent_ref):
     """Poll a real Prava session until approved, rejected, expired, or timed out."""
     try:
@@ -253,11 +375,9 @@ def await_mandate(intent_ref):
     if "outcome" in intent:
         return dict(intent["outcome"])
 
-    api_key, base_url = _load_prava_config()
-
     constraints = intent["constraints"]
-    poll_timeout = float(constraints.get("poll_timeout_seconds", 90))
-    poll_interval = float(constraints.get("poll_interval_seconds", 3))
+    poll_timeout = float(constraints.get("poll_timeout_seconds", 60))
+    poll_interval = float(constraints.get("poll_interval_seconds", 2))
     if poll_timeout <= 0:
         raise ValueError("poll_timeout_seconds must be positive")
     if poll_interval < 0:
@@ -265,26 +385,11 @@ def await_mandate(intent_ref):
     deadline = time.monotonic() + poll_timeout
 
     while True:
-        request = Request(
-            f"{base_url}/v1/sessions/{quote(str(intent_ref), safe='')}/payment-result",
-            headers={"Authorization": f"Bearer {api_key}"},
-            method="GET",
-        )
         try:
-            with urlopen(
-                request,
-                timeout=float(constraints.get("request_timeout_seconds", 20)),
-            ) as response:
-                result = json.loads(response.read().decode("utf-8"))
-        except HTTPError as exc:
-            try:
-                error = json.loads(exc.read().decode("utf-8")).get("error", {})
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                error = {}
-            code = error.get("code", "HTTP_ERROR")
-            message = error.get("message", "Prava payment-result polling failed")
-            raise RuntimeError(f"Prava API {exc.code} {code}: {message}") from exc
-        except (TimeoutError, URLError) as exc:
+            result = get_payment_result(intent_ref)
+        except RuntimeError as exc:
+            if isinstance(exc, PravaAPIError):
+                raise
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError(
@@ -303,6 +408,11 @@ def await_mandate(intent_ref):
             token = line_item.get("token")
             dynamic_cvv = line_item.get("dynamic_cvv")
             if token and dynamic_cvv:
+                txn_ref_id = line_item.get("txn_ref_id")
+                if not txn_ref_id:
+                    raise RuntimeError(
+                        "Prava awaiting_result omitted required txn_ref_id"
+                    )
                 credential_reference = f"prava_credential_{uuid4().hex}"
                 _CREDENTIALS[credential_reference] = {
                     "token": token,
@@ -310,17 +420,18 @@ def await_mandate(intent_ref):
                     "expiry_month": line_item.get("expiry_month"),
                     "expiry_year": line_item.get("expiry_year"),
                     "session_id": str(intent_ref),
-                    "txn_ref_id": line_item.get("txn_ref_id"),
+                    "txn_ref_id": txn_ref_id,
                     "created_at": datetime.now(timezone.utc),
                     "consumed_at": None,
                 }
                 outcome = {
                     "status": "approved",
                     "mandate_id": (
-                        line_item.get("txn_ref_id")
+                        txn_ref_id
                         or transaction.get("txn_id")
                         or str(intent_ref)
                     ),
+                    "txn_ref_id": txn_ref_id,
                     "credential_reference": credential_reference,
                     "scope": {
                         "merchant": intent["merchant"],
@@ -431,30 +542,41 @@ def purge_expired_credentials() -> int:
     return purged
 
 
-def report_checkout_outcome(
+def _report_status(
     session_id: str,
     txn_ref_id: str,
-    transaction_status: str,
+    txn_status: str,
+    *,
+    authorization_code: str | None = None,
+    response_code: str | None = None,
     amount_paid: Decimal | str | int | float | None = None,
 ) -> dict:
-    """Report a known merchant outcome using non-secret Prava references."""
+    """Internal implementation shared by the public and compatibility contracts."""
 
-    normalized_status = str(transaction_status).upper()
+    normalized_status = str(txn_status).upper()
     if normalized_status not in {"APPROVED", "DECLINED"}:
-        raise ValueError("transaction_status must be APPROVED or DECLINED")
+        raise ValueError("txn_status must be APPROVED or DECLINED")
     if not session_id or not txn_ref_id:
         raise ValueError("session_id and txn_ref_id are required")
+    if authorization_code is not None and len(str(authorization_code)) > 128:
+        raise ValueError("authorization_code cannot exceed 128 characters")
+    if response_code is not None and len(str(response_code)) > 2:
+        raise ValueError("response_code cannot exceed 2 characters")
 
     api_key, base_url = _load_prava_config()
     payload = {
         "txn_ref_id": str(txn_ref_id),
         "txn_status": normalized_status,
     }
+    if authorization_code is not None:
+        payload["authorization_code"] = str(authorization_code)
+    if response_code is not None:
+        payload["response_code"] = str(response_code)
     if amount_paid is not None:
         normalized_amount = Decimal(str(amount_paid)).quantize(Decimal("0.01"))
         if normalized_amount <= 0:
             raise ValueError("amount_paid must be positive")
-        payload["amount_paid"] = float(normalized_amount)
+        payload["amount_paid"] = format(normalized_amount, "f")
     request = Request(
         f"{base_url}/v1/sessions/{quote(str(session_id), safe='')}/report-status",
         data=json.dumps(payload).encode("utf-8"),
@@ -470,11 +592,7 @@ def report_checkout_outcome(
             headers = getattr(response, "headers", None)
             response_id = headers.get("X-Response-ID") if headers is not None else None
     except HTTPError as exc:
-        response_id = exc.headers.get("X-Response-ID") if exc.headers is not None else None
-        suffix = f" (X-Response-ID: {response_id})" if response_id else ""
-        raise RuntimeError(
-            f"Prava report-status failed with HTTP {exc.code}{suffix}"
-        ) from exc
+        raise _api_error(exc, "Prava report-status failed") from exc
     except (TimeoutError, URLError) as exc:
         raise RuntimeError("Prava report-status could not reach the configured API") from exc
 
@@ -494,34 +612,46 @@ def report_checkout_outcome(
     return result
 
 
+def report_status(
+    session_id,
+    txn_ref_id,
+    txn_status,
+    authorization_code=None,
+    response_code=None,
+    amount_paid=None,
+):
+    """Report a checkout outcome using Prava's documented public contract."""
+
+    return _report_status(
+        session_id,
+        txn_ref_id,
+        txn_status,
+        authorization_code=authorization_code,
+        response_code=response_code,
+        amount_paid=amount_paid,
+    )
+
+
+def report_checkout_outcome(
+    session_id: str,
+    txn_ref_id: str,
+    transaction_status: str,
+    amount_paid: Decimal | str | int | float | None = None,
+) -> dict:
+    """Backward-compatible wrapper retaining the existing checkout integration."""
+
+    return _report_status(
+        session_id,
+        txn_ref_id,
+        transaction_status,
+        amount_paid=amount_paid,
+    )
+
+
 def get_payment_result_status(session_id: str) -> str:
     """Read one Prava session status for crash-safe report reconciliation."""
 
-    if not session_id:
-        raise ValueError("session_id is required")
-    api_key, base_url = _load_prava_config()
-    request = Request(
-        f"{base_url}/v1/sessions/{quote(str(session_id), safe='')}/payment-result",
-        headers={"Authorization": f"Bearer {api_key}"},
-        method="GET",
-    )
-    try:
-        with urlopen(request, timeout=20) as response:
-            result = json.loads(response.read().decode("utf-8"))
-    except HTTPError as exc:
-        response_id = exc.headers.get("X-Response-ID") if exc.headers else None
-        suffix = f" (X-Response-ID: {response_id})" if response_id else ""
-        raise RuntimeError(
-            f"Prava payment-result failed with HTTP {exc.code}{suffix}"
-        ) from exc
-    except (TimeoutError, URLError) as exc:
-        raise RuntimeError("Prava payment-result could not reach the configured API") from exc
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise RuntimeError("Prava payment-result returned an invalid response") from exc
-    status = str(result.get("status", "")).lower()
-    if status not in {"pending", "awaiting_result", "completed", "failed"}:
-        raise RuntimeError("Prava payment-result returned an unknown status")
-    return status
+    return str(get_payment_result(session_id)["status"]).lower()
 
 
 def finalize_credential(credential_reference: str, transaction_status: str) -> None:

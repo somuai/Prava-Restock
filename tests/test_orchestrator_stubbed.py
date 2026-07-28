@@ -59,6 +59,7 @@ def offline_prava_client(monkeypatch) -> None:
         return {
             "status": "approved",
             "mandate_id": f"offline_mandate_{intent_ref}",
+            "txn_ref_id": f"offline_txn_{intent_ref}",
             "credential_reference": f"offline_credential_{intent_ref}",
             "scope": {
                 "merchant": intent["merchant"],
@@ -215,6 +216,7 @@ def test_price_deviation_requires_reapproval_before_merchant(
     intent_id = UUID("00000000-0000-0000-0000-000000000099")
     context.mandates["mandate-price"] = Mandate(
         mandate_id="mandate-price",
+        txn_ref_id="txn-price",
         intent_id=intent_id,
         credential_reference="offline-price-credential",
         scope_merchant="zepto",

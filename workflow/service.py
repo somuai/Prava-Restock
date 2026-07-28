@@ -346,6 +346,11 @@ class WorkflowService:
         raw_status = response.get("status")
         status_value = raw_status.value if isinstance(raw_status, CheckoutStatus) else str(raw_status)
         execution_mode = str(response.get("execution_mode") or "disclosed_mock")
+        disclosure_reason = response.get("disclosure_reason")
+        audit_modes = dict(run["modes"])
+        audit_modes["home_payment"] = execution_mode
+        if disclosure_reason:
+            audit_modes["home_payment_reason"] = str(disclosure_reason)
         credential_provably_unexposed = (
             response.get("credential_exposed") is False
             or (
@@ -370,9 +375,12 @@ class WorkflowService:
                 payload={
                     "merchant_order_id": response.get("merchant_order_id"),
                     "retryable": bool(response.get("retryable", False)),
-                    "reason": response.get("error_code") or "PAYMENT_PENDING",
+                    "reason": disclosure_reason
+                    or response.get("error_code")
+                    or "PAYMENT_PENDING",
+                    "execution_mode": execution_mode,
                 },
-                modes=run["modes"],
+                modes=audit_modes,
             )
             return pending
         if status_value == CheckoutStatus.PRICE_CHANGED.value:
@@ -407,7 +415,7 @@ class WorkflowService:
                 item_id=run["item_id"],
                 event_type="reapproval_required",
                 payload={"reason": "price_changed", "fresh_amount": changed_amount},
-                modes=run["modes"],
+                modes=audit_modes,
             )
             return reapproval
         if status_value != CheckoutStatus.COMPLETED.value:
@@ -421,7 +429,12 @@ class WorkflowService:
             )
             self.repository.audit(
                 user_id=run["user_id"], run_id=run["run_id"], item_id=run["item_id"],
-                event_type="checkout_failed", payload={"reason": status_value}, modes=run["modes"]
+                event_type="checkout_failed",
+                payload={
+                    "reason": disclosure_reason or response.get("error_code") or status_value,
+                    "execution_mode": execution_mode,
+                },
+                modes=audit_modes,
             )
             return failed
 
@@ -434,6 +447,9 @@ class WorkflowService:
             amount=Decimal(str(response.get("charged_amount") or run["proposed_amount"])),
             currency=str(response.get("currency") or run["currency"]),
             execution_mode=execution_mode,
+            disclosure_reason=(
+                str(disclosure_reason) if disclosure_reason is not None else None
+            ),
         )
         if credential_reference and credential_provably_unexposed:
             self._retire_unused_credential(credential_reference)
