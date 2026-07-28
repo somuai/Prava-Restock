@@ -53,7 +53,8 @@ def _require_predicted(item: TrackedItem) -> None:
 
 def predicted_depletion_date(item: TrackedItem) -> date:
     _require_predicted(item)
-    assert item.last_purchased_at is not None
+    if item.last_purchased_at is None:
+        raise ValueError("cold-start items have no predicted depletion date before a purchase")
     assert item.typical_cadence_days is not None
     return item.last_purchased_at + timedelta(days=item.typical_cadence_days)
 
@@ -68,6 +69,11 @@ def trigger_condition(
     today: date | None = None,
     trigger_window_days: int = TRIGGER_WINDOW_DAYS,
 ) -> bool:
+    # A cadence prior is an onboarding estimate, not evidence that a user has
+    # purchased the item. Do not create a depletion notification until the
+    # first purchase establishes a clock. A price threshold may still fire.
+    if item.last_purchased_at is None:
+        return False
     return days_until_depletion(item, today) <= trigger_window_days
 
 
@@ -132,19 +138,22 @@ def _price_reason(item: TrackedItem) -> str:
 
 def propose(item: TrackedItem) -> dict:
     _require_predicted(item)
-    assert item.last_purchase_amount is not None
-    depletion_days = days_until_depletion(item)
     depletion_fired = trigger_condition(item)
     price_fired = price_trigger_condition(item)
+    depletion_days = days_until_depletion(item) if depletion_fired else None
     merchant = item.preferred_merchant.value
 
     if depletion_fired and price_fired:
+        assert depletion_days is not None
         reason = f"{_depletion_reason(item, depletion_days)}, and {_price_reason(item)}."
     elif depletion_fired:
+        assert depletion_days is not None
         reason = f"{_depletion_reason(item, depletion_days)}."
     elif price_fired:
         reason = f"{_price_reason(item)}."
     else:
+        if item.last_purchase_amount is None:
+            raise ValueError("cold-start proposal requires a current observed price")
         reason = f"{item.name} has not reached a reorder trigger yet."
 
     proposed_amount = (
@@ -152,6 +161,8 @@ def propose(item: TrackedItem) -> dict:
         if price_fired and item.last_observed_price is not None
         else item.last_purchase_amount
     )
+    if proposed_amount is None:
+        raise ValueError("cold-start proposal requires a current observed price")
     return {
         "proposed_amount": proposed_amount,
         "merchant": merchant,

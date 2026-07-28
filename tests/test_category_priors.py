@@ -35,28 +35,56 @@ def _predicted_item(
     )
 
 
-def test_known_category_seeds_from_lookup_table() -> None:
-    """A new item in a known category uses the Instacart-derived prior."""
-    cadence = consumption_model.seed_cadence_from_priors("grocery", user_estimate=20.0)
-    assert cadence == 11.0  # Instacart grocery median, not the user's 20-day estimate
+def _cold_start_item(category: str, cadence: float | None) -> TrackedItem:
+    return TrackedItem(
+        item_id=UUID("00000000-0000-0000-0000-000000000098"),
+        user_id=USER_ID,
+        name="New item",
+        track="home",
+        trigger_type="predicted",
+        category=category,
+        sensitive_flag=False,
+        preferred_merchant="zepto",
+        merchant_sku_id="new-sku",
+        currency="INR",
+        status="active",
+        typical_cadence_days=cadence,
+    )
 
 
-def test_unknown_category_falls_back_to_user_estimate() -> None:
+def test_new_known_category_item_seeds_from_lookup_table() -> None:
+    """A new item in a known category ignores its estimate for the public prior."""
+    item = _cold_start_item("grocery", cadence=20.0)
+    assert item.typical_cadence_days == 11.0
+    assert item.last_purchased_at is None
+    assert consumption_model.trigger_condition(item) is False
+
+
+def test_new_unknown_category_item_falls_back_to_user_estimate() -> None:
     """A new item in an unknown category falls back to the user's own estimate."""
-    cadence = consumption_model.seed_cadence_from_priors("stationery", user_estimate=45.0)
-    assert cadence == 45.0
+    item = _cold_start_item("stationery", cadence=45.0)
+    assert item.typical_cadence_days == 45.0
 
 
 def test_no_prior_and_no_estimate_raises() -> None:
     """Neither a category match nor a user estimate is available."""
-    with pytest.raises(ValueError, match="no category prior"):
-        consumption_model.seed_cadence_from_priors("stationery")
+    with pytest.raises(ValueError, match="user cadence estimate"):
+        _cold_start_item("stationery", None)
 
 
 def test_health_category_seeds_from_lookup_table() -> None:
     """Health category uses the personal-care derived prior."""
     cadence = consumption_model.seed_cadence_from_priors("health")
     assert cadence == 18.0
+
+
+def test_cold_start_price_signal_can_propose_without_purchase_history() -> None:
+    item = _cold_start_item("grocery", cadence=None).model_copy(
+        update={"price_threshold": Decimal("400"), "last_observed_price": Decimal("380")}
+    )
+    assert consumption_model.should_fire(item) is True
+    proposal = consumption_model.propose(item)
+    assert proposal["proposed_amount"] == Decimal("380")
 
 
 def test_recalibration_converges_regardless_of_seed_source() -> None:

@@ -1,16 +1,16 @@
 """Explainable cold-start priors; personal EWMA replaces them after observations."""
 
-from payments.models import Category
+from payments.models import Category, _cold_start_category_priors
 
 
-CATEGORY_PRIORS_DAYS: dict[Category, float] = {
-    Category.GROCERY: 14.0,
-    Category.STATIONERY: 45.0,
-    Category.HEALTH: 30.0,
-    Category.SAAS_SUBSCRIPTION: 30.0,
-    Category.OTHER: 30.0,
-}
+_FALLBACK_PRIOR_DAYS = 30.0
 
 
 def cadence_prior_days(category: Category | str) -> float:
-    return CATEGORY_PRIORS_DAYS[Category(category)]
+    """Return the public category prior, or a neutral benchmark fallback.
+
+    This helper is for offline evaluation only. Onboarding retains the user's
+    estimate when a category is not mapped; see ``TrackedItem``.
+    """
+    normalized = Category(category).value
+    return _cold_start_category_priors().get(normalized, _FALLBACK_PRIOR_DAYS)

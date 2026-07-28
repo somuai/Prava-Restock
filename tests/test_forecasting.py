@@ -59,7 +59,7 @@ def test_ewma_and_metrics_are_deterministic() -> None:
     ])
     assert metrics.mae_days == 1
     assert metrics.user_action_rate == 0.5
-    assert cadence_prior_days("grocery") == 14
+    assert cadence_prior_days("grocery") == 11
 
 
 def test_forecast_storage_requires_consent_and_can_be_deleted(tmp_path) -> None:

@@ -4,12 +4,19 @@
 
 **Source:** [Kaggle — Instacart Market Basket Analysis](https://www.kaggle.com/c/instacart-market-basket-analysis)  
 **Original publisher:** Instacart, 2017  
-**License:** Released under non-commercial research-use terms; community mirrors tagged CC0: Public Domain on Kaggle.
+**License and provenance:** The specific [Kaggle mirror used for this
+aggregate](https://www.kaggle.com/datasets/psparks/instacart-market-basket-analysis/metadata)
+is marked **CC0: Public Domain** in its data card. The original Instacart 2017
+release has also been described in published work as non-commercial-use data.
+Those terms are not interchangeable, so Restock does not redistribute raw
+records or treat this as clearance for a trained production model. Legal review
+is required before any broader use.
 
 ### What was extracted
 
 Median days-between-reorders at the department/category level, mapped to
-Restock's `Category` enum:
+Restock's `Category` enum. The checked-in values are the only derived output;
+the raw dataset is neither checked in nor loaded by the application:
 
 | Restock Category | Instacart Department(s) | Median Reorder Interval |
 |---|---|---|

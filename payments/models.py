@@ -7,6 +7,9 @@ the opaque credential reference supplied by Prava.
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
+from functools import lru_cache
+import json
+from pathlib import Path
 from typing import Any, Optional
 from uuid import UUID
 
@@ -73,6 +76,22 @@ PositiveDecimal = Field(gt=Decimal("0"))
 PositiveFloat = Field(gt=0)
 
 
+@lru_cache(maxsize=1)
+def _cold_start_category_priors() -> dict[str, float]:
+    """Read static, aggregate category priors without importing trigger code.
+
+    Keeping this small loader here avoids a models → triggers → models import
+    cycle while making the onboarding behaviour part of the Pydantic contract.
+    """
+    path = Path(__file__).resolve().parents[1] / "triggers" / "category_priors.json"
+    decoded = json.loads(path.read_text(encoding="utf-8"))
+    return {
+        key: float(value)
+        for key, value in decoded.items()
+        if not key.startswith("_") and float(value) > 0
+    }
+
+
 class RestockModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -104,6 +123,8 @@ class TrackedItem(RestockModel):
     sensitive_flag: bool
     preferred_merchant: PreferredMerchant
     merchant_sku_id: str
+    merchant_address_ref: str | None = Field(default=None, min_length=1, max_length=255)
+    quantity: int | None = Field(default=None, ge=1, strict=True)
     currency: str = Field(min_length=3, max_length=3)
     status: ItemStatus
 
@@ -120,15 +141,12 @@ class TrackedItem(RestockModel):
 
     @model_validator(mode="after")
     def validate_trigger_fields(self) -> "TrackedItem":
-        predicted_fields = (
-            self.typical_cadence_days,
-            self.last_purchased_at,
-            self.last_purchase_amount,
-        )
+        purchase_history = (self.last_purchased_at, self.last_purchase_amount)
         optional_predicted_fields = (
             self.price_threshold,
             self.last_observed_price,
         )
+        home_quote_fields = (self.merchant_address_ref, self.quantity)
         known_date_fields = (
             self.renewal_date,
             self.current_plan_amount,
@@ -136,16 +154,40 @@ class TrackedItem(RestockModel):
             self.alternate_plan_label,
         )
         if self.trigger_type is TriggerType.PREDICTED:
-            if any(value is None for value in predicted_fields):
-                raise ValueError("predicted items require all predicted-trigger fields")
+            if self.track is not Track.HOME:
+                raise ValueError("predicted items must use the Home track")
+            if (self.last_purchased_at is None) != (self.last_purchase_amount is None):
+                raise ValueError(
+                    "predicted items require both purchase date and amount, or neither for cold start"
+                )
+            if self.last_purchased_at is None:
+                # The caller's cadence is the user's estimate for categories
+                # without a public prior. A category prior deliberately wins
+                # for mapped categories at first creation only.
+                prior = _cold_start_category_priors().get(self.category.value)
+                if prior is not None:
+                    self.typical_cadence_days = prior
+                elif self.typical_cadence_days is None:
+                    raise ValueError(
+                        "cold-start predicted items require a user cadence estimate when no category prior exists"
+                    )
+            elif self.typical_cadence_days is None:
+                raise ValueError("predicted items require typical_cadence_days")
             if any(value is not None for value in known_date_fields):
                 raise ValueError("predicted items cannot set known-date fields")
         else:
+            if self.track is not Track.TEAMS:
+                raise ValueError("known-date items must use the Teams track")
             if any(value is None for value in known_date_fields):
                 raise ValueError("known-date items require all known-date fields")
             if any(
                 value is not None
-                for value in predicted_fields + optional_predicted_fields
+                for value in (
+                    purchase_history
+                    + (self.typical_cadence_days,)
+                    + optional_predicted_fields
+                    + home_quote_fields
+                )
             ):
                 raise ValueError("known-date items cannot set predicted-trigger fields")
         return self
