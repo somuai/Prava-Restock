@@ -1,0 +1,32 @@
+name: production trigger scan
+
+on:
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: restock-production-trigger-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run one leased trigger scan
+        env:
+          RESTOCK_PUBLIC_API_URL: ${{ secrets.RESTOCK_PUBLIC_API_URL }}
+          RESTOCK_WORKER_SERVICE_TOKEN: ${{ secrets.RESTOCK_WORKER_SERVICE_TOKEN }}
+        run: |
+          test -n "$RESTOCK_PUBLIC_API_URL"
+          test -n "$RESTOCK_WORKER_SERVICE_TOKEN"
+          curl --fail-with-body \
+            --retry 2 \
+            --retry-all-errors \
+            --max-time 60 \
+            -X POST \
+            -H "Authorization: Bearer $RESTOCK_WORKER_SERVICE_TOKEN" \
+            "${RESTOCK_PUBLIC_API_URL%/}/api/v1/service/worker/scan"

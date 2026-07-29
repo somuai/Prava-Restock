@@ -878,13 +878,22 @@ class RestockRepository:
 
     def pending_notifications(self, user_id: str) -> list[dict[str, Any]]:
         with self.database.session() as session:
-            rows = session.scalars(
-                select(NotificationRow).where(
+            rows = session.execute(
+                select(NotificationRow, WorkflowRunRow, TrackedItemRow)
+                .join(WorkflowRunRow, WorkflowRunRow.run_id == NotificationRow.run_id)
+                .join(TrackedItemRow, TrackedItemRow.item_id == WorkflowRunRow.item_id)
+                .where(
                     NotificationRow.user_id == user_id,
                     NotificationRow.status == "pending",
                 )
             ).all()
-            return [_row_dict(row) for row in rows]
+            result = []
+            for notification, run, item in rows:
+                value = _row_dict(notification)
+                value["item_id"] = run.item_id
+                value["track"] = item.payload.get("track")
+                result.append(value)
+            return result
 
     def record_action(
         self,

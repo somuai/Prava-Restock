@@ -370,11 +370,11 @@ just a known fact on the `TrackedItem` record.
 - Same Prava mandate flow, same passkey approval, same audit log as Restock
   Home — only the merchant/billing call differs (see next point).
 - One-time hosted-invoice quoting is implemented. Unattended final payment is a
-  **disclosed mock**. Prava confirmed recurring mandates unavailable for the
-  applicable hackathon flow, so they remain disabled. Broader SDK fields such
-  as `frequency` and `useLimit` are not proof that the server-side Session API
-  supports this use case; revalidate after the event before changing the
-  boundary.
+  **disclosed mock**. Prava now documents active-mandate charging through its
+  server REST API, but Restock has not implemented or sandbox-proved that
+  separate charge/report boundary. Keep recurring Teams charging disabled
+  until those integration tests pass; do not infer readiness from the
+  platform endpoint alone.
 - The Prava mandate is scoped to a **team budget cap** instead of a personal
   one, and the audit log is framed as a savings report ("caught 1 price
   increase, saved $58/year") rather than a personal pantry log.

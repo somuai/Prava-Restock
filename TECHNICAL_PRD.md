@@ -321,9 +321,11 @@ fresh provider authorization and explicit operator enablement.
 Real Home proposals must be based on a fresh exact-cart quote for the tracked `merchant_sku_id`, positive `quantity`, and opaque `merchant_address_ref`. Initial quoting prepares and verifies the exact cart before preview; pre-checkout revalidation previews the already-prepared cart again. The Zepto device ID is supplied only through deployment configuration (`ZEPTO_DEVICE_ID`) and must never be persisted in `TrackedItem`, logs, or API payloads. Merchant clients remain injected so credential-free tests cannot make live calls by accident.
 
 **Restock Teams:** one-time hosted-invoice quoting is implemented. Unattended
-final invoice payment remains disclosed simulation. Prava currently supports
-one-time mandates only, so recurring Teams charging is disabled rather than
-approximated.
+final invoice payment remains disclosed simulation. Prava now documents
+`POST /v1/mandates/{id}/charge` for active mandates, including idempotent charge
+references and merchant/cap enforcement. Restock has not implemented or
+sandbox-proved that separate charge/report flow, so recurring Teams charging
+remains disabled rather than being approximated.
 
 ### 9.3 OpenAI Agents SDK
 
@@ -385,8 +387,8 @@ Every durable state transition writes a sanitized domain-audit entry with run, u
 *Resolution paths for each of these live in `PRD.md` §15 (Roadmap) — this list is deliberately just the "not done yet" inventory, not the plan to close it.*
 
 - No production ML forecasting model — deterministic EWMA remains the production baseline while consented observation logging and offline benchmarking collect evidence.
-- One-time hosted SaaS invoice quoting is implemented; its unattended final payment remains a disclosed mock. Prava's [Report Status documentation](https://docs.prava.space/api-reference/report-status) states that mandates are currently one-time and recurring frequencies are planned, so recurring Teams charging is unsupported and disabled.
-- Multi-user Household/Organization membership, roles, invitations, consent, and multi-approver policy are implemented; shared payment approval does not make the underlying one-time Prava mandate reusable or recurring.
+- One-time hosted SaaS invoice quoting is implemented; its unattended final payment remains a disclosed mock. Prava now documents active-mandate charging, but Restock has not integrated or sandbox-proved that charge/report boundary, so recurring Teams charging remains disabled.
+- Multi-user Household/Organization membership, roles, invitations, consent, and multi-approver policy are implemented; shared approval is not treated as reusable payment authority until Restock's mandate-charge integration enforces the same policy.
 - Capacitor Android/iOS wrappers are implemented and simulator-built; store enrollment, physical-device push validation, and publication remain external launch gates.
 - The guaranteed submission surface remains the disclosed PWA. The real Slack adapter and Meta test-number adapter must still disclose whether external credentials/setup are active.
 - Home adapters cover real Zepto and Swiggy catalog/cart quoting. Zepto's unattended final payment remains disclosed-mock by default; Swiggy card payment remains an explicit browser boundary and is never silently replaced by COD.
@@ -404,15 +406,13 @@ Every durable state transition writes a sanitized domain-audit entry with run, u
 - [x] **RESOLVED** — Restock sends `effective_until_minutes` on Session
   creation (15 minutes by default) and treats expiry as terminal.
 - [x] **RESOLVED — platform fact:** Prava requires a Visa card issued in the US, Canada, Hong Kong, or Singapore for any real card used in the flow, whether in sandbox or production. Prava's own documented sandbox test cards are unaffected and complete a full simulated flow with no geography restriction; use those for the hackathon. For production, Prava has offered: "reach out to us and we'll sort you out with a compatible card".
-- [x] **RESOLVED FOR HACKATHON SCOPE — CONFIRMED UNAVAILABLE:** Prava
-  confirmed (Shubham Kukreti, Discord, 22–23 July 2026) that standing or
-  recurring mandates are not live in the applicable hackathon flow. The
-  broader client-SDK pages now describe `frequency` and `useLimit`, but that
-  does not prove access or compatibility with the server-side Session API used
-  here. Treat every hackathon Session as one-time. Restock Teams uses Path B
-  (pay the hosted invoice via one-time credential) or the disclosed mock; any
-  post-event recurring implementation requires fresh environment-specific
-  provider confirmation and integration tests.
+- [x] **RESOLVED AT THE PLATFORM CONTRACT; RESTOCK INTEGRATION PENDING:** Prava
+  now documents `POST /v1/mandates/{id}/charge` for active mandates and a
+  corresponding terminal report operation. The charge is idempotent when a
+  reference is supplied and enforces mandate merchant/cap constraints. This
+  supersedes the earlier hackathon-era availability note. Restock Teams still
+  uses the one-time hosted-invoice path or disclosed mock until the new
+  mandate-charge boundary is implemented and sandbox-proved end to end.
 
 ## 18. Glossary
 

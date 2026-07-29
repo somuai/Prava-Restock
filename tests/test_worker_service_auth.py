@@ -94,6 +94,37 @@ def test_worker_service_route_rechecks_trigger_condition(tmp_path, monkeypatch) 
     assert repository.list_workflows(str(item.user_id)) == []
 
 
+def test_worker_scan_is_authenticated_leased_and_duplicate_safe(
+    tmp_path, monkeypatch
+) -> None:
+    repository = RestockRepository(Database(f"sqlite:///{tmp_path / 'scan.db'}"))
+    repository.create_schema()
+    item = persisted_item(repository)
+    monkeypatch.setattr(service_routes, "REPOSITORY", repository)
+    monkeypatch.setattr(prava_client, "create_intent", lambda *_args, **_kwargs: "intent-1")
+    monkeypatch.setenv("RESTOCK_WORKER_SERVICE_TOKEN", SERVICE_TOKEN)
+    client = TestClient(app)
+
+    assert client.post("/api/v1/service/worker/scan").status_code == 401
+    first = client.post(
+        "/api/v1/service/worker/scan",
+        headers={"Authorization": f"Bearer {SERVICE_TOKEN}"},
+    )
+    second = client.post(
+        "/api/v1/service/worker/scan",
+        headers={"Authorization": f"Bearer {SERVICE_TOKEN}"},
+    )
+
+    assert first.status_code == 200
+    assert first.json()["status"] == "completed"
+    assert first.json()["due"] == 1
+    assert first.json()["created"] == 1
+    assert first.json()["failed"] == 0
+    assert second.status_code == 200
+    assert second.json()["duplicate_suppressed"] == 1
+    assert len(repository.list_workflows(str(item.user_id))) == 1
+
+
 def test_worker_uses_fresh_exact_quote_for_prava_amount(tmp_path, monkeypatch) -> None:
     repository = RestockRepository(Database(f"sqlite:///{tmp_path / 'service.db'}"))
     repository.create_schema()

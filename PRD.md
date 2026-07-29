@@ -202,7 +202,15 @@ Restock is an independent agent. It is not embedded inside Zepto, Swiggy, Amazon
 
 Amazon’s Rufus AutoBuy is the contrast. It works, but only inside Amazon’s catalog, using Amazon’s stored payment method and requiring no third-party mandate. That is the embedded model. Restock deliberately does not copy it.
 
-Integration with Zepto or Swiggy means backend integration through Prava’s published MCP checkout skill. Restock calls the merchant programmatically to complete a transaction. That is real, deep integration at the API layer, invisible to the user; it is never a Restock widget embedded in the merchant’s app screens. The same logic applies to Restock Teams and SaaS billing: Restock pays the invoice through the vendor’s billing surface; it does not live inside the vendor’s dashboard.
+Integration with Zepto or Swiggy means backend integration through the
+merchant's remote MCP where available, with Prava handling the scoped payment
+boundary. Prava's current skills repository also exposes generic Shopping and
+Pay workflows rather than requiring a merchant-specific Restock UI. Restock
+calls the merchant programmatically to complete a transaction. That is real,
+deep integration at the API layer, invisible to the user; it is never a
+Restock widget embedded in the merchant’s app screens. The same logic applies
+to Restock Teams and SaaS billing: Restock pays the invoice through the
+vendor’s billing surface; it does not live inside the vendor’s dashboard.
 
 The user-facing surface is track-specific:
 
@@ -459,8 +467,9 @@ complete_checkout(credential_reference, merchant_sku_id, amount, idempotency_key
 Home: merchant access is confirmed; real Zepto/Swiggy catalog/cart/quote work
 does not imply a real final charge. That payment boundary remains independently
 mode-tagged and operator-gated. Teams: one-time hosted invoice quoting is built;
-unattended fulfillment remains disclosed simulation and recurring mandates are
-unsupported.
+unattended fulfillment remains disclosed simulation. Prava now documents
+active-mandate charging, but Restock has not integrated or sandbox-proved that
+separate charge/report boundary, so recurring Teams charging remains disabled.
 
 OpenAI Agents SDK: standard tool-calling loop; verify current model pricing/latency at build
 time rather than assuming.
@@ -608,17 +617,13 @@ vs. effort rather than by how they’re listed in Appendix A.
    and store publication remain external activation gates. Meta publishes
    template-review guidance of up to 24 hours and no confirmed 1–2 week
    business-verification SLA is claimed.
-2. **One-time invoice path built; recurring is currently unsupported:** Real SaaS billing integration. The mock exists because a subscription renewal is
+2. **One-time invoice path built; recurring integration is pending:** Real SaaS billing integration. The mock exists because a subscription renewal is
 merchant-initiated (recurring), not agent-initiated (one-time) like a grocery reorder — a genuinely different transaction shape from what’s built. Two paths:
-   - Path A (confirmed unavailable for this hackathon flow — closed): Prava
-     confirmed (Shubham Kukreti, Discord, 22–23 July 2026) that standing or
-     recurring mandates are not live in the applicable sandbox or production
-     flow. Prava's broader client-SDK documentation now describes `frequency`
-     and `useLimit` fields, but that does not establish access or compatibility
-     with the hackathon Session API. Restock Teams therefore proceeds on Path B
-     (pay the hosted invoice via one-time credential) or the disclosed mock for
-     this hackathon; post-event recurring work requires fresh
-     environment-specific confirmation and integration proof.
+   - Path A (platform contract now documented; Restock integration pending):
+     Prava documents `POST /v1/mandates/{id}/charge` for active mandates,
+     idempotent references, and merchant/cap enforcement. Restock must still
+     implement and sandbox-prove the charge plus terminal-report flow before
+     advertising recurring Teams billing.
    - Path B (buildable now, no new dependency): keep the existing agent-initiated, one-time-credential flow exactly as built, and have Restock pay the vendor’s hosted
 invoice/payment link directly two days before the known renewal date — same architecture, different merchant_sku_id target. This is the one to actually build first.
 3. **Data foundation built; production ML still gated:** Real forecasting model. The constraint is data volume, not modeling difficulty — a
@@ -671,7 +676,8 @@ predicted-trigger track.
 - No real SaaS billing-portal integration — the known-date track’s checkout is a disclosed
 mock; the renewal date and Prava mandate flow around it are real.
 - Household/Organization tenants and approval policies are implemented, but
-  Prava mandates remain one-time and are not reusable shared authority.
+  reusable mandate charging is not enabled until Restock integrates and proves
+  the documented mandate-charge boundary under the same approval policy.
 - Capacitor Android/iOS wrappers are implemented; physical-device validation,
   store enrollment, and publication remain launch gates.
 - Merchant adapters cover Zepto and Swiggy catalog/cart quoting. Final card
@@ -691,12 +697,10 @@ decision. The hard constraints remain enforced by code-level Guardrails. See §1
   expected merchant decline is disclosed rather than presented as a charge.
 - Whether Prava mandates expose a configurable TTL/expiry we should set explicitly on
 Intent creation, or whether it’s fixed by Prava.
-- RESOLVED FOR HACKATHON SCOPE — CONFIRMED UNAVAILABLE: Prava confirmed
-  (Shubham Kukreti, Discord, 22–23 July 2026) that standing or recurring
-  mandates are not live in the applicable hackathon flow. Broader client-SDK
-  documentation mentioning frequency/use limits is not treated as proof for
-  the Session API. Restock Teams uses Path B or the disclosed mock for this
-  hackathon; post-event recurring work requires fresh provider confirmation.
+- RESOLVED AT PLATFORM CONTRACT; RESTOCK INTEGRATION PENDING — Prava now
+  documents active-mandate charging and terminal status reporting. Restock
+  Teams uses Path B or the disclosed mock until that new boundary is
+  implemented and sandbox-proved under Restock's explicit approval policies.
 
 ### C. Glossary
 

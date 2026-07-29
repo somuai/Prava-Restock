@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from uuid import uuid4
 
 from fastapi import APIRouter, Header, HTTPException, status
 
@@ -90,3 +91,69 @@ def trigger_item(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except HomeQuoteError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/scan")
+def scan_due_items(
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Run one leased trigger scan without requiring a paid worker process.
+
+    A scheduled HTTPS caller can invoke this endpoint. The database lease keeps
+    concurrent or delayed scheduler invocations from producing duplicate work,
+    while the per-item route still rechecks every trigger and active-workflow
+    constraint before creating a Prava intent.
+    """
+
+    require_worker_service(authorization)
+    repository = get_repository()
+    owner_id = f"http-scan-{uuid4().hex}"
+    lease_seconds = max(30, int(os.getenv("RESTOCK_SCAN_LEASE_SECONDS", "120")))
+    acquired = repository.acquire_lease(
+        lease_name="trigger-scan",
+        owner_id=owner_id,
+        expires_at=datetime.now(timezone.utc) + timedelta(seconds=lease_seconds),
+    )
+    if not acquired:
+        return {
+            "status": "lease_busy",
+            "due": 0,
+            "created": 0,
+            "duplicate_suppressed": 0,
+            "failed": 0,
+        }
+
+    results: list[dict[str, Any]] = []
+    try:
+        WorkflowService(repository).repair_pending_completion_effects()
+        for _, item in repository.list_schedulable_items():
+            should_fire = (
+                consumption_model.should_fire(item)
+                if item.trigger_type.value == "predicted"
+                else renewal_model.should_fire(item)
+            )
+            if not should_fire:
+                continue
+            try:
+                results.append(trigger_item(str(item.item_id), authorization))
+            except HTTPException as exc:
+                results.append(
+                    {
+                        "status": "failed",
+                        "item_id": str(item.item_id),
+                        "status_code": exc.status_code,
+                    }
+                )
+    finally:
+        repository.release_lease(lease_name="trigger-scan", owner_id=owner_id)
+
+    return {
+        "status": "completed",
+        "due": len(results),
+        "created": sum(result.get("status") == "created" for result in results),
+        "duplicate_suppressed": sum(
+            result.get("status") == "duplicate_suppressed" for result in results
+        ),
+        "failed": sum(result.get("status") == "failed" for result in results),
+        "results": results,
+    }

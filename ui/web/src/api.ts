@@ -50,6 +50,29 @@ export type TenantSummary = {
   role?: string;
 };
 
+export type TrackedItem = {
+  item_id: string;
+  user_id: string;
+  tenant_id?: string | null;
+  name: string;
+  track: "home" | "teams";
+  trigger_type: "predicted" | "known_date";
+  category: string;
+  preferred_merchant: string;
+  merchant_sku_id: string;
+  currency: string;
+  status: string;
+  typical_cadence_days?: number | null;
+  last_purchased_at?: string | null;
+  last_purchase_amount?: string | null;
+  price_threshold?: string | null;
+  last_observed_price?: string | null;
+  renewal_date?: string | null;
+  current_plan_amount?: string | null;
+  alternate_plan_amount?: string | null;
+  alternate_plan_label?: string | null;
+};
+
 import { clearSessionToken, isNative, loadSessionToken, saveSessionToken } from "./native";
 
 const API_BASE = String(import.meta.env.VITE_RESTOCK_API_BASE_URL || "").replace(/\/$/, "");
@@ -123,6 +146,7 @@ export const api = {
   capabilities: () => read<Capabilities>("/capabilities"),
   me: () => read<UserProfile>("/api/v1/me"),
   tenants: () => read<TenantSummary[]>("/api/v1/tenants"),
+  items: () => read<TrackedItem[]>("/api/v1/items"),
   notifications: () => read<Notification[]>("/api/v1/notifications/pending"),
   workflows: () => read<WorkflowRun[]>("/api/v1/workflows"),
   audit: () => read<AuditEntry[]>("/api/v1/audit"),

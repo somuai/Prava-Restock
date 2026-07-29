@@ -165,10 +165,14 @@ def test_proactive_workflow_resumes_and_survives_repository_restart(repository) 
     prava = FakePrava()
     checkout = FakeCheckout()
     service = WorkflowService(repository, prava=prava, home_checkout=checkout)
-    run = service.begin(build_user(), build_home_item())
+    item = build_home_item()
+    run = service.begin(build_user(), item)
 
     assert run["state"] == "notified"
-    assert repository.pending_notifications(str(USER_ID))[0]["run_id"] == run["run_id"]
+    pending = repository.pending_notifications(str(USER_ID))
+    assert pending[0]["run_id"] == run["run_id"]
+    assert pending[0]["item_id"] == str(item.item_id)
+    assert pending[0]["track"] == "home"
     assert service.approval_url(run["run_id"]).startswith("https://approval.test/")
 
     restarted = RestockRepository(Database(repository.database.url))

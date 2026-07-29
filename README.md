@@ -18,7 +18,7 @@ staged OpenAI, Prava, Slack, Meta/WhatsApp, and generic credential assignments.
 The legacy `/audit-log` and `/notifications/pending` compatibility endpoints are
 development-only; production clients use the user-scoped `/api/v1` equivalents.
 
-Run the scheduler as a separate process with `.venv/bin/python -m workflow.worker`. The `Procfile` keeps web and worker commands separate so multiple web replicas cannot duplicate trigger scans.
+Run the scheduler as a separate process with `.venv/bin/python -m workflow.worker`. The `Procfile` keeps web and worker commands separate so multiple web replicas cannot duplicate trigger scans. For the student deployment, `.github/workflows/production-scheduler.yml` calls the authenticated, database-leased `/api/v1/service/worker/scan` endpoint instead, avoiding the cost of an always-on worker process.
 
 ## Deployment
 
@@ -30,20 +30,28 @@ After deployment, verify every public endpoint with:
 ./scripts/smoke_test.sh https://restock-offline-stub-production.up.railway.app
 ```
 
-The hosted URL runs the current application in credential-free demo mode. Its public `/capabilities` response currently reports Prava as `sandbox_unconfigured`, all merchant/billing boundaries as `disclosed_mock`, channel integrations as unconfigured, real money disabled, and `demo_mode=true`. Local or platform-secret configuration can activate the implemented integrations; credentials are not committed or baked into the image.
+The hosted API is connected to a free Neon Postgres database and Prava's
+sandbox, with `demo_mode=false`. Its public `/capabilities` response remains
+authoritative: Prava is sandbox-configured, merchant payment and Teams billing
+remain `disclosed_mock`, real money is disabled, and channel integrations are
+reported configured only after their deployed process authenticates. Secrets
+are held in platform secret storage, not committed or baked into the image.
 
 ## What is real and what is simulated
 
 - **Real:** deterministic trigger logic, code-owned spend caps, OpenAI Agents SDK tool surface, and Prava sandbox intent/passkey/mandate integration.
 - **Real merchant boundary:** Zepto OAuth/MCP client, address selection, live exact-SKU price lookup, cart preview, exact-price quote normalization, stock handling, and payment-status reconciliation interface. Similar search results are rejected rather than substituted.
 - **Disclosed simulation:** final Zepto live-money charge and Restock Teams billing-portal fulfillment. Zepto publishes no merchant payment sandbox, so the final charge stays disabled unless an operator explicitly enables a compatible-card checkout.
-- **Hosted runtime:** the current application is published, but the hosted environment remains deliberately unactivated: demo mode is on, provider credentials are absent, and real-money execution is disabled. `/capabilities` is authoritative for the running environment.
+- **Hosted runtime:** the current application is published with durable
+  Postgres state, password authentication, and sandbox Prava configuration.
+  Real-money execution remains disabled and every unavailable boundary remains
+  mode-tagged. `/capabilities` is authoritative for the running environment.
 
 Runtime modes are returned by `/capabilities`. `HOME_MERCHANT_MODE` controls catalog/cart quoting independently from `HOME_PAYMENT_MODE`, which controls the final charge. Both default to `disclosed_mock`, so production can truthfully expose a real Zepto quote with a disclosed simulated payment. A real charge additionally requires `ZEPTO_REAL_PAYMENT_ENABLED=1`, production Prava configuration, and an allowlisted payment-browser executor; it is never enabled in CI.
 
 ## Workflow and persistence
 
-Phase 9 implemented a resumable database-backed state machine, Postgres-compatible SQLAlchemy repositories, an initial Alembic migration, unique active-workflow and idempotency constraints, authenticated action/resume endpoints, scheduler leases, sanitized mode-tagged audit entries, and cadence recalibration after completed Home purchases. SQLite is the zero-cost local/demo default; set `DATABASE_URL` to Postgres for a durable deployment.
+Phase 9 implemented a resumable database-backed state machine, Postgres-compatible SQLAlchemy repositories, an initial Alembic migration, unique active-workflow and idempotency constraints, authenticated action/resume endpoints, scheduler leases, sanitized mode-tagged audit entries, and cadence recalibration after completed Home purchases. SQLite is the zero-cost local/demo default. The public student deployment uses Neon's free Postgres tier, so no paid database plan is required at the current scale.
 
 Run `.venv/bin/python demo/dry_run.py --mode offline` for all five deterministic seeded workflows. Use `--mode integration --item coffee` for the explicitly interactive Prava path; it opens the short-lived approval page and never makes the live Zepto payment path automatic.
 
@@ -90,7 +98,7 @@ EWMA remains the production baseline. Phase 13 implemented consent-gated forecas
 
 ## Additional merchant adapters
 
-Phase 14 implemented the official Swiggy MCP endpoints for catalog/cart work through the same quote/checkout/reconciliation contract. Swiggy's MCP can expose COD, but Restock never treats COD as a substitute for an approved Prava card payment; card checkout stays an explicit browser boundary and defaults to a disclosed simulation. Restock Teams also supports HTTPS hosted-invoice quotes and idempotent one-time disclosed checkout. Prava's [Report Status documentation](https://docs.prava.space/api-reference/report-status) now states that mandates are currently one-time and recurring frequencies are planned, so recurring Teams charging is explicitly unsupported and disabled.
+Phase 14 implemented the official Swiggy MCP endpoints for catalog/cart work through the same quote/checkout/reconciliation contract. Swiggy's MCP can expose COD, but Restock never treats COD as a substitute for an approved Prava card payment; card checkout stays an explicit browser boundary and defaults to a disclosed simulation. Restock Teams also supports HTTPS hosted-invoice quotes and idempotent one-time disclosed checkout. Prava now documents an authenticated [Charge a Mandate](https://docs.prava.space/api-reference/mandate-charge) REST endpoint with idempotency and merchant/cap enforcement. Restock has not yet integrated or sandbox-proved that endpoint, so recurring Teams charging remains disabled until that separate boundary is implemented and tested.
 
 ## Operations and recovery
 

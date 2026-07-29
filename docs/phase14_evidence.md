@@ -9,7 +9,9 @@
   interactive card checkout requires an explicitly confirmed browser session.
 - Teams supports one-time HTTPS hosted-invoice quotes with idempotent disclosed
   payment execution.
-- `TEAMS_RECURRING_ENABLED=1` fails closed because Prava's
-  [Report Status documentation](https://docs.prava.space/api-reference/report-status)
-  states that mandates are currently one-time and recurring frequencies are planned.
+- `TEAMS_RECURRING_ENABLED=1` still fails closed. Prava's server documentation
+  was re-checked on 30 July 2026 and now publishes
+  [active-mandate charging](https://docs.prava.space/api-reference/mandate-charge).
+  Restock has not yet integrated or sandbox-proved that separate charge/report
+  boundary, so Teams recurring charging remains disabled.
 - The five-item offline run completes through merchant-specific adapters.

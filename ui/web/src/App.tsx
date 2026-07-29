@@ -55,6 +55,7 @@ import {
   type Capabilities,
   type Notification,
   type TenantSummary,
+  type TrackedItem,
   type UserProfile,
   type WorkflowRun,
 } from "./api";
@@ -92,6 +93,7 @@ type PantryProduct = {
 
 type SubscriptionProduct = {
   id: string;
+  itemId?: string;
   name: string;
   category: string;
   logo: string;
@@ -295,6 +297,7 @@ const products: PantryProduct[] = [
   },
   {
     id: "toothpaste",
+    itemId: "00000000-0000-0000-0000-000000000104",
     name: "Colgate Strong Teeth",
     image: "/app/assets/product-colgate-strong-teeth-cutout.png",
     imageAlt: "Colgate Strong Teeth toothpaste box",
@@ -319,6 +322,7 @@ const products: PantryProduct[] = [
 const subscriptions: SubscriptionProduct[] = [
   {
     id: "copilot",
+    itemId: "00000000-0000-0000-0000-000000000105",
     name: "GitHub Copilot Business",
     category: "Developer tool",
     logo: "/app/assets/providers/githubcopilot.svg",
@@ -480,6 +484,110 @@ const subscriptions: SubscriptionProduct[] = [
     alternateDescription: "No validated alternate plan is attached to this tracked subscription.",
   },
 ];
+
+const DAY_MS = 86_400_000;
+
+function dateLabel(value?: string | null): string {
+  if (!value) return "Not recorded";
+  const parsed = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return "Not recorded";
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(parsed);
+}
+
+function daysFromToday(value?: string | null): number | null {
+  if (!value) return null;
+  const target = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(target.getTime())) return null;
+  const today = new Date();
+  const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  return Math.ceil((target.getTime() - todayUtc) / DAY_MS);
+}
+
+function moneyLabel(value: string | null | undefined, currency: string): string {
+  if (!value || !Number.isFinite(Number(value))) return "Quote pending";
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: Number(value) % 1 === 0 ? 0 : 2,
+  }).format(Number(value));
+}
+
+function trackedHomeProduct(base: PantryProduct, item: TrackedItem): PantryProduct {
+  const cadence = item.typical_cadence_days || 0;
+  const lastPurchase = item.last_purchased_at ? new Date(`${item.last_purchased_at}T00:00:00Z`) : null;
+  const predictedDate = lastPurchase && cadence
+    ? new Date(lastPurchase.getTime() + cadence * DAY_MS).toISOString().slice(0, 10)
+    : null;
+  const remaining = daysFromToday(predictedDate);
+  const price = item.last_observed_price || item.last_purchase_amount;
+  const priceTriggered = Boolean(
+    item.price_threshold
+    && item.last_observed_price
+    && Number(item.last_observed_price) <= Number(item.price_threshold),
+  );
+  const due = remaining !== null && remaining <= 3;
+  const trigger = priceTriggered && due
+    ? "Depletion and price threshold"
+    : priceTriggered
+      ? "Price threshold"
+      : "Predicted depletion";
+  const status = remaining === null
+    ? "Learning cadence"
+    : remaining <= 0
+      ? "Due now"
+      : `${remaining} day${remaining === 1 ? "" : "s"} left`;
+  const lifecycle: ProductLifecycle = priceTriggered || due ? "attention" : "tracking";
+  return {
+    ...base,
+    name: item.name,
+    merchant: item.preferred_merchant === "zepto" ? "Zepto" : item.preferred_merchant === "swiggy" ? "Swiggy" : base.merchant,
+    category: item.category.replaceAll("_", " "),
+    price: moneyLabel(price, item.currency),
+    lastBought: dateLabel(item.last_purchased_at),
+    cadence: cadence ? `every ${Number(cadence.toFixed(1))} days` : "Still learning",
+    daysRemaining: remaining === null ? "not enough history yet" : remaining <= 0 ? "due now" : `about ${remaining} days`,
+    status,
+    trigger,
+    lifecycle,
+    nextDue: remaining === null ? "after more purchase history" : status.toLowerCase(),
+  };
+}
+
+function trackedTeamSubscription(base: SubscriptionProduct, item: TrackedItem): SubscriptionProduct {
+  const current = moneyLabel(item.current_plan_amount, item.currency);
+  const alternate = moneyLabel(item.alternate_plan_amount, item.currency);
+  const currentValue = Number(item.current_plan_amount || 0);
+  const alternateValue = Number(item.alternate_plan_amount || 0);
+  const savings = currentValue > alternateValue
+    ? `${moneyLabel(String(currentValue - alternateValue), item.currency)} per renewal`
+    : "No cheaper match";
+  const renewalDays = daysFromToday(item.renewal_date);
+  const decisionDue = renewalDays !== null && renewalDays <= 3;
+  return {
+    ...base,
+    id: "teamtool",
+    name: item.name,
+    category: "SaaS subscription",
+    logo: "/app/assets/restock-mark.png",
+    color: "#17624d",
+    currentPlan: "Current plan",
+    currentAmount: current,
+    alternatePlan: item.alternate_plan_label || "Alternate plan",
+    alternateAmount: alternate,
+    renewal: dateLabel(item.renewal_date),
+    savings,
+    status: decisionDue ? "Decision due" : "Watching",
+    description: "A persisted team subscription loaded from the Restock production database.",
+    currency: item.currency === "INR" ? "INR" : "USD",
+    invoiceStatus: decisionDue ? "Approval due" : "Not due",
+    alternateDescription: `Move to ${item.alternate_plan_label || "the alternate plan"} only after a distinct switch approval.`,
+  };
+}
 
 const revealAssets = [
   "/app/assets/cardboard-texture-cc0.png",
@@ -644,6 +752,7 @@ function AppHeader({
   profile,
   tenant,
   capabilities,
+  watchedCount,
   onOpenNotification,
 }: {
   view: View;
@@ -654,6 +763,7 @@ function AppHeader({
   profile: UserProfile | null;
   tenant: TenantSummary | null;
   capabilities: Capabilities | null;
+  watchedCount: number;
   onOpenNotification: (notification: Notification) => void;
 }) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -673,7 +783,6 @@ function AppHeader({
     .toUpperCase();
   const detectedTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Local time";
   const localTimezone = detectedTimezone === "Asia/Calcutta" ? "Asia/Kolkata" : detectedTimezone;
-  const watchedCount = products.filter((product) => product.lifecycle !== "restocked").length;
   const capLabel = (value: string | number | undefined | null) => (
     value === undefined || value === null ? "—" : `₹${value}`
   );
@@ -1029,11 +1138,13 @@ export function resolveProductLifecycle({
 }
 
 function LivingPantry({
+  products: trackedProducts,
   onOpen,
   onPreview,
   workflows,
   notification,
 }: {
+  products: PantryProduct[];
   onOpen: (product: PantryProduct) => void;
   onPreview: () => void;
   workflows: WorkflowRun[];
@@ -1041,16 +1152,18 @@ function LivingPantry({
 }) {
   const stageRef = useRef<HTMLElement>(null);
   const animationFrame = useRef<number | null>(null);
-  const presentationProducts = useMemo(() => products.map((product) => {
+  const presentationProducts = useMemo(() => trackedProducts.map((product) => {
     const lifecycle = resolveProductLifecycle({
       base: product.lifecycle,
       itemId: product.itemId,
       workflows,
-      hasPendingNotification: product.id === "coffee"
+      hasPendingNotification: (notification?.item_id
+        ? product.itemId === notification.item_id
+        : product.id === "coffee")
         && Boolean(notification && ["pending", "preview"].includes(notification.status)),
     });
     return { ...product, lifecycle };
-  }), [notification, workflows]);
+  }), [notification, trackedProducts, workflows]);
   const shelfProducts = presentationProducts.filter((product) => product.lifecycle !== "restocked");
   const upperProducts = shelfProducts.slice(0, 3);
   const middleProducts = shelfProducts.slice(3, 5);
@@ -1401,9 +1514,11 @@ function SubscriptionTicket({
 }
 
 function TeamsGallery({
+  subscriptions: trackedSubscriptions,
   onOpen,
   onPreview,
 }: {
+  subscriptions: SubscriptionProduct[];
   onOpen: (subscription: SubscriptionProduct) => void;
   onPreview: () => void;
 }) {
@@ -1466,7 +1581,7 @@ function TeamsGallery({
         </div>
         <div className="award-shelf award-shelf--upper">
           <div className="award-items">
-            {subscriptions.slice(0, 3).map((subscription) => (
+            {trackedSubscriptions.slice(0, 3).map((subscription) => (
               <SubscriptionTicket
                 key={subscription.id}
                 subscription={subscription}
@@ -1479,7 +1594,7 @@ function TeamsGallery({
         </div>
         <div className="award-shelf award-shelf--lower">
           <div className="award-items">
-            {subscriptions.slice(3).map((subscription) => (
+            {trackedSubscriptions.slice(3).map((subscription) => (
               <SubscriptionTicket
                 key={subscription.id}
                 subscription={subscription}
@@ -1829,15 +1944,17 @@ function SubscriptionDetail({
 }
 
 function ActivityView({
+  products: trackedProducts,
   audit,
   capabilities,
   workflows,
 }: {
+  products: PantryProduct[];
   audit: AuditEntry[];
   capabilities: Capabilities | null;
   workflows: WorkflowRun[];
 }) {
-  const completedProducts = products.filter((product) => resolveProductLifecycle({
+  const completedProducts = trackedProducts.filter((product) => resolveProductLifecycle({
     base: product.lifecycle,
     itemId: product.itemId,
     workflows,
@@ -1880,7 +1997,7 @@ function ActivityView({
             <dl className="streak-stats">
               <div><dt>Longest</dt><dd>{currentStreak} days</dd></div>
               <div><dt>Cycles completed</dt><dd>{completedProducts.length}</dd></div>
-              <div><dt>Items watched</dt><dd>{products.length}</dd></div>
+              <div><dt>Items watched</dt><dd>{trackedProducts.length}</dd></div>
             </dl>
           </div>
         </header>
@@ -2070,9 +2187,11 @@ export default function App() {
   const [view, setView] = useState<View>(initialViewFromUrl);
   const [selectedProduct, setSelectedProduct] = useState<PantryProduct | null>(null);
   const [selectedSubscription, setSelectedSubscription] = useState<SubscriptionProduct | null>(null);
-  const [notifications, setNotifications] = useState<Notification[]>(previews);
+  const [notifications, setNotifications] = useState<Notification[]>(import.meta.env.DEV ? previews : []);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [workflows, setWorkflows] = useState<WorkflowRun[]>([]);
+  const [trackedItems, setTrackedItems] = useState<TrackedItem[]>([]);
+  const [backendConnected, setBackendConnected] = useState(false);
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [tenants, setTenants] = useState<TenantSummary[]>([]);
@@ -2102,16 +2221,19 @@ export default function App() {
     try {
       const caps = await api.capabilities();
       setCapabilities(caps);
-      const [pending, events, workflowRuns, currentUser, currentTenants] = await Promise.all([
+      const [pending, events, workflowRuns, currentItems, currentUser, currentTenants] = await Promise.all([
         api.notifications(),
         api.audit(),
         api.workflows(),
+        api.items(),
         api.me().catch(() => null),
         api.tenants().catch(() => []),
       ]);
-      if (pending.length) setNotifications(pending);
+      setNotifications(pending);
       setAudit(events);
       setWorkflows(workflowRuns);
+      setTrackedItems(currentItems);
+      setBackendConnected(true);
       if (currentUser) setProfile(currentUser);
       setTenants(currentTenants);
       setAuthState("ready");
@@ -2123,11 +2245,13 @@ export default function App() {
         setStatus("Sign in required");
         return;
       }
-      // A frontend-only deployment (for example, a private Sites review)
-      // deliberately has no API origin. Keep the seeded, explicitly disclosed
-      // preview usable instead of leaving the shell on "Opening your pantry…".
+      setBackendConnected(false);
+      if (import.meta.env.PROD) {
+        setNotifications([]);
+        setTrackedItems([]);
+      }
       setAuthState("ready");
-      setStatus("Local preview ready");
+      setStatus(import.meta.env.DEV ? "Local preview ready" : "Service temporarily unavailable");
     }
   };
 
@@ -2154,6 +2278,22 @@ export default function App() {
     () => notifications.find((notification) => (notification.track || (notification.actions.includes("switch_plan") ? "teams" : "home")) === "teams"),
     [notifications],
   );
+  const visibleProducts = useMemo(() => {
+    if (!backendConnected) return import.meta.env.DEV ? products : [];
+    const byId = new Map(trackedItems.filter((item) => item.track === "home").map((item) => [item.item_id, item]));
+    return products
+      .filter((product) => product.itemId && byId.has(product.itemId))
+      .map((product) => trackedHomeProduct(product, byId.get(product.itemId!)!));
+  }, [backendConnected, trackedItems]);
+  const visibleSubscriptions = useMemo(() => {
+    if (!backendConnected) return import.meta.env.DEV ? subscriptions : [];
+    const tracked = trackedItems.filter((item) => item.track === "teams");
+    return tracked.map((item, index) => {
+      const base = subscriptions.find((subscription) => subscription.itemId === item.item_id)
+        || subscriptions[index % subscriptions.length];
+      return trackedTeamSubscription(base, item);
+    });
+  }, [backendConnected, trackedItems]);
 
   useEffect(() => {
     if (selectedProduct || selectedSubscription || foregroundNotification) return;
@@ -2229,11 +2369,13 @@ export default function App() {
     const isTeams = notification.track === "teams" || notification.actions.includes("switch_plan");
     if (isTeams) {
       setViewWithSound("teams");
-      openSubscription(subscriptions.find((subscription) => subscription.id === "copilot") || subscriptions[0]);
+      const subscription = visibleSubscriptions[0];
+      if (subscription) openSubscription(subscription);
       return;
     }
     setViewWithSound("home");
-    openProduct(products.find((product) => product.id === "coffee") || products[0]);
+    const product = visibleProducts.find((candidate) => candidate.id === "coffee") || visibleProducts[0];
+    if (product) openProduct(product);
   };
 
   const closeSubscription = () => {
@@ -2310,6 +2452,7 @@ export default function App() {
         profile={profile}
         tenant={tenants[0] || null}
         capabilities={capabilities}
+        watchedCount={visibleProducts.filter((product) => product.lifecycle !== "restocked").length + visibleSubscriptions.length}
         onOpenNotification={openNotification}
       />
       <p className="sr-only" role="status" aria-live="polite">{status}</p>
@@ -2323,7 +2466,12 @@ export default function App() {
       {selectedProduct && view === "home" ? (
         <ProductDetail
           product={selectedProduct}
-          notification={selectedProduct.id === "coffee" ? homeNotification : undefined}
+          notification={
+            selectedProduct.itemId === homeNotification?.item_id
+            || (!homeNotification?.item_id && selectedProduct.id === "coffee")
+              ? homeNotification
+              : undefined
+          }
           capabilities={capabilities}
           busy={busyNotificationId === homeNotification?.notification_id}
           actionStatus={actionFeedback}
@@ -2332,6 +2480,7 @@ export default function App() {
         />
       ) : view === "home" ? (
         <LivingPantry
+          products={visibleProducts}
           onOpen={openProduct}
           onPreview={() => sound("hover")}
           workflows={workflows}
@@ -2340,7 +2489,12 @@ export default function App() {
       ) : selectedSubscription && view === "teams" ? (
         <SubscriptionDetail
           subscription={selectedSubscription}
-          notification={selectedSubscription.id === "copilot" ? teamsNotification : undefined}
+          notification={
+            selectedSubscription.itemId === teamsNotification?.item_id
+            || (!teamsNotification?.item_id && selectedSubscription.id === "copilot")
+              ? teamsNotification
+              : undefined
+          }
           capabilities={capabilities}
           busy={busyNotificationId === teamsNotification?.notification_id}
           actionStatus={actionFeedback}
@@ -2348,9 +2502,9 @@ export default function App() {
           onAction={(notification, action) => void act(notification, action)}
         />
       ) : view === "teams" ? (
-        <TeamsGallery onOpen={openSubscription} onPreview={() => sound("hover")} />
+        <TeamsGallery subscriptions={visibleSubscriptions} onOpen={openSubscription} onPreview={() => sound("hover")} />
       ) : (
-        <ActivityView audit={audit} capabilities={capabilities} workflows={workflows} />
+        <ActivityView products={visibleProducts} audit={audit} capabilities={capabilities} workflows={workflows} />
       )}
     </div>
   );
