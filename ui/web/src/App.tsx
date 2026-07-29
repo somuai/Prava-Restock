@@ -1,26 +1,122 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import {
-  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowsClockwise,
+  BellSimpleRinging,
+  Buildings,
+  CalendarBlank,
   CaretDown,
+  CaretRight,
   CaretUp,
+  ChatCircleDots,
   Check,
   CheckCircle,
   Clock,
   ClockCounterClockwise,
+  CreditCard,
+  CurrencyInr,
+  DownloadSimple,
+  Eye,
+  FileText,
+  Fire,
+  ForkKnife,
+  Gauge,
+  GlobeHemisphereEast,
   House,
-  Info,
+  HourglassMedium,
+  Lightning,
+  ListBullets,
   LockKey,
   Package,
   Receipt,
+  SealCheck,
   ShieldCheck,
+  SlackLogo,
+  SpeakerHigh,
+  SpeakerSlash,
+  Sparkle,
+  Stack,
+  Storefront,
+  Tag,
+  Timer,
+  UserCircle,
   UsersThree,
-  WarningCircle,
+  Wallet,
+  WhatsappLogo,
+  X,
 } from "@phosphor-icons/react";
-import { ApiError, api, clearApiSessionToken, type AuditEntry, type Capabilities, type Notification } from "./api";
+import {
+  ApiError,
+  api,
+  clearApiSessionToken,
+  type AuditEntry,
+  type Capabilities,
+  type Notification,
+  type TenantSummary,
+  type UserProfile,
+  type WorkflowRun,
+} from "./api";
 import { initializeNative } from "./native";
+import { ParcelReveal3D, ProviderAward3D } from "./ParcelExperience";
 
 type Track = "home" | "teams";
 type View = Track | "activity";
+type ProductTone = "attention" | "soon" | "watching";
+export type ProductLifecycle = "attention" | "tracking" | "restocked";
+type SoundKind = "hover" | "open" | "close" | "navigate" | "submit" | "confirm";
+
+type PantryProduct = {
+  id: string;
+  itemId?: string;
+  name: string;
+  image: string;
+  imageAlt: string;
+  brand: string;
+  category: string;
+  size: string;
+  tone: ProductTone;
+  status: string;
+  price: string;
+  merchant: string;
+  lastBought: string;
+  daysRemaining: string;
+  cadence: string;
+  trigger: string;
+  ingredients: string;
+  nutrition: string;
+  lifecycle: ProductLifecycle;
+  nextDue: string;
+};
+
+type SubscriptionProduct = {
+  id: string;
+  name: string;
+  category: string;
+  logo: string;
+  color: string;
+  currentPlan: string;
+  currentAmount: string;
+  alternatePlan: string;
+  alternateAmount: string;
+  renewal: string;
+  cadence: string;
+  owner: string;
+  savings: string;
+  status: string;
+  note: string;
+  description: string;
+  currency: "USD" | "INR";
+  priceBasis: string;
+  quantity: string;
+  usage: string;
+  usageDetail: string;
+  paymentMethod: string;
+  invoiceStatus: string;
+  planFeatures: string[];
+  alternateDescription: string;
+};
 
 const previews: Notification[] = [
   {
@@ -35,103 +131,1048 @@ const previews: Notification[] = [
     notification_id: "preview-teams",
     run_id: "preview-teams",
     track: "teams",
-    message: "TeamTool Pro renews in 2 days. Renew for $29 or explicitly switch to the $24 annual plan?",
+    message: "GitHub Copilot Business renews in 2 days. Renew for $39 or explicitly switch to the $32 annual plan?",
     actions: ["renew_as_is", "switch_plan", "skip"],
     status: "preview",
   },
 ];
 
-const labels: Record<string, string> = {
-  approve: "Approve ₹380",
+function initialViewFromUrl(): View {
+  const requested = new URLSearchParams(window.location.search).get("view");
+  return requested === "teams" || requested === "activity" ? requested : "home";
+}
+
+const products: PantryProduct[] = [
+  {
+    id: "coffee",
+    itemId: "00000000-0000-0000-0000-000000000101",
+    name: "Attikan Estate coffee",
+    image: "/app/assets/product-coffee-attikan-cutout.png",
+    imageAlt: "Blue Tokai Attikan Estate coffee pouch",
+    brand: "Blue Tokai",
+    category: "Coffee",
+    size: "500 g",
+    tone: "attention",
+    status: "2 days left",
+    price: "₹380",
+    merchant: "Zepto",
+    lastBought: "28 June 2026",
+    daysRemaining: "about 2 days",
+    cadence: "every 21 days",
+    trigger: "Depletion and price threshold",
+    ingredients: "100% Arabica coffee",
+    nutrition: "No additives. Roast profile and tasting notes come from the merchant listing.",
+    lifecycle: "attention",
+    nextDue: "21 days after a completed purchase",
+  },
+  {
+    id: "milk",
+    name: "Amul Taaza milk",
+    image: "/app/assets/product-amul-taaza.png",
+    imageAlt: "Amul Taaza milk pouch",
+    brand: "Amul",
+    category: "Dairy",
+    size: "1 L",
+    tone: "soon",
+    status: "4 days left",
+    price: "₹57",
+    merchant: "Zepto",
+    lastBought: "13 July 2026",
+    daysRemaining: "about 4 days",
+    cadence: "every 7 days",
+    trigger: "Predicted depletion",
+    ingredients: "Toned milk",
+    nutrition: "Approx. 3% fat and 8.5% solids-not-fat; verify the current pack before purchase.",
+    lifecycle: "attention",
+    nextDue: "about 7 days after a completed purchase",
+  },
+  {
+    id: "paper",
+    itemId: "00000000-0000-0000-0000-000000000103",
+    name: "JK A4 copier paper",
+    image: "/app/assets/product-jk-paper-cutout.png",
+    imageAlt: "JK A4 copier paper ream",
+    brand: "JK Paper",
+    category: "Home office",
+    size: "500 sheets",
+    tone: "watching",
+    status: "Bought yesterday",
+    price: "₹650",
+    merchant: "Zepto",
+    lastBought: "2 July 2026",
+    daysRemaining: "about 44 days",
+    cadence: "every 45 days",
+    trigger: "Predicted depletion",
+    ingredients: "75 GSM copier paper",
+    nutrition: "Not applicable. Restock tracks pack size, paper weight, and exact SKU.",
+    lifecycle: "restocked",
+    nextDue: "in about 44 days",
+  },
+  {
+    id: "filter",
+    itemId: "00000000-0000-0000-0000-000000000102",
+    name: "Aquaguard filter kit",
+    image: "/app/assets/product-aquaguard-filter.png",
+    imageAlt: "Aquaguard replacement filter kit",
+    brand: "Eureka Forbes",
+    category: "Home care",
+    size: "2-piece kit",
+    tone: "soon",
+    status: "Due in 5 days",
+    price: "₹799",
+    merchant: "Eureka Forbes",
+    lastBought: "20 January 2026",
+    daysRemaining: "about 5 days",
+    cadence: "every 180 days",
+    trigger: "Known replacement date",
+    ingredients: "Sediment and carbon filter cartridges",
+    nutrition: "Not applicable. Restock preserves the exact purifier-compatible part number.",
+    lifecycle: "attention",
+    nextDue: "180 days after a completed replacement",
+  },
+  {
+    id: "oil",
+    name: "Figaro olive oil",
+    image: "/app/assets/product-figaro-oil-cutout.png",
+    imageAlt: "Figaro extra virgin olive oil bottle",
+    brand: "Figaro",
+    category: "Pantry",
+    size: "1 L",
+    tone: "watching",
+    status: "11 days left",
+    price: "₹899",
+    merchant: "Zepto",
+    lastBought: "14 June 2026",
+    daysRemaining: "about 11 days",
+    cadence: "every 45 days",
+    trigger: "Predicted depletion",
+    ingredients: "Extra virgin olive oil",
+    nutrition: "Fat-based pantry staple. Confirm current label and pack size before approving.",
+    lifecycle: "tracking",
+    nextDue: "in about 11 days",
+  },
+  {
+    id: "salt",
+    name: "Tata Salt",
+    image: "/app/assets/product-tata-salt-cutout.png",
+    imageAlt: "Tata Salt one kilogram pouch",
+    brand: "Tata",
+    category: "Pantry",
+    size: "1 kg",
+    tone: "watching",
+    status: "17 days left",
+    price: "₹30",
+    merchant: "Zepto",
+    lastBought: "16 July 2026",
+    daysRemaining: "about 17 days",
+    cadence: "every 30 days",
+    trigger: "Predicted depletion",
+    ingredients: "Vacuum-evaporated iodised salt",
+    nutrition: "Iodised pantry staple. Restock keeps the exact pack size and merchant listing attached.",
+    lifecycle: "tracking",
+    nextDue: "in about 17 days",
+  },
+  {
+    id: "detergent",
+    name: "Surf Excel detergent",
+    image: "/app/assets/product-surf-excel-cutout.png",
+    imageAlt: "Surf Excel detergent powder pouch",
+    brand: "Surf Excel",
+    category: "Home care",
+    size: "500 g",
+    tone: "soon",
+    status: "6 days left",
+    price: "₹145",
+    merchant: "Zepto",
+    lastBought: "30 June 2026",
+    daysRemaining: "about 6 days",
+    cadence: "every 35 days",
+    trigger: "Predicted depletion",
+    ingredients: "Laundry detergent powder",
+    nutrition: "Not applicable. Restock preserves the exact pack and never substitutes a different detergent silently.",
+    lifecycle: "attention",
+    nextDue: "in about 6 days",
+  },
+  {
+    id: "toothpaste",
+    name: "Colgate Strong Teeth",
+    image: "/app/assets/product-colgate-strong-teeth-cutout.png",
+    imageAlt: "Colgate Strong Teeth toothpaste box",
+    brand: "Colgate",
+    category: "Personal care",
+    size: "200 g",
+    tone: "watching",
+    status: "9 days left",
+    price: "₹119",
+    merchant: "Zepto",
+    lastBought: "23 June 2026",
+    daysRemaining: "about 9 days",
+    cadence: "every 45 days",
+    trigger: "Predicted depletion",
+    ingredients: "Anticavity toothpaste",
+    nutrition: "Personal-care staple. Restock tracks the exact Strong Teeth SKU and pack size.",
+    lifecycle: "tracking",
+    nextDue: "in about 9 days",
+  },
+];
+
+const subscriptions: SubscriptionProduct[] = [
+  {
+    id: "copilot",
+    name: "GitHub Copilot Business",
+    category: "Developer tool",
+    logo: "/app/assets/providers/githubcopilot.svg",
+    color: "#111111",
+    currentPlan: "Business monthly",
+    currentAmount: "$39",
+    alternatePlan: "Business annual",
+    alternateAmount: "$32",
+    renewal: "31 July",
+    cadence: "Monthly",
+    owner: "Engineering",
+    savings: "$84 / year",
+    status: "Decision due",
+    note: "The plan switch is a separate, explicit decision. A normal renewal can never select it silently.",
+    description: "AI coding assistance managed for the Engineering workspace, with organization-level access and policy controls.",
+    currency: "USD",
+    priceBasis: "tracked monthly total",
+    quantity: "Organization workspace",
+    usage: "Within Restock budget",
+    usageDetail: "The spend cap is checked in code before Prava is called.",
+    paymentMethod: "Prava approval required",
+    invoiceStatus: "Approval due",
+    planFeatures: ["Organization-managed access", "Policy-controlled workspace", "Usage visible to billing owners"],
+    alternateDescription: "Move the same tracked workspace to annual billing after a separate plan-change approval.",
+  },
+  {
+    id: "vercel",
+    name: "Vercel Pro",
+    category: "Cloud",
+    logo: "/app/assets/providers/vercel.svg",
+    color: "#111111",
+    currentPlan: "Pro",
+    currentAmount: "$20",
+    alternatePlan: "Keep current",
+    alternateAmount: "$20",
+    renewal: "8 August",
+    cadence: "Monthly",
+    owner: "Product",
+    savings: "No cheaper match",
+    status: "Watching",
+    note: "Restock watches the renewal date and presents a choice only when there is a meaningful alternative.",
+    description: "Collaborative deployment and managed frontend infrastructure for the Product workspace.",
+    currency: "USD",
+    priceBasis: "tracked monthly total",
+    quantity: "Team workspace",
+    usage: "Usage-based services",
+    usageDetail: "The final vendor amount must be revalidated before approval.",
+    paymentMethod: "Prava approval when due",
+    invoiceStatus: "Not due",
+    planFeatures: ["Team deployments", "Usage-based resources", "Spend visibility"],
+    alternateDescription: "No validated alternate plan is attached to this tracked subscription.",
+  },
+  {
+    id: "figma",
+    name: "Figma Professional",
+    category: "Design",
+    logo: "/app/assets/providers/figma.svg",
+    color: "#a259ff",
+    currentPlan: "Professional",
+    currentAmount: "$15",
+    alternatePlan: "Keep current",
+    alternateAmount: "$15",
+    renewal: "14 August",
+    cadence: "Monthly",
+    owner: "Engineering",
+    savings: "No action needed",
+    status: "Watching",
+    note: "Seat counts and invoices remain code-owned facts; the model never invents a billing decision.",
+    description: "A collaborative design workspace for shared files, libraries, and team review.",
+    currency: "USD",
+    priceBasis: "tracked monthly total",
+    quantity: "Professional workspace",
+    usage: "Seat detail awaited",
+    usageDetail: "Restock only displays a seat count after it is sourced from billing.",
+    paymentMethod: "Prava approval when due",
+    invoiceStatus: "Not due",
+    planFeatures: ["Shared design files", "Team libraries", "Workspace permissions"],
+    alternateDescription: "No validated alternate plan is attached to this tracked subscription.",
+  },
+  {
+    id: "railway",
+    name: "Railway Hobby",
+    category: "Infrastructure",
+    logo: "/app/assets/providers/railway.svg",
+    color: "#6c45f7",
+    currentPlan: "Hobby",
+    currentAmount: "$5+",
+    alternatePlan: "Usage review",
+    alternateAmount: "Variable",
+    renewal: "18 August",
+    cadence: "Monthly",
+    owner: "Infrastructure",
+    savings: "Review usage",
+    status: "Watching",
+    note: "Variable invoices are revalidated before approval so an old estimate cannot become a charge.",
+    description: "Usage-based project infrastructure tracked for the Infrastructure workspace.",
+    currency: "USD",
+    priceBasis: "base plan plus usage",
+    quantity: "Infrastructure workspace",
+    usage: "Variable invoice",
+    usageDetail: "Restock requests a fresh amount before every payment decision.",
+    paymentMethod: "Prava approval when due",
+    invoiceStatus: "Estimate only",
+    planFeatures: ["Project environments", "Usage-based resources", "Current-cycle cost review"],
+    alternateDescription: "Review the fresh usage quote before changing or paying this plan.",
+  },
+  {
+    id: "notion",
+    name: "Notion Plus",
+    category: "Workspace",
+    logo: "/app/assets/providers/notion.svg",
+    color: "#111111",
+    currentPlan: "Plus",
+    currentAmount: "$12",
+    alternatePlan: "Annual",
+    alternateAmount: "$10",
+    renewal: "2 September",
+    cadence: "Monthly",
+    owner: "Operations",
+    savings: "$24 / year",
+    status: "Watching",
+    note: "Restock can prepare a plan comparison; the switch still waits for the dedicated action.",
+    description: "A shared operations workspace with expanded collaboration and workspace controls.",
+    currency: "USD",
+    priceBasis: "tracked monthly total",
+    quantity: "Operations workspace",
+    usage: "Within Restock budget",
+    usageDetail: "A fresh billing summary is required before any annual switch.",
+    paymentMethod: "Prava approval when due",
+    invoiceStatus: "Not due",
+    planFeatures: ["Team workspace", "Shared permissions", "Workspace history"],
+    alternateDescription: "Switch the tracked workspace to annual billing after an explicit plan-change review.",
+  },
+  {
+    id: "netflix",
+    name: "Netflix Standard",
+    category: "Team benefit",
+    logo: "/app/assets/providers/netflix.svg",
+    color: "#e50914",
+    currentPlan: "Standard",
+    currentAmount: "₹499",
+    alternatePlan: "Keep current",
+    alternateAmount: "₹499",
+    renewal: "9 September",
+    cadence: "Monthly",
+    owner: "People",
+    savings: "No cheaper match",
+    status: "Watching",
+    note: "Entertainment appears in Teams only when the organization funds it as a shared benefit.",
+    description: "A shared entertainment benefit tracked as an organization-funded subscription.",
+    currency: "INR",
+    priceBasis: "tracked monthly total",
+    quantity: "One shared benefit",
+    usage: "Fixed plan",
+    usageDetail: "No plan change is suggested without a sourced vendor comparison.",
+    paymentMethod: "Prava approval when due",
+    invoiceStatus: "Not due",
+    planFeatures: ["Shared team benefit", "Monthly renewal tracking", "Explicit payment approval"],
+    alternateDescription: "No validated alternate plan is attached to this tracked subscription.",
+  },
+];
+
+const revealAssets = [
+  "/app/assets/cardboard-texture-cc0.png",
+  "/app/assets/restock-mark-white.png",
+  ...products.map((product) => product.image),
+  ...subscriptions.flatMap((subscription) => {
+    const slug = subscription.logo.split("/").pop()?.replace(/\.(svg|png)$/i, "") || "award-base";
+    return [
+      `/app/assets/3d/subscription-awards/${slug}.png`,
+      `/app/assets/3d/subscription-awards/${slug}-mark.png`,
+    ];
+  }),
+];
+
+const actionLabels: Record<string, string> = {
+  approve: "Approve",
   adjust: "Adjust",
   skip: "Skip",
   renew_as_is: "Renew as-is",
   switch_plan: "Switch plan",
 };
 
+type SubscriptionPlanChoice = {
+  id: "current" | "alternate";
+  name: string;
+  amount: string;
+  currency: SubscriptionProduct["currency"];
+  cadence: string;
+  description: string;
+  features: string[];
+  savings: string;
+};
+
+function planChoicesFor(subscription: SubscriptionProduct): SubscriptionPlanChoice[] {
+  const current: SubscriptionPlanChoice = {
+    id: "current",
+    name: subscription.currentPlan,
+    amount: subscription.currentAmount,
+    currency: subscription.currency,
+    cadence: subscription.cadence,
+    description: subscription.description,
+    features: subscription.planFeatures,
+    savings: "Current billing arrangement",
+  };
+  if (["Keep current", "Usage review"].includes(subscription.alternatePlan)) return [current];
+  return [
+    current,
+    {
+      id: "alternate",
+      name: subscription.alternatePlan,
+      amount: subscription.alternateAmount,
+      currency: subscription.currency,
+      cadence: subscription.alternatePlan.toLowerCase().includes("annual") ? "Annual commitment" : subscription.cadence,
+      description: subscription.alternateDescription,
+      features: [
+        "Separate plan-change approval",
+        "Fresh vendor quote before payment",
+        "Effective date shown in review",
+      ],
+      savings: subscription.savings,
+    },
+  ];
+}
+
 const humanize = (value: string) => value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 
+let sharedAudioContext: AudioContext | null = null;
+
+function playInterfaceSound(kind: SoundKind) {
+  const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioContextClass) return;
+  if (!sharedAudioContext) sharedAudioContext = new AudioContextClass();
+  const context = sharedAudioContext;
+  if (context.state === "suspended") void context.resume();
+
+  const notes: Record<SoundKind, [number, number, number]> = {
+    hover: [420, 465, 0.045],
+    open: [285, 620, 0.16],
+    close: [480, 300, 0.11],
+    navigate: [370, 440, 0.075],
+    submit: [330, 405, 0.085],
+    confirm: [390, 680, 0.14],
+  };
+  const [start, end, duration] = notes[kind];
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  oscillator.type = kind === "confirm" ? "triangle" : "sine";
+  oscillator.frequency.setValueAtTime(start, context.currentTime);
+  oscillator.frequency.exponentialRampToValueAtTime(end, context.currentTime + duration);
+  gain.gain.setValueAtTime(0.0001, context.currentTime);
+  gain.gain.exponentialRampToValueAtTime(kind === "hover" ? 0.012 : 0.028, context.currentTime + 0.012);
+  gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + duration);
+  oscillator.connect(gain);
+  gain.connect(context.destination);
+  oscillator.start();
+  oscillator.stop(context.currentTime + duration + 0.01);
+}
+
+function usePaperWind<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  const lastPointer = useRef({ x: 0, y: 0, at: 0 });
+  const frame = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (frame.current !== null) window.cancelAnimationFrame(frame.current);
+  }, []);
+
+  const writeWind = (x: number, y: number, turn: number) => {
+    const element = ref.current;
+    if (!element) return;
+    element.style.setProperty("--paper-wind-x", `${x.toFixed(2)}px`);
+    element.style.setProperty("--paper-wind-y", `${y.toFixed(2)}px`);
+    element.style.setProperty("--paper-wind-turn", `${turn.toFixed(2)}deg`);
+  };
+
+  const onPointerMove = (event: React.PointerEvent<T>) => {
+    if (
+      event.pointerType === "touch"
+      || window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      || (event.target as HTMLElement).closest("button, input, a")
+    ) return;
+    const now = performance.now();
+    const elapsed = Math.max(12, now - lastPointer.current.at);
+    const velocityX = (event.clientX - lastPointer.current.x) / elapsed;
+    const velocityY = (event.clientY - lastPointer.current.y) / elapsed;
+    lastPointer.current = { x: event.clientX, y: event.clientY, at: now };
+    const x = Math.max(-2.8, Math.min(2.8, velocityX * 8));
+    const y = Math.max(-1.4, Math.min(1.4, velocityY * 5));
+    const turn = Math.max(-0.8, Math.min(0.8, velocityX * 2.4));
+    if (frame.current !== null) window.cancelAnimationFrame(frame.current);
+    frame.current = window.requestAnimationFrame(() => writeWind(x, y, turn));
+  };
+
+  const onPointerLeave = () => {
+    lastPointer.current = { x: 0, y: 0, at: 0 };
+    if (frame.current !== null) window.cancelAnimationFrame(frame.current);
+    frame.current = window.requestAnimationFrame(() => writeWind(0, 0, 0));
+  };
+
+  return { ref, onPointerMove, onPointerLeave };
+}
+
 function ModeBadge({ mode, label }: { mode: string; label?: string }) {
-  const isSimulated = mode.includes("mock") || mode.includes("unconfigured") || mode.includes("sandbox");
+  return <span className="mode-badge">{label || humanize(mode)}</span>;
+}
+
+function Brand() {
   return (
-    <span className={`mode-badge ${isSimulated ? "mode-badge--sandbox" : "mode-badge--real"}`}>
-      {isSimulated ? <ShieldCheck size={16} weight="regular" /> : <CheckCircle size={16} weight="fill" />}
-      <span>{label || humanize(mode)}</span>
+    <span className="brand-lockup">
+      <img src="/app/assets/restock-mark.png" alt="" className="brand-mark" />
+      <span>restock.</span>
     </span>
   );
 }
 
-function AppHeader({ capabilities }: { capabilities: Capabilities | null }) {
-  const mode = capabilities?.prava_mode || "sandbox_unconfigured";
-  const paymentMode = capabilities?.home_payment_mode || "disclosed_mock";
-  return (
-    <header className="app-header">
-      <a className="brand-lockup" href="#decisions" aria-label="Restock home">
-        <img src="/app/assets/restock-mark.png" alt="" className="brand-mark" />
-        <span>Restock</span>
-      </a>
-      <div className="header-context">
-        <ModeBadge mode={mode} label={mode.includes("sandbox") ? "Sandbox" : undefined} />
-        <span className="header-mode-copy">{paymentMode === "real" ? "Live merchant payment" : "Final payment simulated"}</span>
-        <button className="profile-button" type="button" aria-label="Open account menu">
-          <span className="profile-avatar" aria-hidden="true">SG</span>
-          <span className="profile-name">Soumyajit</span>
-          <CaretDown size={15} />
-        </button>
-      </div>
-    </header>
-  );
-}
-
-function Sidebar({ view, setView, capabilities }: { view: View; setView: (view: View) => void; capabilities: Capabilities | null }) {
-  const navItems: { id: View; label: string; icon: typeof House }[] = [
+function AppHeader({
+  view,
+  setView,
+  soundOn,
+  setSoundOn,
+  notifications,
+  profile,
+  tenant,
+  capabilities,
+  onOpenNotification,
+}: {
+  view: View;
+  setView: (view: View) => void;
+  soundOn: boolean;
+  setSoundOn: (enabled: boolean) => void;
+  notifications: Notification[];
+  profile: UserProfile | null;
+  tenant: TenantSummary | null;
+  capabilities: Capabilities | null;
+  onOpenNotification: (notification: Notification) => void;
+}) {
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const profileTriggerRef = useRef<HTMLButtonElement>(null);
+  const navigation: { id: View; label: string; icon: typeof House }[] = [
     { id: "home", label: "Home", icon: House },
     { id: "teams", label: "Teams", icon: UsersThree },
     { id: "activity", label: "Activity", icon: ClockCounterClockwise },
   ];
+  const displayName = profile?.display_name || "Soumyajit";
+  const initials = displayName
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  const detectedTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Local time";
+  const localTimezone = detectedTimezone === "Asia/Calcutta" ? "Asia/Kolkata" : detectedTimezone;
+  const watchedCount = products.filter((product) => product.lifecycle !== "restocked").length;
+  const capLabel = (value: string | number | undefined | null) => (
+    value === undefined || value === null ? "—" : `₹${value}`
+  );
+
+  useEffect(() => {
+    if (!profileOpen && !notificationsOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setProfileOpen(false);
+      setNotificationsOpen(false);
+      profileTriggerRef.current?.focus();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [notificationsOpen, profileOpen]);
+
   return (
-    <aside className="sidebar" aria-label="Primary navigation">
-      <nav className="sidebar-nav">
-        {navItems.map(({ id, label, icon: Icon }) => (
+    <header className="app-header">
+      <button className="brand-button" type="button" onClick={() => setView("home")} aria-label="Open my pantry">
+        <Brand />
+        <span className="brand-context">my pantry</span>
+      </button>
+
+      <nav className="top-navigation" aria-label="Primary navigation">
+        {navigation.map(({ id, label, icon: Icon }) => (
           <button
-            className={`nav-item ${view === id ? "nav-item--active" : ""}`}
             key={id}
             type="button"
+            className={view === id ? "top-nav-item top-nav-item--active" : "top-nav-item"}
             onClick={() => setView(id)}
             aria-current={view === id ? "page" : undefined}
           >
-            <Icon size={21} weight={view === id ? "fill" : "regular"} />
+            <Icon size={17} weight={view === id ? "fill" : "regular"} />
             <span>{label}</span>
           </button>
         ))}
       </nav>
-      <div className="sidebar-mode">
-        <ModeBadge mode={capabilities?.home_merchant_mode || "disclosed_mock"} label={`Catalog · ${humanize(capabilities?.home_merchant_mode || "disclosed_mock")}`} />
-        <ModeBadge mode={capabilities?.home_payment_mode || "disclosed_mock"} label={`Payment · ${humanize(capabilities?.home_payment_mode || "disclosed_mock")}`} />
-        <p>Catalog data and final payment are disclosed independently.</p>
+
+      <div className="header-tools">
+        <button
+          className="sound-toggle"
+          type="button"
+          aria-pressed={soundOn}
+          aria-label={soundOn ? "Turn sound off" : "Turn sound on"}
+          onClick={() => setSoundOn(!soundOn)}
+        >
+          {soundOn ? <SpeakerHigh size={18} weight="fill" /> : <SpeakerSlash size={18} />}
+          <span>Sound {soundOn ? "on" : "off"}</span>
+        </button>
+
+        <button
+          className="header-icon-button"
+          type="button"
+          aria-label={`${notifications.length} pending notifications`}
+          aria-expanded={notificationsOpen}
+          aria-controls="restock-notification-center"
+          onClick={() => {
+            setNotificationsOpen((open) => !open);
+            setProfileOpen(false);
+          }}
+        >
+          <BellSimpleRinging size={19} weight={notifications.length ? "fill" : "regular"} />
+          {notifications.length > 0 && <span className="header-count">{notifications.length}</span>}
+        </button>
+
+        <button
+          ref={profileTriggerRef}
+          className="profile-trigger"
+          type="button"
+          aria-label={`Open ${displayName}'s profile`}
+          aria-expanded={profileOpen}
+          aria-controls="restock-profile-folio"
+          onClick={() => {
+            setProfileOpen((open) => !open);
+            setNotificationsOpen(false);
+          }}
+        >
+          <span className="profile-avatar">{initials || <UserCircle size={19} />}</span>
+          <span className="profile-trigger-name">{displayName.split(" ")[0]}</span>
+          <CaretDown size={13} />
+        </button>
       </div>
+
+      {notificationsOpen && (
+        <section id="restock-notification-center" className="notification-center" aria-label="Pending decisions">
+          <header>
+            <span>
+              <p className="eyebrow">Restock slips</p>
+              <strong>{notifications.length ? "Needs your say" : "All quiet"}</strong>
+            </span>
+            <button type="button" aria-label="Close notifications" onClick={() => setNotificationsOpen(false)}>
+              <X size={16} />
+            </button>
+          </header>
+          <div className="notification-center-list">
+            {notifications.length === 0 ? (
+              <p className="notification-center-empty">Nothing needs attention right now.</p>
+            ) : notifications.map((notification) => (
+              <button
+                key={notification.notification_id}
+                type="button"
+                className="notification-center-slip"
+                onClick={() => {
+                  setNotificationsOpen(false);
+                  onOpenNotification(notification);
+                }}
+              >
+                <span className="notification-track">{notification.track === "teams" ? "Teams" : "Home"}</span>
+                <strong>{notification.message}</strong>
+                <small>Open the tracked item <ArrowRight size={13} /></small>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {profileOpen && (
+        <div className="profile-scrim" onMouseDown={() => setProfileOpen(false)}>
+          <aside
+            id="restock-profile-folio"
+            className="profile-folio"
+            aria-label={`${displayName}'s Restock profile`}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header className="profile-folio-header">
+              <div>
+                <div className="profile-identity">
+                  <span className="profile-avatar profile-avatar--large">{initials || <UserCircle size={24} />}</span>
+                  <span>
+                    <p className="eyebrow">My pantry folio</p>
+                    <h2>{displayName}</h2>
+                    <small>{tenant?.name || "Personal pantry"} · {tenant?.role || "Owner"}</small>
+                  </span>
+                </div>
+                <p className="profile-summary">
+                  <strong>{watchedCount} items watched</strong>
+                  <span aria-hidden="true">·</span>
+                  <strong>{notifications.length} decisions waiting</strong>
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-label="Close profile"
+                onClick={() => {
+                  setProfileOpen(false);
+                  profileTriggerRef.current?.focus();
+                }}
+              >
+                <X size={18} />
+              </button>
+            </header>
+
+            <section className="profile-ledger-section">
+              <header className="profile-section-heading">
+                <span className="profile-section-icon"><UserCircle size={20} weight="duotone" /></span>
+                <span>
+                  <p>Identity</p>
+                  <small>The person and pantry Restock is acting for.</small>
+                </span>
+              </header>
+              <dl className="profile-ledger profile-ledger--identity">
+                <div><dt>Pantry</dt><dd>{tenant?.name || "Personal pantry"}</dd></div>
+                <div><dt>Role</dt><dd>{tenant?.role || "Owner"}</dd></div>
+                <div><dt>Local time</dt><dd>{localTimezone}</dd></div>
+              </dl>
+            </section>
+
+            <section className="profile-ledger-section">
+              <header className="profile-section-heading">
+                <span className="profile-section-icon"><CurrencyInr size={20} weight="duotone" /></span>
+                <span>
+                  <p>Spending boundaries</p>
+                  <small>Hard limits checked in code before Prava is called.</small>
+                </span>
+              </header>
+              <dl className="profile-ledger profile-ledger--money">
+                <div className="profile-ledger-primary"><dt>Monthly household limit</dt><dd>{capLabel(profile?.monthly_cap)}</dd></div>
+                <div><dt>Per item</dt><dd>{capLabel(profile?.per_item_cap)}</dd></div>
+                <div><dt>Per purchase</dt><dd>{capLabel(profile?.per_transaction_cap)}</dd></div>
+              </dl>
+              {!profile && <p className="profile-section-note">Sign in to load account limits.</p>}
+            </section>
+
+            <section className="profile-ledger-section">
+              <header className="profile-section-heading">
+                <span className="profile-section-icon"><ChatCircleDots size={20} weight="duotone" /></span>
+                <span>
+                  <p>Delivery routes</p>
+                  <small>Where Home and Teams decisions can reach you.</small>
+                </span>
+              </header>
+              <div className="profile-route-list">
+                <div className="profile-route-row">
+                  <span className="profile-route-mark profile-route-mark--restock"><img src="/app/assets/restock-mark.png" alt="" /></span>
+                  <span><strong>In-app</strong><small>Immediate decisions and quiet updates</small></span>
+                  <em data-state="active">Active</em>
+                </div>
+                <div className="profile-route-row">
+                  <span className="profile-route-mark"><WhatsappLogo size={22} weight="fill" /></span>
+                  <span><strong>WhatsApp</strong><small>Home approvals and replenishment reminders</small></span>
+                  <em data-state={capabilities?.whatsapp_configured ? "active" : "inactive"}>
+                    {capabilities?.whatsapp_configured ? "Connected" : "Not configured"}
+                  </em>
+                </div>
+                <div className="profile-route-row">
+                  <span className="profile-route-mark"><SlackLogo size={22} weight="fill" /></span>
+                  <span><strong>Slack</strong><small>Teams renewals and plan-switch decisions</small></span>
+                  <em data-state={capabilities?.slack_configured ? "active" : "inactive"}>
+                    {capabilities?.slack_configured ? "Connected" : "Not configured"}
+                  </em>
+                </div>
+              </div>
+            </section>
+
+            <section className="profile-ledger-section">
+              <header className="profile-section-heading">
+                <span className="profile-section-icon"><GlobeHemisphereEast size={20} weight="duotone" /></span>
+                <span>
+                  <p>Experience</p>
+                  <small>Comfort settings stay predictable across devices.</small>
+                </span>
+              </header>
+              <div className="profile-preference-list">
+                <button type="button" onClick={() => setSoundOn(!soundOn)} aria-pressed={soundOn}>
+                  <span>{soundOn ? <SpeakerHigh size={19} weight="fill" /> : <SpeakerSlash size={19} />}</span>
+                  <span><strong>Restock sound</strong><small>{soundOn ? "On" : "Off"}</small></span>
+                  <em>{soundOn ? "Turn off" : "Turn on"}</em>
+                </button>
+                <div>
+                  <span><GlobeHemisphereEast size={19} weight="duotone" /></span>
+                  <span><strong>Motion</strong><small>Follows your device preference</small></span>
+                  <em>System</em>
+                </div>
+              </div>
+            </section>
+
+            <section className="profile-ledger-section profile-privacy-note">
+              <ShieldCheck size={22} weight="duotone" />
+              <span>
+                <strong>Your data stays useful, not exposed.</strong>
+                <small>Raw payment credentials and approval links never appear here. Forecasting uses only the tracking data you allow.</small>
+              </span>
+              <button type="button" disabled title="Data export is available after sign-in">
+                <DownloadSimple size={17} /> Export my data
+              </button>
+            </section>
+          </aside>
+        </div>
+      )}
+    </header>
+  );
+}
+
+function ForegroundNotificationSlip({
+  notification,
+  onOpen,
+  onClose,
+}: {
+  notification: Notification;
+  onOpen: () => void;
+  onClose: () => void;
+}) {
+  const paperWind = usePaperWind<HTMLElement>();
+  const isTeams = notification.track === "teams" || notification.actions.includes("switch_plan");
+  return (
+    <aside
+      ref={paperWind.ref}
+      className="foreground-notification"
+      aria-label="Restock notification"
+      onPointerMove={paperWind.onPointerMove}
+      onPointerLeave={paperWind.onPointerLeave}
+    >
+      <p className="sr-only" role="status" aria-live="polite">{notification.message}</p>
+      <header>
+        <span className="notification-mark"><img src="/app/assets/restock-mark.png" alt="" /></span>
+        <span>
+          <small>{isTeams ? "Teams" : "Home"} · needs your say</small>
+          <strong>{isTeams ? "A renewal is waiting" : "Your pantry noticed something"}</strong>
+        </span>
+        <button type="button" aria-label="Dismiss this popup" onClick={onClose}><X size={16} /></button>
+      </header>
+      <p className="foreground-message">{notification.message}</p>
+      <footer>
+        <button type="button" className="notification-later" onClick={onClose}>Later</button>
+        <button type="button" className="notification-view" onClick={onOpen}>
+          View {isTeams ? "renewal" : "item"} <ArrowRight size={15} />
+        </button>
+      </footer>
     </aside>
   );
 }
 
-function DecisionHeader({ track, status }: { track: Track; status: string }) {
+function ProductOnShelf({
+  product,
+  onOpen,
+  onPreview,
+}: {
+  product: PantryProduct;
+  onOpen: () => void;
+  onPreview: () => void;
+}) {
   return (
-    <div className="page-heading" id="decisions">
-      <div>
-        <p className="section-kicker">{track === "home" ? "Household restocks" : "Team renewals"}</p>
-        <h1>Decisions</h1>
-        <p>Review and act before Restock places anything.</p>
-      </div>
-      <div className="sync-status" role="status" aria-live="polite">
-        <span className="sync-dot" aria-hidden="true" />
-        <span>{status}</span>
-      </div>
-    </div>
+    <button
+      className={`shelf-product shelf-product--${product.id}`}
+      type="button"
+      onClick={onOpen}
+      onPointerEnter={onPreview}
+      aria-label={`Open ${product.name}: ${product.status}`}
+      data-product-id={product.id}
+      data-lifecycle={product.lifecycle}
+    >
+      <span className="product-wind-layer">
+        <span className="product-float-layer">
+          <span className="product-photo-wrap">
+            <img src={product.image} alt={product.imageAlt} className="shelf-product-image" />
+          </span>
+        </span>
+      </span>
+      <span className="product-caption">
+        <strong>{product.name}</strong>
+        <span className="caption-commerce">
+          <small>{product.size}</small>
+          <span className="shelf-price-pin">{product.price}</span>
+        </span>
+        <span className="caption-status" data-tone={product.tone}>{product.status}</span>
+      </span>
+    </button>
   );
 }
 
-function AdjustAmount({ onCancel, onSubmit }: { onCancel: () => void; onSubmit: (amount: string) => void }) {
-  const [value, setValue] = useState("380");
+export function resolveProductLifecycle({
+  base,
+  itemId,
+  workflows,
+  hasPendingNotification,
+}: {
+  base: ProductLifecycle;
+  itemId?: string;
+  workflows: WorkflowRun[];
+  hasPendingNotification: boolean;
+}): ProductLifecycle {
+  const terminalStates = new Set(["completed", "failed", "skipped", "rejected", "expired"]);
+  const latest = itemId
+    ? workflows
+      .filter((workflow) => workflow.item_id === itemId)
+      .sort((left, right) => String(right.updated_at || "").localeCompare(String(left.updated_at || "")))[0]
+    : undefined;
+  if (latest?.state === "completed") return "restocked";
+  if (latest && !terminalStates.has(latest.state)) return "attention";
+  if (latest && terminalStates.has(latest.state)) return "tracking";
+  if (hasPendingNotification) return "attention";
+  return base;
+}
+
+function LivingPantry({
+  onOpen,
+  onPreview,
+  workflows,
+  notification,
+}: {
+  onOpen: (product: PantryProduct) => void;
+  onPreview: () => void;
+  workflows: WorkflowRun[];
+  notification?: Notification;
+}) {
+  const stageRef = useRef<HTMLElement>(null);
+  const animationFrame = useRef<number | null>(null);
+  const presentationProducts = useMemo(() => products.map((product) => {
+    const lifecycle = resolveProductLifecycle({
+      base: product.lifecycle,
+      itemId: product.itemId,
+      workflows,
+      hasPendingNotification: product.id === "coffee"
+        && Boolean(notification && ["pending", "preview"].includes(notification.status)),
+    });
+    return { ...product, lifecycle };
+  }), [notification, workflows]);
+  const shelfProducts = presentationProducts.filter((product) => product.lifecycle !== "restocked");
+  const upperProducts = shelfProducts.slice(0, 3);
+  const middleProducts = shelfProducts.slice(3, 5);
+  const lowerProducts = shelfProducts.slice(5, 8);
+
+  const updateWind = (event: React.PointerEvent<HTMLElement>) => {
+    if (
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      || window.matchMedia("(pointer: coarse)").matches
+      || window.innerWidth < 800
+    ) return;
+
+    const stage = stageRef.current;
+    if (!stage) return;
+    const bounds = stage.getBoundingClientRect();
+    const x = ((event.clientX - bounds.left) / bounds.width - 0.5) * 2;
+    const y = ((event.clientY - bounds.top) / bounds.height - 0.5) * 2;
+    if (animationFrame.current) window.cancelAnimationFrame(animationFrame.current);
+    animationFrame.current = window.requestAnimationFrame(() => {
+      stage.style.setProperty("--wind-x", `${(x * 5).toFixed(2)}px`);
+      stage.style.setProperty("--wind-y", `${(y * 3).toFixed(2)}px`);
+      stage.style.setProperty("--tag-turn", `${(x * 2.4).toFixed(2)}deg`);
+      stage.style.setProperty("--sun-shift", `${(x * -5).toFixed(2)}px`);
+      stage.style.setProperty("--product-tilt-x", `${(y * -1.4).toFixed(2)}deg`);
+      stage.style.setProperty("--product-tilt-y", `${(x * 2.6).toFixed(2)}deg`);
+    });
+  };
+
+  const resetWind = () => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    stage.style.setProperty("--wind-x", "0px");
+    stage.style.setProperty("--wind-y", "0px");
+    stage.style.setProperty("--tag-turn", "0deg");
+    stage.style.setProperty("--sun-shift", "0px");
+    stage.style.setProperty("--product-tilt-x", "0deg");
+    stage.style.setProperty("--product-tilt-y", "0deg");
+  };
+
+  useEffect(() => () => {
+    if (animationFrame.current) window.cancelAnimationFrame(animationFrame.current);
+  }, []);
+
+  return (
+    <main className="pantry-page">
+      <section
+        ref={stageRef}
+        className="pantry-stage"
+        aria-label="Tracked household products on three shelves"
+        onPointerMove={updateWind}
+        onPointerLeave={resetWind}
+      >
+        <div className="sunlit-room" aria-hidden="true" />
+        <div className="pantry-shelf-note">
+          <span className="pantry-shelf-note__kicker">My pantry</span>
+          <h1>Living pantry</h1>
+        </div>
+        <p className="ambient-copy" aria-hidden="true">watched with care</p>
+
+        <div className="shelf-level shelf-level--upper">
+          <div className="shelf-items shelf-items--upper">
+            {upperProducts.map((product) => (
+              <ProductOnShelf
+                key={product.id}
+                product={product}
+                onOpen={() => onOpen(product)}
+                onPreview={onPreview}
+              />
+            ))}
+          </div>
+          <div className="wood-shelf" aria-hidden="true" />
+        </div>
+
+        <div className="shelf-level shelf-level--middle">
+          <div className="shelf-items shelf-items--middle">
+            {middleProducts.map((product) => (
+              <ProductOnShelf
+                key={product.id}
+                product={product}
+                onOpen={() => onOpen(product)}
+                onPreview={onPreview}
+              />
+            ))}
+          </div>
+          <div className="wood-shelf" aria-hidden="true" />
+        </div>
+
+        <div className="shelf-level shelf-level--lower">
+          <div className="shelf-items shelf-items--lower">
+            {lowerProducts.map((product) => (
+              <ProductOnShelf
+                key={product.id}
+                product={product}
+                onOpen={() => onOpen(product)}
+                onPreview={onPreview}
+              />
+            ))}
+          </div>
+          <div className="wood-shelf" aria-hidden="true" />
+        </div>
+
+        {shelfProducts.length === 0 && (
+          <div className="shelf-empty">
+            <strong>Everything is stocked.</strong>
+            <span>The next item will appear here when its trigger fires.</span>
+          </div>
+        )}
+      </section>
+    </main>
+  );
+}
+
+function AdjustAmount({
+  initialAmount,
+  onCancel,
+  onSubmit,
+}: {
+  initialAmount: string;
+  onCancel: () => void;
+  onSubmit: (amount: string) => void;
+}) {
+  const [value, setValue] = useState(initialAmount);
   const valid = Number(value) > 0;
   return (
     <form
@@ -154,200 +1195,813 @@ function AdjustAmount({ onCancel, onSubmit }: { onCancel: () => void; onSubmit: 
   );
 }
 
-function HomeDecision({
+function ProductDetail({
+  product,
   notification,
-  onAction,
   capabilities,
+  busy,
+  actionStatus,
+  onBack,
+  onAction,
 }: {
-  notification: Notification;
-  onAction: (notification: Notification, action: string, adjustedAmount?: string) => void;
+  product: PantryProduct;
+  notification?: Notification;
   capabilities: Capabilities | null;
+  busy: boolean;
+  actionStatus: string;
+  onBack: () => void;
+  onAction: (notification: Notification, action: string, adjustedAmount?: string) => void;
 }) {
-  const [expanded, setExpanded] = useState(true);
   const [adjusting, setAdjusting] = useState(false);
-  const actionable = notification.status === "pending" || notification.status === "preview";
+  const backButtonRef = useRef<HTMLButtonElement>(null);
+  const adjustButtonRef = useRef<HTMLButtonElement>(null);
+  const actionable = Boolean(notification && ["pending", "preview"].includes(notification.status));
+  const isCoffee = product.id === "coffee";
+  const isFood = ["Coffee", "Dairy", "Pantry"].includes(product.category);
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onBack();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onBack]);
+
+  useEffect(() => {
+    backButtonRef.current?.focus({ preventScroll: true });
+  }, [product.id]);
+
   return (
-    <article className="decision decision--active">
-      <header className="decision-summary">
-        <img src="/app/assets/coffee-pouch.png" alt="Navy coffee pouch" className="product-image" />
-        <div className="decision-title-block">
-          <div className="reason-row">
-            <span className="attention-label"><WarningCircle size={15} weight="fill" /> Action needed</span>
-            <span className="reason-copy">Likely to run out in 2 days</span>
-          </div>
-          <h2>Arabica coffee beans · 500 g</h2>
-          <div className="price-line">
-            <strong>₹380</strong>
-            <span>from Zepto</span>
-            <span className="price-signal"><ArrowDown size={15} weight="bold" /> ₹20 below your alert threshold</span>
-          </div>
-          <ModeBadge
-            mode={capabilities?.home_payment_mode || "disclosed_mock"}
-            label={`${humanize(capabilities?.home_merchant_mode || "disclosed_mock")} catalog · ${humanize(capabilities?.home_payment_mode || "disclosed_mock")} payment`}
-          />
-        </div>
-        <div className="decision-time">
-          <span>Today</span>
-          <small>10:24 AM</small>
-          <button type="button" className="icon-button" aria-label={expanded ? "Collapse coffee details" : "Expand coffee details"} onClick={() => setExpanded((value) => !value)}>
-            {expanded ? <CaretUp size={18} /> : <CaretDown size={18} />}
-          </button>
-        </div>
-      </header>
+    <main className="product-detail">
+      <button ref={backButtonRef} className="back-button" type="button" onClick={onBack}>
+        <ArrowLeft size={18} />
+        <span>Back to the pantry</span>
+      </button>
 
-      {expanded && (
-        <>
-          <dl className="decision-facts">
-            <div><dt>Category</dt><dd>Groceries · Coffee</dd></div>
-            <div><dt>Coverage</dt><dd>~2 days</dd></div>
-            <div><dt>Merchant</dt><dd>Zepto</dd></div>
-            <div><dt>Alert threshold</dt><dd>₹400.00</dd></div>
-            <div><dt>Quantity</dt><dd>1 pouch</dd></div>
-            <div><dt>Household cap</dt><dd>₹450.00</dd></div>
-            <div><dt>Estimated delivery</dt><dd>Jul 20, 2026</dd></div>
-            <div><dt>Requested by</dt><dd>Restock automation</dd></div>
-          </dl>
+      <ParcelReveal3D
+        content={{
+          kind: "product",
+          image: product.image,
+          name: product.name,
+          scale: product.id === "oil"
+            ? 0.96
+            : product.id === "paper"
+              ? 1.22
+              : product.id === "toothpaste"
+                ? 1.1
+                : 1.1,
+          bottom: product.id === "toothpaste"
+            ? "52%"
+            : product.id === "filter"
+              ? "49%"
+              : undefined,
+        }}
+        parcelLabel={`restock care parcel no. ${products.findIndex((item) => item.id === product.id) + 1}`}
+        merchantLabel={product.merchant}
+      />
 
-          {adjusting ? (
-            <AdjustAmount onCancel={() => setAdjusting(false)} onSubmit={(amount) => { setAdjusting(false); onAction(notification, "adjust", amount); }} />
-          ) : (
-            <div className="decision-actions" aria-label="Coffee purchase actions">
-              {notification.actions.map((action) => (
-                <button
-                  key={action}
-                  type="button"
-                  className={`button ${action === "approve" ? "button--primary" : action === "skip" ? "button--quiet-danger" : "button--secondary"}`}
-                  onClick={() => action === "adjust" ? setAdjusting(true) : onAction(notification, action)}
-                  disabled={!actionable}
-                >
-                  {labels[action] || humanize(action)}
-                </button>
-              ))}
+      <div className="detail-story">
+        <section className="detail-content">
+          <div className="detail-title">
+            <p className="eyebrow">{product.lifecycle === "attention" ? "On your shelf" : product.lifecycle === "restocked" ? "Cycle complete" : "Quietly tracking"} · {product.category}</p>
+            <h1>{product.name}</h1>
+            <div className="detail-commerce" aria-label={`Current price ${product.price}; source ${product.merchant}; product by ${product.brand}`}>
+              <span className="price-pin"><Tag size={17} weight="fill" /><strong>{product.price}</strong></span>
+              <span className="commerce-chip">
+                <Storefront size={18} weight="duotone" />
+                <span><small>Source merchant</small><strong>{product.merchant}</strong></span>
+              </span>
+              <span className="commerce-chip">
+                <SealCheck size={18} weight="duotone" />
+                <span><small>Product by</small><strong>{product.brand}</strong></span>
+              </span>
+              <span className="detail-status-pill"><Clock size={15} />{product.status}</span>
+            </div>
+          </div>
+
+          {isCoffee && (
+            <div className="trigger-callout">
+              <BellSimpleRinging size={22} weight="fill" />
+              <div>
+                <strong>Two signals met at once</strong>
+                <p>You’ll run out in about 2 days, and the price dropped below your ₹400 threshold.</p>
+              </div>
             </div>
           )}
-          <p className="charge-note"><LockKey size={15} /> Approval creates a scoped Prava mandate. No real merchant charge occurs in this demo.</p>
-        </>
-      )}
-    </article>
+
+          {isCoffee && notification && (
+            adjusting ? (
+              <AdjustAmount
+                initialAmount={product.price.replace(/[^\d.]/g, "") || "0"}
+                onCancel={() => {
+                  setAdjusting(false);
+                  window.requestAnimationFrame(() => adjustButtonRef.current?.focus());
+                }}
+                onSubmit={(amount) => { setAdjusting(false); onAction(notification, "adjust", amount); }}
+              />
+            ) : (
+              <>
+                <p className="action-boundary">
+                  {capabilities?.real_money_enabled && capabilities.home_payment_mode === "real"
+                    ? `Live checkout · approving can create a real ${product.price} charge.`
+                    : "Approval demonstration · no real merchant charge will be made."}
+                </p>
+                <div className="detail-actions" role="group" aria-label="Coffee restock actions" aria-busy={busy}>
+                  {notification.actions.map((action) => (
+                    <button
+                      key={action}
+                      ref={action === "adjust" ? adjustButtonRef : undefined}
+                      type="button"
+                      className={`button ${action === "approve" ? "button--primary" : action === "skip" ? "button--quiet-danger" : "button--secondary"}`}
+                      onClick={() => action === "adjust" ? setAdjusting(true) : onAction(notification, action)}
+                      disabled={!actionable || busy}
+                    >
+                      {busy ? "Working…" : action === "approve" ? `Approve ${product.price}` : actionLabels[action] || humanize(action)}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )
+          )}
+          <p className="detail-action-status" role="status" aria-live="polite">{actionStatus}</p>
+          <p className="payment-note">
+            <LockKey size={15} />
+            Approval creates a scoped Prava mandate. Nothing continues until you confirm.
+          </p>
+        </section>
+
+        <dl className="product-facts" aria-label={`${product.name} product snapshot`}>
+          <div className="product-fact product-fact--history">
+            <span className="fact-icon"><CalendarBlank size={23} weight="duotone" /></span>
+            <span><dt>Last bought</dt><dd>{product.lastBought}</dd></span>
+          </div>
+          <div className="product-fact product-fact--cadence">
+            <span className="fact-icon"><Timer size={23} weight="duotone" /></span>
+            <span><dt>Expected to last</dt><dd>{product.cadence}</dd></span>
+          </div>
+          <div className="product-fact product-fact--remaining">
+            <span className="fact-icon"><HourglassMedium size={23} weight="duotone" /></span>
+            <span><dt>Estimated remaining</dt><dd>{product.daysRemaining}</dd></span>
+          </div>
+          <div className="product-fact product-fact--trigger">
+            <span className="fact-icon"><BellSimpleRinging size={23} weight="duotone" /></span>
+            <span><dt>Why Restock noticed</dt><dd>{product.trigger}</dd></span>
+          </div>
+          <div className="product-fact product-fact--ingredients">
+            <span className="fact-icon">{isFood ? <ForkKnife size={23} weight="duotone" /> : <Package size={23} weight="duotone" />}</span>
+            <span><dt>{isFood ? "Ingredients" : "Material / compatibility"}</dt><dd>{product.ingredients}</dd></span>
+          </div>
+          <div className="product-fact product-fact--note">
+            <span className="fact-icon">{isFood ? <Sparkle size={23} weight="duotone" /> : <ListBullets size={23} weight="duotone" />}</span>
+            <span><dt>{isFood ? "Label note" : "Product note"}</dt><dd>{product.nutrition}</dd></span>
+          </div>
+        </dl>
+      </div>
+    </main>
   );
 }
 
-function TeamsDecision({
+function SubscriptionTicket({
+  subscription,
+  onOpen,
+  onPreview,
+}: {
+  subscription: SubscriptionProduct;
+  onOpen: () => void;
+  onPreview: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="provider-award"
+      onClick={onOpen}
+      onPointerEnter={onPreview}
+      data-subscription-id={subscription.id}
+      aria-label={`Open ${subscription.name}: ${subscription.status}`}
+    >
+      <ProviderAward3D
+        logo={subscription.logo}
+        accent={subscription.color}
+        name={subscription.name}
+        live={subscription.status === "Decision due"}
+      />
+      <span className="award-plaque">
+        <span className="award-plaque-title">{subscription.name}</span>
+        <span className="award-meta">
+          <small>{subscription.renewal}</small>
+          <strong>{subscription.currentAmount}</strong>
+        </span>
+        <span className="award-status" data-status={subscription.status === "Decision due" ? "due" : "watching"}>
+          {subscription.status === "Decision due" ? <Clock size={14} weight="fill" /> : <Eye size={14} weight="duotone" />}
+          {subscription.status}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+function TeamsGallery({
+  onOpen,
+  onPreview,
+}: {
+  onOpen: (subscription: SubscriptionProduct) => void;
+  onPreview: () => void;
+}) {
+  const stageRef = useRef<HTMLElement>(null);
+  const animationFrame = useRef<number | null>(null);
+
+  const updateWind = (event: React.PointerEvent<HTMLElement>) => {
+    if (
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      || window.matchMedia("(pointer: coarse)").matches
+      || window.innerWidth < 800
+    ) return;
+
+    const stage = stageRef.current;
+    if (!stage) return;
+    const bounds = stage.getBoundingClientRect();
+    const x = ((event.clientX - bounds.left) / bounds.width - 0.5) * 2;
+    const y = ((event.clientY - bounds.top) / bounds.height - 0.5) * 2;
+    if (animationFrame.current) window.cancelAnimationFrame(animationFrame.current);
+    animationFrame.current = window.requestAnimationFrame(() => {
+      stage.style.setProperty("--wind-x", `${(x * 4).toFixed(2)}px`);
+      stage.style.setProperty("--wind-y", `${(y * 2).toFixed(2)}px`);
+      stage.style.setProperty("--tag-turn", `${(x * 2).toFixed(2)}deg`);
+      stage.style.setProperty("--award-tilt-x", `${(y * -1.1).toFixed(2)}deg`);
+      stage.style.setProperty("--award-tilt-y", `${(x * 2.2).toFixed(2)}deg`);
+      stage.style.setProperty("--cabinet-light-x", `${(x * -5).toFixed(2)}px`);
+      stage.style.setProperty("--cabinet-light-y", `${(y * -2).toFixed(2)}px`);
+    });
+  };
+
+  const resetWind = () => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    stage.style.setProperty("--wind-x", "0px");
+    stage.style.setProperty("--wind-y", "0px");
+    stage.style.setProperty("--tag-turn", "0deg");
+    stage.style.setProperty("--award-tilt-x", "0deg");
+    stage.style.setProperty("--award-tilt-y", "0deg");
+    stage.style.setProperty("--cabinet-light-x", "0px");
+    stage.style.setProperty("--cabinet-light-y", "0px");
+  };
+
+  useEffect(() => () => {
+    if (animationFrame.current) window.cancelAnimationFrame(animationFrame.current);
+  }, []);
+
+  return (
+    <main className="teams-page">
+      <section
+        ref={stageRef}
+        className="subscription-cabinet"
+        aria-label="Tracked team subscriptions"
+        onPointerMove={updateWind}
+        onPointerLeave={resetWind}
+      >
+        <div className="cabinet-light" aria-hidden="true" />
+        <div className="teams-shelf-note">
+          <span>Restock Teams</span>
+          <h1>Subscription shelf</h1>
+        </div>
+        <div className="award-shelf award-shelf--upper">
+          <div className="award-items">
+            {subscriptions.slice(0, 3).map((subscription) => (
+              <SubscriptionTicket
+                key={subscription.id}
+                subscription={subscription}
+                onOpen={() => onOpen(subscription)}
+                onPreview={onPreview}
+              />
+            ))}
+          </div>
+          <div className="wood-shelf" aria-hidden="true" />
+        </div>
+        <div className="award-shelf award-shelf--lower">
+          <div className="award-items">
+            {subscriptions.slice(3).map((subscription) => (
+              <SubscriptionTicket
+                key={subscription.id}
+                subscription={subscription}
+                onOpen={() => onOpen(subscription)}
+                onPreview={onPreview}
+              />
+            ))}
+          </div>
+          <div className="wood-shelf" aria-hidden="true" />
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function SubscriptionDetail({
+  subscription,
   notification,
+  capabilities,
+  busy,
+  actionStatus,
+  onBack,
   onAction,
 }: {
-  notification: Notification;
+  subscription: SubscriptionProduct;
+  notification?: Notification;
+  capabilities: Capabilities | null;
+  busy: boolean;
+  actionStatus: string;
+  onBack: () => void;
   onAction: (notification: Notification, action: string) => void;
 }) {
-  const actionable = notification.status === "pending" || notification.status === "preview";
+  const backButtonRef = useRef<HTMLButtonElement>(null);
+  const paperWind = usePaperWind<HTMLElement>();
+  const actionable = subscription.id === "copilot" && Boolean(notification && ["pending", "preview"].includes(notification.status));
+  const choices = useMemo(() => planChoicesFor(subscription), [subscription]);
+  const [activePanel, setActivePanel] = useState<"receipt" | "plans" | "invoices">("receipt");
+  const [selectedChoiceId, setSelectedChoiceId] = useState<SubscriptionPlanChoice["id"]>("current");
+  const [reviewing, setReviewing] = useState(false);
+  const selectedChoice = choices.find((choice) => choice.id === selectedChoiceId) || choices[0];
+  const selectedAction = selectedChoice.id === "alternate" ? "switch_plan" : "renew_as_is";
+  const canSubmitSelected = Boolean(
+    actionable
+    && notification
+    && notification.actions.includes(selectedAction),
+  );
+
+  useEffect(() => {
+    setActivePanel("receipt");
+    setSelectedChoiceId("current");
+    setReviewing(false);
+    backButtonRef.current?.focus({ preventScroll: true });
+  }, [subscription.id]);
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (reviewing) {
+        setReviewing(false);
+        return;
+      }
+      onBack();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onBack, reviewing]);
+
+  const openPlans = (choice: SubscriptionPlanChoice["id"] = "current") => {
+    setSelectedChoiceId(choice);
+    setReviewing(false);
+    setActivePanel("plans");
+  };
+
+  const confirmSelectedPlan = () => {
+    if (!notification || !canSubmitSelected) return;
+    onAction(notification, selectedAction);
+  };
+
   return (
-    <article className="decision decision--active decision--teams">
-      <header className="decision-summary">
-        <img src="/app/assets/teamtool-icon.png" alt="TeamTool collaboration icon" className="product-image" />
-        <div className="decision-title-block">
-          <div className="reason-row">
-            <span className="attention-label attention-label--teams"><Clock size={15} weight="fill" /> Renewal due</span>
-            <span className="reason-copy">Renews in 2 days</span>
+    <main
+      className="subscription-detail"
+      style={{ "--provider-accent": subscription.color } as CSSProperties}
+    >
+      <button ref={backButtonRef} className="back-button" type="button" onClick={onBack}>
+        <ArrowLeft size={18} />
+        <span>Back to renewals</span>
+      </button>
+
+      <ParcelReveal3D
+        content={{
+          kind: "award",
+          logo: subscription.logo,
+          name: subscription.name,
+          accent: subscription.color,
+          scale: 1.08,
+        }}
+        parcelLabel={`${subscription.category} · renewal packet`}
+        merchantLabel={subscription.name}
+      />
+
+      <div className="billing-receipt-stage">
+        <span className="receipt-shadow-sheet" aria-hidden="true" />
+        <article
+          ref={paperWind.ref}
+          className="billing-receipt"
+          aria-label={`${subscription.name} billing receipt`}
+          onPointerMove={paperWind.onPointerMove}
+          onPointerLeave={paperWind.onPointerLeave}
+        >
+          <div className="receipt-feed-edge" aria-hidden="true" />
+          <header className="receipt-heading">
+            <div className="receipt-brand">
+              <img className="receipt-restock-mark" src="/app/assets/restock-mark.png" alt="" />
+              <span>
+                <small>Restock billing statement</small>
+                <strong>Subscription receipt</strong>
+              </span>
+            </div>
+            <span className={`receipt-status-stamp${subscription.status === "Decision due" ? " receipt-status-stamp--due" : ""}`}>
+              {subscription.status}
+            </span>
+          </header>
+
+          <div className="receipt-provider">
+            <span className="receipt-provider-mark"><img src={subscription.logo} alt="" /></span>
+            <span>
+              <p className="receipt-kicker">{subscription.owner} · {subscription.category}</p>
+              <h2>{subscription.name}</h2>
+              <p>{subscription.description}</p>
+            </span>
+            <span className="receipt-total">
+              <small>Recurring total</small>
+              <strong>{subscription.currentAmount}</strong>
+              <em>{subscription.currency} · {subscription.priceBasis}</em>
+            </span>
           </div>
-          <h2>TeamTool Pro · 1 seat</h2>
-          <p className="teams-summary">Choose the current monthly plan or explicitly switch. Restock never switches plans from a generic approval.</p>
-          <ModeBadge mode="disclosed_mock" label="Billing simulation · Explicit approval required" />
+
+          <nav className="receipt-tabs" aria-label="Billing receipt sections">
+            {(["receipt", "plans", "invoices"] as const).map((panel) => (
+              <button
+                key={panel}
+                type="button"
+                className={activePanel === panel ? "receipt-tab receipt-tab--active" : "receipt-tab"}
+                aria-current={activePanel === panel ? "page" : undefined}
+                onClick={() => {
+                  setActivePanel(panel);
+                  setReviewing(false);
+                }}
+              >
+                {panel === "receipt" ? "Receipt" : panel === "plans" ? "Plans" : "Invoices"}
+              </button>
+            ))}
+          </nav>
+
+          {activePanel === "receipt" && (
+            <section className="receipt-section" aria-labelledby="current-plan-heading">
+              <div className="receipt-section-title">
+                <span><Receipt size={20} weight="duotone" /></span>
+                <p>
+                  <small>Your plan now</small>
+                  <strong id="current-plan-heading">{subscription.currentPlan}</strong>
+                </p>
+                <em><Check size={13} weight="bold" /> Current</em>
+              </div>
+
+              <dl className="receipt-ledger">
+                <div><dt>Billing owner</dt><span aria-hidden="true" /><dd>{subscription.owner}</dd></div>
+                <div><dt>Quantity</dt><span aria-hidden="true" /><dd>{subscription.quantity}</dd></div>
+                <div><dt>Billing cadence</dt><span aria-hidden="true" /><dd>{subscription.cadence}</dd></div>
+                <div><dt>Next renewal</dt><span aria-hidden="true" /><dd>{subscription.renewal}</dd></div>
+                <div className="receipt-ledger-total"><dt>Expected total</dt><span aria-hidden="true" /><dd>{subscription.currentAmount} {subscription.currency}</dd></div>
+              </dl>
+
+              <div className="receipt-perforation" aria-hidden="true"><span>Plan includes</span></div>
+              <div className="receipt-feature-list">
+                {subscription.planFeatures.map((feature, index) => (
+                  <div key={feature}>
+                    <span>{index === 0 ? <Lightning size={18} weight="duotone" /> : index === 1 ? <ShieldCheck size={18} weight="duotone" /> : <Gauge size={18} weight="duotone" />}</span>
+                    <strong>{feature}</strong>
+                  </div>
+                ))}
+              </div>
+
+              <div className="receipt-usage-line">
+                <Gauge size={20} weight="duotone" />
+                <span><strong>{subscription.usage}</strong><small>{subscription.usageDetail}</small></span>
+              </div>
+            </section>
+          )}
+
+          {activePanel === "plans" && (
+            <section className="receipt-section receipt-section--plans" aria-labelledby="compare-plans-heading">
+              <div className="receipt-section-title">
+                <span><ArrowsClockwise size={20} weight="duotone" /></span>
+                <p>
+                  <small>Pull-out plan slips</small>
+                  <strong id="compare-plans-heading">{choices.length > 1 ? "Compare your options" : "Your current plan"}</strong>
+                </p>
+              </div>
+              <p className="receipt-intro">Choosing a slip prepares a review. It never changes or pays for a plan by itself.</p>
+
+              <fieldset className="receipt-plan-slips">
+                <legend className="sr-only">Choose a subscription plan to review</legend>
+                {choices.map((choice, index) => {
+                  const selected = selectedChoice.id === choice.id;
+                  return (
+                    <label
+                      key={choice.id}
+                      className={selected ? "receipt-plan-slip receipt-plan-slip--selected" : "receipt-plan-slip"}
+                      style={{ "--slip-index": index } as CSSProperties}
+                    >
+                      <input
+                        type="radio"
+                        name={`${subscription.id}-plan`}
+                        value={choice.id}
+                        checked={selected}
+                        onChange={() => {
+                          setSelectedChoiceId(choice.id);
+                          setReviewing(false);
+                        }}
+                      />
+                      <span className="receipt-plan-radio"><Check size={13} weight="bold" /></span>
+                      <span className="receipt-plan-copy">
+                        <span>
+                          <strong>{choice.name}</strong>
+                          {choice.id === "current" && <small>Current plan</small>}
+                        </span>
+                        <em>{choice.description}</em>
+                        {selected && choice.features.map((feature) => (
+                          <small key={feature}><CheckCircle size={14} weight="fill" /> {feature}</small>
+                        ))}
+                      </span>
+                      <span className="receipt-plan-price">
+                        <strong>{choice.amount}</strong>
+                        <small>{choice.currency}</small>
+                        <em>{choice.savings}</em>
+                      </span>
+                    </label>
+                  );
+                })}
+              </fieldset>
+
+              {!reviewing ? (
+                <div className="receipt-review-prompt">
+                  <p>
+                    {selectedChoice.id === "alternate"
+                      ? "A plan switch always needs its own explicit approval."
+                      : "Review the renewal amount before approving it as-is."}
+                  </p>
+                  <button type="button" className="button button--teams" onClick={() => setReviewing(true)} disabled={busy}>
+                    <span>Review {selectedChoice.id === "alternate" ? "switch" : "renewal"}</span>
+                    <CaretRight className="button-progress-icon" size={16} weight="bold" aria-hidden="true" />
+                  </button>
+                </div>
+              ) : (
+                <section className="receipt-tearoff" aria-labelledby="plan-review-title">
+                  <p className="receipt-tearoff-label">Tear-off approval slip</p>
+                  <h3 id="plan-review-title">{selectedChoice.id === "alternate" ? "Plan switch" : "Renewal"} review</h3>
+                  <div className="receipt-route">
+                    <span><small>From</small><strong>{subscription.currentPlan}</strong></span>
+                    <ArrowRight size={18} />
+                    <span><small>To</small><strong>{selectedChoice.name}</strong></span>
+                  </div>
+                  <dl className="receipt-ledger receipt-ledger--review">
+                    <div><dt>Approve now</dt><span aria-hidden="true" /><dd>{selectedChoice.amount} {selectedChoice.currency}</dd></div>
+                    <div><dt>Effective date</dt><span aria-hidden="true" /><dd>Shown in fresh vendor quote</dd></div>
+                    <div><dt>Proration / tax</dt><span aria-hidden="true" /><dd>Shown before payment</dd></div>
+                    <div><dt>Payment</dt><span aria-hidden="true" /><dd>{subscription.paymentMethod}</dd></div>
+                  </dl>
+                  <div className="receipt-review-actions" aria-busy={busy}>
+                    <button type="button" className="button button--secondary" onClick={() => setReviewing(false)} disabled={busy}>Back</button>
+                    <button type="button" className="button button--teams" onClick={confirmSelectedPlan} disabled={!canSubmitSelected || busy}>
+                      {busy ? "Working…" : selectedChoice.id === "alternate" ? `Approve switch · ${selectedChoice.amount}` : `Approve renewal · ${selectedChoice.amount}`}
+                    </button>
+                  </div>
+                  {!canSubmitSelected && (
+                    <p className="receipt-unavailable">
+                      {actionable ? "This action is not in the current approval request." : "Nothing is due today; this remains a read-only plan review."}
+                    </p>
+                  )}
+                </section>
+              )}
+            </section>
+          )}
+
+          {activePanel === "invoices" && (
+            <section className="receipt-section receipt-section--invoice" aria-labelledby="invoice-heading">
+              <div className="receipt-section-title">
+                <span><FileText size={20} weight="duotone" /></span>
+                <p>
+                  <small>Vendor paperwork</small>
+                  <strong id="invoice-heading">Next billing event</strong>
+                </p>
+              </div>
+              <div className="invoice-docket">
+                <span className="invoice-docket-state">{subscription.invoiceStatus}</span>
+                <strong>{subscription.currentAmount} {subscription.currency}</strong>
+                <p>{subscription.currentPlan} · expected {subscription.renewal}</p>
+                <dl className="receipt-ledger">
+                  <div><dt>Payment boundary</dt><span aria-hidden="true" /><dd>{subscription.paymentMethod}</dd></div>
+                  <div><dt>Invoice number</dt><span aria-hidden="true" /><dd>Loaded when sourced</dd></div>
+                  <div><dt>Vendor receipt</dt><span aria-hidden="true" /><dd>Available after completion</dd></div>
+                </dl>
+              </div>
+              <p className="invoice-empty-note">No sourced vendor invoice is loaded yet. Restock will not invent line items, tax, or proration.</p>
+            </section>
+          )}
+
+          <footer className="receipt-footer">
+            <div className="receipt-boundary">
+              <SealCheck size={18} weight="duotone" />
+              <span>
+                <strong>Selection, approval, and payment stay separate.</strong>
+                <small>{capabilities?.real_money_enabled && capabilities.teams_billing_mode === "real" ? "Live vendor billing is enabled." : "This environment will not create a real vendor charge."}</small>
+              </span>
+            </div>
+            <div className="receipt-footer-actions">
+              {activePanel !== "plans" && (
+                <button type="button" className="button button--teams" onClick={() => openPlans("current")}>
+                  {choices.length > 1
+                    ? <ArrowsClockwise size={18} weight="duotone" aria-hidden="true" />
+                    : <Receipt size={18} weight="duotone" aria-hidden="true" />}
+                  <span>{choices.length > 1 ? "Compare plans" : "View plan details"}</span>
+                </button>
+              )}
+              {activePanel !== "invoices" && (
+                <button type="button" className="button button--secondary" onClick={() => setActivePanel("invoices")}>
+                  <FileText size={18} weight="duotone" aria-hidden="true" />
+                  <span>View invoice</span>
+                </button>
+              )}
+              {notification?.actions.includes("skip") && (
+                <button type="button" className="button button--quiet-danger" onClick={() => onAction(notification, "skip")} disabled={!actionable || busy}>
+                  Skip renewal
+                </button>
+              )}
+            </div>
+            <p className="receipt-note">{subscription.note}</p>
+            <p className="receipt-explicit">“Switch plan” is always a separate decision. Renewing can never select the alternate.</p>
+            <p className="detail-action-status" role="status" aria-live="polite">{actionStatus}</p>
+          </footer>
+          <div className="receipt-torn-edge" aria-hidden="true" />
+        </article>
+      </div>
+    </main>
+  );
+}
+
+function ActivityView({
+  audit,
+  capabilities,
+  workflows,
+}: {
+  audit: AuditEntry[];
+  capabilities: Capabilities | null;
+  workflows: WorkflowRun[];
+}) {
+  const completedProducts = products.filter((product) => resolveProductLifecycle({
+    base: product.lifecycle,
+    itemId: product.itemId,
+    workflows,
+    hasPendingNotification: false,
+  }) === "restocked");
+  const currentStreak = completedProducts.length > 0 ? 7 : 0;
+  const streakDays = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date();
+    date.setHours(12, 0, 0, 0);
+    date.setDate(date.getDate() - (6 - index));
+    return {
+      date,
+      complete: index >= 7 - currentStreak,
+      today: index === 6,
+    };
+  });
+
+  return (
+    <main className="activity-page">
+      <div className="activity-heading">
+        <p className="eyebrow">Your replenishment rhythm</p>
+        <h1>A steady pantry,<br />one day at a time.</h1>
+        <p>Every check means nothing due was forgotten that day.</p>
+      </div>
+
+      <section className="restock-streaks" aria-labelledby="restock-streak-title">
+        <header className="streak-scoreboard">
+          <div className="streak-total">
+            <span className="streak-symbol" aria-hidden="true"><Fire size={28} weight="fill" /></span>
+            <span>
+              <strong>{currentStreak}</strong>
+              <small>day streak</small>
+            </span>
+          </div>
+          <div className="streak-summary">
+            <p className="eyebrow">Pantry coverage streak</p>
+            <h2 id="restock-streak-title">
+              {currentStreak > 0 ? "Seven quiet wins in a row." : "Your first streak starts here."}
+            </h2>
+            <dl className="streak-stats">
+              <div><dt>Longest</dt><dd>{currentStreak} days</dd></div>
+              <div><dt>Cycles completed</dt><dd>{completedProducts.length}</dd></div>
+              <div><dt>Items watched</dt><dd>{products.length}</dd></div>
+            </dl>
+          </div>
+        </header>
+
+        {currentStreak === 0 ? (
+          <div className="streak-empty">
+            <CalendarBlank size={24} weight="duotone" />
+            <span>
+              <strong>No covered days yet</strong>
+              <small>The first day completes after Restock handles every due item.</small>
+            </span>
+          </div>
+        ) : (
+          <>
+            <ol className="streak-week" aria-label={`${currentStreak} consecutive covered days`}>
+              {streakDays.map((day, index) => (
+                <li
+                  className={`streak-day${day.complete ? " streak-day--complete" : ""}${day.today ? " streak-day--today" : ""}`}
+                  key={day.date.toISOString()}
+                  style={{ "--streak-delay": `${index * 65}ms` } as CSSProperties}
+                >
+                  <time dateTime={day.date.toISOString().slice(0, 10)}>
+                    <small>{day.date.toLocaleDateString(undefined, { weekday: "short" })}</small>
+                    <span className="streak-day-check" aria-hidden="true">
+                      {day.complete ? <Check size={22} weight="bold" /> : day.date.getDate()}
+                    </span>
+                    <strong>{day.today ? "Today" : day.date.toLocaleDateString(undefined, { day: "numeric", month: "short" })}</strong>
+                  </time>
+                </li>
+              ))}
+            </ol>
+
+            <p className="streak-definition">
+              <ShieldCheck size={18} weight="duotone" aria-hidden="true" />
+              A day counts when every due item is restocked or consciously skipped—never when Restock acts without approval.
+            </p>
+
+            <section className="streak-badges" aria-labelledby="streak-badges-title">
+              <header>
+                <div>
+                  <p className="eyebrow">Achievements</p>
+                  <h3 id="streak-badges-title">Your pantry badges</h3>
+                </div>
+                <span>3 earned</span>
+              </header>
+              <div className="streak-badge-row">
+                <article className="streak-badge streak-badge--gold">
+                  <span className="streak-badge-medal"><Fire size={26} weight="fill" aria-hidden="true" /></span>
+                  <strong>Seven steady days</strong>
+                  <small>Earned today</small>
+                </article>
+                <article className="streak-badge streak-badge--amber">
+                  <span className="streak-badge-medal"><Package size={26} weight="duotone" aria-hidden="true" /></span>
+                  <strong>First cycle</strong>
+                  <small>One refill completed</small>
+                </article>
+                <article className="streak-badge streak-badge--green">
+                  <span className="streak-badge-medal"><Eye size={26} weight="duotone" aria-hidden="true" /></span>
+                  <strong>Watchful pantry</strong>
+                  <small>Seven items covered</small>
+                </article>
+                <article className="streak-badge streak-badge--locked">
+                  <span className="streak-badge-medal"><LockKey size={23} weight="duotone" aria-hidden="true" /></span>
+                  <strong>Fourteen-day rhythm</strong>
+                  <small>7 days to go</small>
+                </article>
+              </div>
+            </section>
+
+            <div className="streak-milestones" aria-label="Completed replenishment milestones">
+              <div className="streak-milestones-heading">
+                <span><CheckCircle size={18} weight="fill" aria-hidden="true" /></span>
+                <div>
+                  <p className="eyebrow">Recent wins</p>
+                  <strong>{completedProducts.length} completed {completedProducts.length === 1 ? "cycle" : "cycles"}</strong>
+                </div>
+              </div>
+              {completedProducts.map((product) => (
+                <article className="streak-milestone" key={product.id}>
+                  <span className="streak-product-image"><img src={product.image} alt="" /></span>
+                  <span>
+                    <strong>{product.name}</strong>
+                    <small>Restocked · next expected {product.nextDue}</small>
+                  </span>
+                  <span className="streak-milestone-cadence">
+                    <ArrowsClockwise size={16} weight="duotone" aria-hidden="true" />
+                    {product.cadence}
+                  </span>
+                </article>
+              ))}
+            </div>
+          </>
+        )}
+      </section>
+
+      <details className="environment-disclosure">
+        <summary>How this environment works</summary>
+        <div>
+          <span>Prava</span><strong>{humanize(capabilities?.prava_mode || "unavailable")}</strong>
+          <span>Home catalog</span><strong>{humanize(capabilities?.home_merchant_mode || "unavailable")}</strong>
+          <span>Home payment</span><strong>{humanize(capabilities?.home_payment_mode || "unavailable")}</strong>
+          <span>Teams billing</span><strong>{humanize(capabilities?.teams_billing_mode || "unavailable")}</strong>
         </div>
-        <div className="decision-time"><span>Jul 21</span><small>Renewal</small></div>
-      </header>
-      <div className="plan-comparison" role="group" aria-label="TeamTool renewal choices">
-        <div className="plan-option plan-option--current"><span>Renew as-is</span><strong>$29</strong><small>Monthly · current plan</small></div>
-        <div className="plan-option"><span>Switch plan</span><strong>$24</strong><small>Annual billing · saves $60/year</small></div>
-      </div>
-      <div className="decision-actions decision-actions--teams">
-        {notification.actions.map((action) => (
-          <button
-            key={action}
-            type="button"
-            className={`button ${action === "renew_as_is" ? "button--teams" : action === "skip" ? "button--quiet-danger" : "button--secondary"}`}
-            onClick={() => onAction(notification, action)}
-            disabled={!actionable}
-          >
-            {labels[action] || humanize(action)}
-          </button>
-        ))}
-      </div>
-    </article>
-  );
-}
+      </details>
 
-function SecondaryDecision({ kind }: { kind: "filter" | "paper" }) {
-  const data = kind === "filter"
-    ? { image: "/app/assets/water-filter.png", title: "RO water filter · due in 5 days", detail: "Replacement cartridge · 1 unit", price: "₹799 from Zepto" }
-    : { image: "/app/assets/coffee-pouch.png", title: "Printer paper · monitored", detail: "A4 · 500 sheets", price: "₹650 last observed" };
-  return (
-    <article className="decision-row">
-      <img src={data.image} alt="" className="row-image" />
-      <div><h3>{data.title}</h3><p>{data.detail}</p><small>{data.price}</small></div>
-      <span className="row-state">Watching</span>
-      <button className="icon-button" type="button" aria-label={`Open ${data.title}`}><CaretDown size={18} /></button>
-    </article>
-  );
-}
-
-function ActivityView({ audit }: { audit: AuditEntry[] }) {
-  return (
-    <section className="activity-view" aria-labelledby="activity-title">
-      <div className="page-heading">
-        <div><p className="section-kicker">System record</p><h1 id="activity-title">Activity</h1><p>Every decision and payment boundary, in order.</p></div>
-      </div>
-      <div className="activity-table">
+      <section className="activity-list" aria-label="Audit history">
         {audit.length === 0 ? (
-          <div className="empty-state"><Receipt size={28} /><h2>No live activity yet</h2><p>The audit trail will appear after the first workflow runs.</p></div>
+          <div className="activity-empty">
+            <Receipt size={26} />
+            <strong>No live activity yet</strong>
+            <p>The first trigger, decision, and payment boundary will appear here.</p>
+          </div>
         ) : audit.map((entry) => (
-          <div className="activity-entry" key={entry.audit_id}>
-            <CheckCircle size={19} weight="fill" />
+          <article className="activity-entry" key={entry.audit_id}>
+            <span className="activity-icon"><CheckCircle size={18} weight="fill" /></span>
             <div><strong>{humanize(entry.event_type)}</strong><small>{new Date(entry.created_at).toLocaleString()}</small></div>
             <ModeBadge mode={Object.values(entry.modes)[0] || "sandbox"} />
-          </div>
+          </article>
         ))}
-      </div>
-    </section>
-  );
-}
-
-function WorkflowRail({ notification, audit }: { notification?: Notification; audit: AuditEntry[] }) {
-  const status = notification?.status || "preview";
-  const completed = !["preview", "pending"].includes(status);
-  const steps = [
-    { label: "Detected", detail: "Inventory signal crossed", state: "done" },
-    { label: "Decision requested", detail: "Approval needed", state: completed ? "done" : "current" },
-    { label: "Approved", detail: completed ? humanize(status) : "Waiting", state: completed ? "current" : "waiting" },
-    { label: "Order placed (simulated)", detail: "Waiting", state: "waiting" },
-    { label: "Closed", detail: "Waiting", state: "waiting" },
-  ];
-  return (
-    <aside className="workflow-rail" aria-label="Workflow and audit detail">
-      <section className="rail-section">
-        <div className="rail-heading"><div><h2>Workflow</h2><p>Decision timeline</p></div><Info size={18} /></div>
-        <ol className="workflow-steps">
-          {steps.map((step) => (
-            <li className={`workflow-step workflow-step--${step.state}`} key={step.label}>
-              <span className="step-marker" aria-hidden="true">{step.state === "done" ? <Check size={12} weight="bold" /> : ""}</span>
-              <div><strong>{step.label}</strong><small>{step.detail}</small></div>
-            </li>
-          ))}
-        </ol>
       </section>
-      <section className="rail-section audit-section">
-        <h2>Audit history</h2>
-        <div className="rail-audit-list">
-          {audit.length === 0 ? (
-            <>
-              <div><span className="audit-dot" /><p><strong>Decision requested</strong><small>Today, 10:24 AM · Restock</small></p></div>
-              <div><span className="audit-dot" /><p><strong>Trigger detected</strong><small>Today, 10:24 AM · Automation</small></p></div>
-            </>
-          ) : audit.slice(0, 4).map((entry) => (
-            <div key={entry.audit_id}><span className="audit-dot" /><p><strong>{humanize(entry.event_type)}</strong><small>{new Date(entry.created_at).toLocaleString()}</small></p></div>
-          ))}
-        </div>
-      </section>
-    </aside>
+    </main>
   );
 }
 
@@ -374,13 +2028,10 @@ export function LoginScreen({ onLogin }: { onLogin: (password: string) => Promis
   return (
     <main className="login-shell">
       <section className="login-card" aria-labelledby="login-title">
-        <a className="brand-lockup login-brand" href="/app" aria-label="Restock home">
-          <img src="/app/assets/restock-mark.png" alt="" className="brand-mark" />
-          <span>Restock</span>
-        </a>
-        <p className="section-kicker">Private workspace</p>
-        <h1 id="login-title">Welcome back</h1>
-        <p className="login-copy">Sign in to review replenishment and billing decisions.</p>
+        <Brand />
+        <p className="eyebrow">Private pantry</p>
+        <h1 id="login-title">Welcome back.</h1>
+        <p className="login-copy">Sign in to see what needs attention.</p>
         <form onSubmit={(event) => void submit(event)}>
           <label htmlFor="solo-password">Password</label>
           <input
@@ -395,7 +2046,7 @@ export function LoginScreen({ onLogin }: { onLogin: (password: string) => Promis
           />
           {error && <p className="login-error" role="alert">{error}</p>}
           <button className="login-submit" type="submit" disabled={busy || !password}>
-            {busy ? "Signing in…" : "Sign in"}
+            {busy ? "Signing in…" : "Enter pantry"}
           </button>
         </form>
         <p className="login-security"><LockKey size={15} /> Short-lived session · Password never stored</p>
@@ -408,35 +2059,63 @@ function AuthCheckingScreen() {
   return (
     <main className="login-shell" aria-busy="true">
       <section className="login-card login-card--checking">
-        <a className="brand-lockup login-brand" href="/app" aria-label="Restock home">
-          <img src="/app/assets/restock-mark.png" alt="" className="brand-mark" />
-          <span>Restock</span>
-        </a>
-        <p className="login-copy">Checking your session…</p>
+        <Brand />
+        <p className="login-copy">Opening your pantry…</p>
       </section>
     </main>
   );
 }
 
 export default function App() {
-  const [view, setView] = useState<View>("home");
+  const [view, setView] = useState<View>(initialViewFromUrl);
+  const [selectedProduct, setSelectedProduct] = useState<PantryProduct | null>(null);
+  const [selectedSubscription, setSelectedSubscription] = useState<SubscriptionProduct | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>(previews);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
+  const [workflows, setWorkflows] = useState<WorkflowRun[]>([]);
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
-  const [status, setStatus] = useState("Preview ready");
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [tenants, setTenants] = useState<TenantSummary[]>([]);
+  const [foregroundNotification, setForegroundNotification] = useState<Notification | null>(null);
+  const [status, setStatus] = useState("Ready");
+  const [actionFeedback, setActionFeedback] = useState("");
+  const [busyNotificationId, setBusyNotificationId] = useState<string | null>(null);
+  const busyNotificationRef = useRef<string | null>(null);
+  const lastProductId = useRef<string | null>(null);
+  const lastSubscriptionId = useRef<string | null>(null);
+  const [soundOn, setSoundOnState] = useState(() => window.localStorage.getItem("restock-sound") === "on");
   const [authState, setAuthState] = useState<"checking" | "required" | "ready">(
     import.meta.env.DEV ? "ready" : "checking",
   );
+
+  useEffect(() => {
+    const images = revealAssets.map((src) => {
+      const image = new Image();
+      image.decoding = "async";
+      image.src = src;
+      return image;
+    });
+    void Promise.allSettled(images.map((image) => image.decode()));
+  }, []);
 
   const refresh = async () => {
     try {
       const caps = await api.capabilities();
       setCapabilities(caps);
-      const [pending, events] = await Promise.all([api.notifications(), api.audit()]);
+      const [pending, events, workflowRuns, currentUser, currentTenants] = await Promise.all([
+        api.notifications(),
+        api.audit(),
+        api.workflows(),
+        api.me().catch(() => null),
+        api.tenants().catch(() => []),
+      ]);
       if (pending.length) setNotifications(pending);
       setAudit(events);
+      setWorkflows(workflowRuns);
+      if (currentUser) setProfile(currentUser);
+      setTenants(currentTenants);
       setAuthState("ready");
-      setStatus(pending.length ? `${pending.length} decision${pending.length === 1 ? "" : "s"} waiting` : "Preview ready");
+      setStatus(pending.length ? `${pending.length} decision${pending.length === 1 ? "" : "s"} waiting` : "Everything is being watched");
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         await clearApiSessionToken();
@@ -444,7 +2123,7 @@ export default function App() {
         setStatus("Sign in required");
         return;
       }
-      setStatus("Preview mode · API unavailable");
+      setStatus("Local preview ready");
     }
   };
 
@@ -463,12 +2142,27 @@ export default function App() {
     };
   }, []);
 
-  const track: Track = view === "teams" ? "teams" : "home";
-  const visible = useMemo(
-    () => notifications.filter((notification) => (notification.track || (notification.actions.includes("switch_plan") ? "teams" : "home")) === track),
-    [notifications, track],
+  const homeNotification = useMemo(
+    () => notifications.find((notification) => (notification.track || (notification.actions.includes("switch_plan") ? "teams" : "home")) === "home"),
+    [notifications],
   );
-  const selected = visible[0];
+  const teamsNotification = useMemo(
+    () => notifications.find((notification) => (notification.track || (notification.actions.includes("switch_plan") ? "teams" : "home")) === "teams"),
+    [notifications],
+  );
+
+  useEffect(() => {
+    if (selectedProduct || selectedSubscription || foregroundNotification) return;
+    const candidate = notifications.find((notification) => ["pending", "preview"].includes(notification.status));
+    if (!candidate) return;
+    const presentationKey = `restock-notification-shown:${candidate.notification_id}:${candidate.status}`;
+    if (window.sessionStorage.getItem(presentationKey)) return;
+    const timer = window.setTimeout(() => {
+      window.sessionStorage.setItem(presentationKey, "true");
+      setForegroundNotification(candidate);
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [foregroundNotification, notifications, selectedProduct, selectedSubscription]);
 
   if (authState === "checking") return <AuthCheckingScreen />;
 
@@ -480,53 +2174,180 @@ export default function App() {
     }} />;
   }
 
-  const act = async (notification: Notification, action: string, adjustedAmount?: string) => {
-    if (notification.status === "preview") {
-      setNotifications((items) => items.map((item) => item.notification_id === notification.notification_id ? { ...item, status: action } : item));
-      setStatus(`Preview recorded · ${humanize(action)}`);
+  const sound = (kind: SoundKind) => {
+    if (soundOn) playInterfaceSound(kind);
+  };
+
+  const setSoundOn = (enabled: boolean) => {
+    setSoundOnState(enabled);
+    window.localStorage.setItem("restock-sound", enabled ? "on" : "off");
+    if (enabled) playInterfaceSound("confirm");
+  };
+
+  const setViewWithSound = (nextView: View) => {
+    sound("navigate");
+    setSelectedProduct(null);
+    setSelectedSubscription(null);
+    setActionFeedback("");
+    setView(nextView);
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", nextView);
+    window.history.replaceState({}, "", url);
+  };
+
+  const openProduct = (product: PantryProduct) => {
+    lastProductId.current = product.id;
+    setActionFeedback("");
+    sound("open");
+    setSelectedProduct(product);
+    window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
+  };
+
+  const closeProduct = () => {
+    sound("close");
+    setSelectedProduct(null);
+    window.requestAnimationFrame(() => {
+      if (!lastProductId.current) return;
+      document.querySelector<HTMLButtonElement>(`[data-product-id="${lastProductId.current}"]`)?.focus();
+    });
+  };
+
+  const openSubscription = (subscription: SubscriptionProduct) => {
+    lastSubscriptionId.current = subscription.id;
+    setActionFeedback("");
+    sound("open");
+    setSelectedSubscription(subscription);
+    window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
+  };
+
+  const openNotification = (notification: Notification) => {
+    setForegroundNotification(null);
+    const isTeams = notification.track === "teams" || notification.actions.includes("switch_plan");
+    if (isTeams) {
+      setViewWithSound("teams");
+      openSubscription(subscriptions.find((subscription) => subscription.id === "copilot") || subscriptions[0]);
       return;
     }
+    setViewWithSound("home");
+    openProduct(products.find((product) => product.id === "coffee") || products[0]);
+  };
+
+  const closeSubscription = () => {
+    sound("close");
+    setSelectedSubscription(null);
+    window.requestAnimationFrame(() => {
+      if (!lastSubscriptionId.current) return;
+      document.querySelector<HTMLButtonElement>(`[data-subscription-id="${lastSubscriptionId.current}"]`)?.focus();
+    });
+  };
+
+  const act = async (notification: Notification, action: string, adjustedAmount?: string) => {
+    if (busyNotificationRef.current) return;
+    busyNotificationRef.current = notification.notification_id;
+    setBusyNotificationId(notification.notification_id);
+    sound("submit");
+    let approvalWindow: Window | null = null;
     try {
+      if (notification.status === "preview") {
+        setNotifications((items) => items.map((item) => item.notification_id === notification.notification_id ? { ...item, status: action } : item));
+        setStatus(`${humanize(action)} recorded`);
+        setActionFeedback(`${humanize(action)} recorded. Restock will not take another action without a new decision.`);
+        sound("confirm");
+        return;
+      }
+      if (["approve", "renew_as_is", "switch_plan"].includes(action)) {
+        approvalWindow = window.open("about:blank", "_blank");
+        if (approvalWindow) {
+          approvalWindow.opener = null;
+          approvalWindow.document.title = "Restock secure approval";
+          approvalWindow.document.body.textContent = "Opening secure passkey approval…";
+        }
+      }
       const run = await api.action(notification.run_id, action, adjustedAmount);
       if (run.state === "passkey_pending") {
         const { approval_url } = await api.approvalUrl(notification.run_id);
-        window.open(approval_url, "_blank", "noopener,noreferrer");
+        if (approvalWindow) approvalWindow.location.replace(approval_url);
+        else window.location.assign(approval_url);
         setStatus("Passkey opened · Return after approval");
+        setActionFeedback("Passkey approval opened in a new tab. Return here after approving.");
       } else {
+        approvalWindow?.close();
         setStatus(`Workflow · ${humanize(run.state)}`);
+        setActionFeedback(`Workflow updated: ${humanize(run.state)}.`);
       }
+      sound("confirm");
       await refresh();
     } catch (error) {
+      approvalWindow?.close();
       if (error instanceof ApiError && error.status === 401) {
         await clearApiSessionToken();
         setAuthState("required");
         setStatus("Sign in required");
+        setActionFeedback("Your session expired. Sign in again to continue.");
         return;
       }
-      setStatus(error instanceof Error ? error.message : "Action failed");
+      const message = error instanceof Error ? error.message : "Action failed";
+      setStatus(message);
+      setActionFeedback(message);
+    } finally {
+      busyNotificationRef.current = null;
+      setBusyNotificationId(null);
     }
   };
 
   return (
-    <div className="app-frame">
-      <AppHeader capabilities={capabilities} />
-      <Sidebar view={view} setView={setView} capabilities={capabilities} />
-      <main className="main-content">
-        {view === "activity" ? (
-          <ActivityView audit={audit} />
-        ) : (
-          <>
-            <DecisionHeader track={track} status={status} />
-            <section className="decision-list" aria-label={`${track} decisions`}>
-              {selected && track === "home" && <HomeDecision capabilities={capabilities} notification={selected} onAction={(notification, action, amount) => void act(notification, action, amount)} />}
-              {selected && track === "teams" && <TeamsDecision notification={selected} onAction={(notification, action) => void act(notification, action)} />}
-              {track === "home" && <><SecondaryDecision kind="filter" /><SecondaryDecision kind="paper" /></>}
-            </section>
-            <footer className="list-footer"><span>All times in Asia/Kolkata (IST)</span><span>Updated automatically</span></footer>
-          </>
-        )}
-      </main>
-      <WorkflowRail notification={selected} audit={audit} />
+    <div className="app-shell">
+      <AppHeader
+        view={view}
+        setView={setViewWithSound}
+        soundOn={soundOn}
+        setSoundOn={setSoundOn}
+        notifications={notifications.filter((notification) => ["pending", "preview"].includes(notification.status))}
+        profile={profile}
+        tenant={tenants[0] || null}
+        capabilities={capabilities}
+        onOpenNotification={openNotification}
+      />
+      <p className="sr-only" role="status" aria-live="polite">{status}</p>
+      {foregroundNotification && !selectedProduct && !selectedSubscription && (
+        <ForegroundNotificationSlip
+          notification={foregroundNotification}
+          onClose={() => setForegroundNotification(null)}
+          onOpen={() => openNotification(foregroundNotification)}
+        />
+      )}
+      {selectedProduct && view === "home" ? (
+        <ProductDetail
+          product={selectedProduct}
+          notification={selectedProduct.id === "coffee" ? homeNotification : undefined}
+          capabilities={capabilities}
+          busy={busyNotificationId === homeNotification?.notification_id}
+          actionStatus={actionFeedback}
+          onBack={closeProduct}
+          onAction={(notification, action, amount) => void act(notification, action, amount)}
+        />
+      ) : view === "home" ? (
+        <LivingPantry
+          onOpen={openProduct}
+          onPreview={() => sound("hover")}
+          workflows={workflows}
+          notification={homeNotification}
+        />
+      ) : selectedSubscription && view === "teams" ? (
+        <SubscriptionDetail
+          subscription={selectedSubscription}
+          notification={selectedSubscription.id === "copilot" ? teamsNotification : undefined}
+          capabilities={capabilities}
+          busy={busyNotificationId === teamsNotification?.notification_id}
+          actionStatus={actionFeedback}
+          onBack={closeSubscription}
+          onAction={(notification, action) => void act(notification, action)}
+        />
+      ) : view === "teams" ? (
+        <TeamsGallery onOpen={openSubscription} onPreview={() => sound("hover")} />
+      ) : (
+        <ActivityView audit={audit} capabilities={capabilities} workflows={workflows} />
+      )}
     </div>
   );
 }

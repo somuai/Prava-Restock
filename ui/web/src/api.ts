@@ -12,10 +12,18 @@ export type Capabilities = {
 export type Notification = {
   notification_id: string;
   run_id: string;
+  item_id?: string;
   message: string;
   actions: string[];
   status: string;
   track?: "home" | "teams";
+};
+
+export type WorkflowRun = {
+  run_id: string;
+  item_id: string;
+  state: string;
+  updated_at?: string;
 };
 
 export type AuditEntry = {
@@ -24,6 +32,22 @@ export type AuditEntry = {
   payload: Record<string, unknown>;
   modes: Record<string, string>;
   created_at: string;
+};
+
+export type UserProfile = {
+  user_id: string;
+  display_name: string;
+  monthly_cap: string;
+  per_item_cap: string;
+  per_transaction_cap: string;
+  created_at: string;
+};
+
+export type TenantSummary = {
+  tenant_id: string;
+  name: string;
+  kind: string;
+  role?: string;
 };
 
 import { clearSessionToken, isNative, loadSessionToken, saveSessionToken } from "./native";
@@ -97,7 +121,10 @@ export const api = {
     return body as { access_token: string; token_type: "bearer"; expires_in: number };
   },
   capabilities: () => read<Capabilities>("/capabilities"),
+  me: () => read<UserProfile>("/api/v1/me"),
+  tenants: () => read<TenantSummary[]>("/api/v1/tenants"),
   notifications: () => read<Notification[]>("/api/v1/notifications/pending"),
+  workflows: () => read<WorkflowRun[]>("/api/v1/workflows"),
   audit: () => read<AuditEntry[]>("/api/v1/audit"),
   action: async (runId: string, action: string, adjustedAmount?: string) => {
     const response = await fetch(endpoint(`/api/v1/workflows/${runId}/actions`), {

@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+.DS_Store
 .venv/
 __pycache__/
 *.py[cod]
@@ -14,3 +15,4 @@ ui/web/dist/
 logs/notifications.json
 logs/merchant_checkouts.json
 logs/restock.db*
+.sites-package/
