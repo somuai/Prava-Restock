@@ -2123,6 +2123,10 @@ export default function App() {
         setStatus("Sign in required");
         return;
       }
+      // A frontend-only deployment (for example, a private Sites review)
+      // deliberately has no API origin. Keep the seeded, explicitly disclosed
+      // preview usable instead of leaving the shell on "Opening your pantry…".
+      setAuthState("ready");
       setStatus("Local preview ready");
     }
   };
