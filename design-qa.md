@@ -171,6 +171,20 @@ No actionable P0, P1, or P2 visual or interaction issue remains in this pass.
 
 Final result: passed
 
+## Decision control legibility
+
+- Previous state: Approve, Adjust, and Skip used the 9px uppercase Geist Pixel
+  metadata treatment, which was too small for primary actions.
+- Final state: all three actions use Inter at 13.5px, weight 650, sentence
+  case, and a 52px minimum control height.
+- Browser verification:
+  `docs/design-research/decision-controls/approve-adjust-skip-larger.jpg`.
+- Frontend production build: passed.
+- Frontend unit tests: 8 passed.
+- Browser-computed styles matched the intended values for all three controls.
+
+Final result: passed
+
 ## Home and Teams hierarchy cleanup
 
 ### Comparison target

@@ -1011,6 +1011,15 @@ button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visibl
   gap: 9px;
   margin-top: 9px;
 }
+.detail-actions .button {
+  min-height: 52px;
+  padding-inline: 20px;
+  font-family: "Inter Variable", "Inter", sans-serif;
+  font-size: 13.5px;
+  font-weight: 650;
+  letter-spacing: -.01em;
+  text-transform: none;
+}
 .action-boundary {
   margin: 24px 0 0;
   color: #6d4a1c;
