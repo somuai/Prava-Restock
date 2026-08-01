@@ -133,10 +133,10 @@ See §10, Distribution and surface, for the PWA-first launch surface, optional c
 | Boundary | Built capability | Current public activation |
 | --- | --- | --- |
 | Trigger, orchestration, spend caps, workflow recovery | Real code with credential-free CI coverage | Active; `demo_mode=false` |
-| Prava | Real sandbox Session creation, passkey handoff, polling, credential normalization, and status reporting are implemented | Sandbox configured on the public service; no production money |
+| Prava | Real sandbox Session creation, passkey handoff, polling, credential normalization, and status reporting are implemented | Sandbox configured; the assigned card is currently blocked at Prava's Security Check Failed / No Passkey step; no production money |
 | Zepto/Swiggy | Real catalog/cart/quote adapters and an explicit browser-payment executor | Catalog and final payment both `disclosed_mock` on the public service |
 | Restock Teams billing | Hosted-link/manual-required workflow and one-time hosted-invoice adapter; Prava recurring charging is documented but not integrated or sandbox-proved by Restock | Fulfillment `disclosed_mock`; recurring disabled |
-| Slack | Bolt/Socket Mode adapter built; private-workspace delivery/callback evidence recorded | Persistent deployed listener with rotated credentials still gated |
+| Slack | Bolt/Socket Mode adapter built; private-workspace delivery/callback evidence recorded | Persistent deployed listener active with rotated credentials |
 | WhatsApp | Cloud API template/webhook adapter built | Optional post-launch; deliberately outside the launch/submission gate |
 | Native | Capacitor Android/iOS wrappers built and simulator-tested | Physical-device/store distribution not activated |
 
@@ -553,11 +553,11 @@ Design commitments:
 | Risk | Mitigation |
 | --- | --- |
 | **RESOLVED** — Prava markets “US & SEA” coverage, but its skill repo ships Zepto/Swiggy (India) integrations — previously unclear if live for hackathon sandbox use | Merchant flows are confirmed buildable per Prava’s team directly, not just the docs. Shubham Kukreti confirmed via Discord on 17 July 2026: "Merchants aren't restricted, so you can build flows for things like Zepto or Swiggy." |
-| Real-card testing (sandbox or production) requires a Visa card issued in US/Canada/Hong Kong/Singapore, which the builder does not currently hold | Use Prava's documented sandbox test cards for the Session/passkey/credential proof. They have no geography restriction, but their expected decline at a real merchant is not a successful live charge. Defer real-money testing to an operator-approved controlled purchase; Prava has offered to help source a compatible card at that stage. |
+| Real-card testing (sandbox or production) requires a Visa card issued in US/Canada/Hong Kong/Singapore, which the builder does not currently hold | Use Prava's documented sandbox test cards for the Session/passkey/credential proof. They have no geography restriction, although the currently assigned card is separately provider-blocked at Security Check Failed / No Passkey. Their expected decline at a real merchant is not a successful live charge. Defer real-money testing to an operator-approved controlled purchase; Prava has offered to help source a compatible card at that stage. |
 | Forecasting looks like a science project and eats the clock | Ship the day-counter first; add smoothing only if time remains after the payment flow works end-to-end |
 | Passkey/biometric approval doesn’t demo well on a shared screen | Scripted, clearly-labeled fallback ready for the recorded demo |
 | Judges read “proactive” as unsafe or spammy | Make spend caps and the approve/adjust/skip step visually central — control is the pitch, not autonomy for its own sake |
-| Teams track reads as “not really using Prava” since billing is mocked | State plainly: the trigger, the Prava mandate, and the passkey approval are real; only the SaaS billing call is simulated |
+| Teams track reads as “not really using Prava” since billing is mocked | State plainly: the trigger and shared Prava Session integration are real code, the currently assigned card is provider-blocked before mandate/passkey proof, and SaaS fulfillment remains simulated until its separate boundary is integrated and verified |
 
 **Merchant choice:** Zepto was confirmed as an explicit, deliberate choice
 (Prava, Discord, 22–23 July 2026: "any merchant you can target totally on your
@@ -589,7 +589,7 @@ credentials or approval URLs.
 
 ### 24. Success metrics for the demo
 
-- One end-to-end Prava flow per track, agent-initiated, with no user-typed purchase request. Success = (1) intent/session created, (2) one-time credential generated, (3) credential correctly populated into the real checkout form via browser automation, (4) Pay attempt fails specifically due to test-card status — not due to a bug in steps 1–3. Sandbox transactions cannot succeed against any real merchant because the test card will be declined; this is expected and fully acceptable for judging.
+- One end-to-end Prava flow per track, agent-initiated, with no user-typed purchase request. Success = (1) intent/session created, (2) one-time credential generated, (3) credential correctly populated into the real checkout form via browser automation, (4) Pay attempt fails specifically due to test-card status — not due to a bug in steps 1–3. Sandbox transactions cannot succeed against any real merchant because the test card will be declined; this is expected and fully acceptable for judging. This remains the target bar: the currently assigned sandbox card is still blocked earlier at Prava's Security Check Failed / No Passkey step and is not claimed as an achieved end-to-end result.
 - At least 2 of the 3–5 Home items reordered autonomously during the judged walkthrough,
 plus the one Teams subscription renewal proposal.
 - A visible, believable savings number in the audit log for both tracks.
@@ -709,8 +709,10 @@ decision. The hard constraints remain enforced by code-level Guardrails. See §1
   the documented Session REST API and polls payment results; there is no mandate webhook.
 - RESOLVED — Zepto and Swiggy MCP tool surfaces are represented by the locked
   adapters; provider OAuth/mobile-OTP activation remains deployment-specific.
-- RESOLVED — Prava’s sandbox test data was used for the Session/passkey proof;
-  expected merchant decline is disclosed rather than presented as a charge.
+- PROVIDER-BLOCKED — Prava's sandbox test data creates the hosted Session, but
+  the currently assigned card stops at Security Check Failed / No Passkey.
+  Passkey provisioning or the missing enrollment step must be resolved before
+  claiming a completed Session/passkey proof; no merchant charge is claimed.
 - Whether Prava mandates expose a configurable TTL/expiry we should set explicitly on
 Intent creation, or whether it’s fixed by Prava.
 - RESOLVED AT PLATFORM CONTRACT; RESTOCK INTEGRATION PENDING — Prava now

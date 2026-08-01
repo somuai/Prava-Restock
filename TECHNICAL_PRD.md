@@ -315,7 +315,7 @@ report_status(session_ref, txn_ref_id, txn_status,
     # Required after every terminal merchant payment attempt.
 ```
 
-**Known platform fact for production planning:** Prava requires a Visa card issued in the US, Canada, Hong Kong, or Singapore for any real card used in the flow, whether in sandbox or production. Prava's own documented sandbox test cards are unaffected and complete a full simulated flow with no geography restriction; use those for all hackathon build and demo work. See the resolved merchant-access and real-card-testing entries in `PRD.md` §21, "Risks and mitigations."
+**Known platform fact for production planning:** Prava requires a Visa card issued in the US, Canada, Hong Kong, or Singapore for any real card used in the flow, whether in sandbox or production. Prava's documented sandbox cards are not subject to that geography rule and are the intended hackathon test path. The currently assigned card is nevertheless blocked by a separate Security Check Failed / No Passkey provisioning issue, so Restock does not claim that its present card completed the documented simulated flow. See the merchant-access and real-card-testing entries in `PRD.md` §21, "Risks and mitigations."
 
 ### 9.2 Merchant / billing execution
 
@@ -418,12 +418,15 @@ Every durable state transition writes a sanitized domain-audit entry with run, u
   implements the documented Session REST endpoints and normalizes the polling
   payload in `payments/prava_client.py`.
 - [x] **RESOLVED — Zepto merchant contract:** the official skill uses `mcp-remote https://mcp.zepto.co.in/mcp` with OAuth/mobile OTP and publishes tools for saved addresses, product search, cart mutation/view, payment methods, online-order preview/creation, payment status, and order history. Final payment-link execution is operator-controlled because no merchant sandbox is documented.
-- [x] **RESOLVED** — Prava's documented sandbox test data was used for the
-  Session/passkey proof. Its expected real-merchant decline is part of the
-  disclosed success criterion, not a completed charge.
+- [ ] **PROVIDER-BLOCKED** — Prava's documented sandbox test data creates a
+  real hosted Session, but the currently assigned card reaches **Security
+  Check Failed** and then appears as **No Passkey**. Passkey provisioning or
+  any missing enrollment/OTP step must be resolved with Prava before Restock
+  claims a completed Session/passkey proof. A real merchant charge is not part
+  of this sandbox claim.
 - [x] **RESOLVED** — Restock sends `effective_until_minutes` on Session
   creation (15 minutes by default) and treats expiry as terminal.
-- [x] **RESOLVED — platform fact:** Prava requires a Visa card issued in the US, Canada, Hong Kong, or Singapore for any real card used in the flow, whether in sandbox or production. Prava's own documented sandbox test cards are unaffected and complete a full simulated flow with no geography restriction; use those for the hackathon. For production, Prava has offered: "reach out to us and we'll sort you out with a compatible card".
+- [x] **RESOLVED — platform fact:** Prava requires a Visa card issued in the US, Canada, Hong Kong, or Singapore for any real card used in the flow, whether in sandbox or production. Prava's documented sandbox cards are not subject to that geography rule and remain the intended hackathon path; the currently assigned card's Security Check Failed / No Passkey state is tracked separately as a provider provisioning blocker. For production, Prava has offered: "reach out to us and we'll sort you out with a compatible card".
 - [x] **RESOLVED AT THE PLATFORM CONTRACT; RESTOCK INTEGRATION PENDING:** Prava
   now documents `POST /v1/mandates/{id}/charge` for active mandates and a
   corresponding terminal report operation. The charge is idempotent when a

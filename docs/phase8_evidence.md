@@ -28,6 +28,6 @@ payment-order creation, because those operations can have side effects.
 
 ## Disclosure boundary
 
-- Real: Prava sandbox approval and Zepto OAuth/catalog/address/exact-SKU price/cart/quote operations.
+- Real: Prava sandbox Session creation and hosted approval handoff, plus Zepto OAuth/catalog/address/exact-SKU price/cart/quote operations. The currently assigned Prava card is provider-blocked before passkey approval, as recorded in Phase 7 evidence.
 - Disclosed simulation: final Zepto payment execution unless an operator explicitly enables the compatible-card live path.
 - Restock's API exposes this distinction through `/capabilities`.
