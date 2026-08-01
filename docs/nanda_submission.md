@@ -23,6 +23,14 @@ human to open Prava's short-lived card/passkey URL and will be run before the
 pull request is marked ready. The test is marked `live`, so normal CI never
 attempts an external transaction.
 
+On 2 August 2026, the adapter successfully created a fresh Prava sandbox
+Session, but the hosted collection page stopped at **Verification Unavailable**
+before card entry or passkey approval. The polling test was cancelled rather
+than treating the provider error as a success or waiting for expiry. No card
+data, one-time credential, merchant checkout, or real money was involved. The
+draft pull request remains draft until a retry completes the required sandbox
+transaction.
+
 The adapter accurately preserves the refund boundary: Prava's official FAQ
 says it exposes no separate refund endpoint, so `refund` delegates to the
 destination merchant and fails closed if no merchant refund handler is
