@@ -154,4 +154,4 @@ def test_slack_outbox_migration_reaches_new_head(tmp_path, monkeypatch) -> None:
     assert "auth_login_throttles" in table_names
     assert "auth_identities" in table_names
     with database.engine.connect() as connection:
-        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20260801_10"
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20260801_11"

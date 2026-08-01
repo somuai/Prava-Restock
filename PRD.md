@@ -204,7 +204,7 @@ User <--approve/adjust/skip--> Restock Backend <--session/polling--> Prava
 | Orchestrator agent | Tool-using loop (OpenAI Agents SDK) deciding what/when to propose, sequencing Prava + merchant calls | Scheduled tick, not a chat handler; trigger-type-agnostic |
 | Prava client | Server-side Session creation, payment-result polling, one-time credential custody, and terminal status reporting | The browser Prava flow owns passkey approval; no mandate webhook is assumed |
 | Merchant client | Zepto/Swiggy MCP catalog/cart/quote operations plus a separate Playwright payment boundary; one-time hosted invoice support for Teams | Catalog truth and final-payment execution expose independent real/simulated modes |
-| Workflow store | SQLite for local/demo use; Postgres-compatible SQLAlchemy repositories and Alembic migrations through `20260801_10` for production | Persists references and state only, never raw payment credentials or approval URLs |
+| Workflow store | SQLite for local/demo use; Postgres-compatible SQLAlchemy repositories and Alembic migrations through `20260801_11` for production | Persists references and state only, never raw payment credentials or approval URLs |
 | UI and channels | PWA decision inbox plus Slack and WhatsApp adapters | Built capability is distinct from provider activation; `/capabilities` is authoritative at runtime |
 
 See §10, Distribution and surface, for why this architecture is independent of every merchant app and where users actually interact with Restock.
@@ -333,7 +333,7 @@ AuditLogEntry
 This public model explains the agent contract. The durable database additionally
 contains tenants, memberships, invitations, consent, workflow runs, quotes,
 notification actions, idempotency records, delivery outboxes, checkout attempts,
-leases, and completion effects. The Alembic chain through `20260801_10` is the
+leases, and completion effects. The Alembic chain through `20260801_11` is the
 authoritative production schema.
 
 ### 13. Trigger sources
@@ -570,7 +570,7 @@ restaurant-delivery platform like Zomato or Swiggy's core product.
 The implementation separates the FastAPI service, leased scheduler worker, and
 optional channel listener. SQLite is the local/demo default. Production uses
 the Postgres-compatible repository and Alembic migrations through
-`20260801_10`; the public deployment already uses managed Postgres. A separate
+`20260801_11`; the public deployment already uses managed Postgres. A separate
 worker, final production secrets, and a restore drill against the final target
 remain external cutover gates. Real-money checkout stays disabled until an
 operator explicitly authorizes a controlled purchase.
@@ -580,7 +580,7 @@ operator explicitly authorizes a controlled purchase.
 A structured, sanitized log line is emitted at every workflow transition.
 User-facing audit and notification compatibility stores use SQLite locally;
 the resumable production path uses Postgres-compatible repositories with
-Alembic migrations through `20260801_10`. Runtime request logs, metrics, and
+Alembic migrations through `20260801_11`. Runtime request logs, metrics, and
 the user-facing audit/savings feed remain separate, and none may contain raw
 credentials or approval URLs.
 

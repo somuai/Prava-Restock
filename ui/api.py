@@ -27,7 +27,7 @@ from fastapi import (
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.exc import SQLAlchemyError
@@ -68,6 +68,14 @@ _WAITLIST_REQUESTS: dict[str, deque[datetime]] = defaultdict(deque)
 _WAITLIST_RATE_SECRET = secrets.token_bytes(32)
 _METRICS: dict[str, float] = defaultdict(float)
 LOGGER = logging.getLogger("restock.api")
+UNSAFE_HTTP_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+NON_PRODUCTION_BROWSER_ORIGINS = frozenset(
+    {
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://testserver",
+    }
+)
 
 app = FastAPI(
     title="Restock API",
@@ -89,21 +97,98 @@ app.include_router(slack_service_router)
 app.include_router(worker_service_router)
 
 
+def _trusted_cookie_origin(request: Request) -> bool:
+    """Require an exact trusted Origin for browser cookie mutations."""
+
+    origin = request.headers.get("Origin", "").strip().rstrip("/")
+    if not origin:
+        return False
+    allowed = {
+        configured.strip().rstrip("/")
+        for configured in os.getenv(
+            "RESTOCK_ALLOWED_ORIGINS", "http://localhost:5173"
+        ).split(",")
+        if configured.strip()
+    }
+    if os.getenv("RESTOCK_ENV", "development") != "production":
+        allowed.update(NON_PRODUCTION_BROWSER_ORIGINS)
+    return origin in allowed
+
+
+def _authorization_token(authorization: str) -> str | None:
+    scheme, separator, token = authorization.partition(" ")
+    if separator != " " or scheme != "Bearer" or not token.strip():
+        return None
+    return token.strip()
+
+
+def _resolve_api_token(token: str, x_restock_user: str) -> str:
+    environment = os.getenv("RESTOCK_ENV", "development")
+    configured = os.getenv("RESTOCK_API_TOKEN")
+    legacy_expected = configured or LOCAL_DEMO_TOKEN
+    if environment != "production" and token == legacy_expected:
+        return x_restock_user
+    secret = os.getenv("RESTOCK_SESSION_SECRET", "")
+    if not secret:
+        raise HTTPException(
+            status_code=503,
+            detail="RESTOCK_SESSION_SECRET is not configured",
+        )
+    try:
+        return session_auth.verify(token, secret)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(exc),
+        ) from exc
+
+
+def _has_valid_authorization(request: Request) -> bool:
+    authorization = request.headers.get("Authorization")
+    if authorization is None:
+        return False
+    token = _authorization_token(authorization)
+    if token is None:
+        return False
+    try:
+        _resolve_api_token(
+            token,
+            request.headers.get("X-Restock-User", DEFAULT_USER_ID),
+        )
+    except HTTPException:
+        return False
+    return True
+
+
+def _requires_cookie_origin_check(request: Request) -> bool:
+    if request.method.upper() not in UNSAFE_HTTP_METHODS:
+        return False
+    if not request.cookies.get(SESSION_COOKIE_NAME):
+        return False
+    return not _has_valid_authorization(request)
+
+
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
     correlation_id = request.headers.get("X-Correlation-ID") or str(uuid4())
     started = time.perf_counter()
-    try:
-        response = await call_next(request)
-    except Exception:
-        _METRICS["http_errors_total"] += 1
-        LOGGER.exception(json.dumps({
-            "event": "request_failed",
-            "correlation_id": correlation_id,
-            "method": request.method,
-            "path": request.url.path,
-        }))
-        raise
+    if _requires_cookie_origin_check(request) and not _trusted_cookie_origin(request):
+        response = JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={"detail": "untrusted request origin"},
+        )
+    else:
+        try:
+            response = await call_next(request)
+        except Exception:
+            _METRICS["http_errors_total"] += 1
+            LOGGER.exception(json.dumps({
+                "event": "request_failed",
+                "correlation_id": correlation_id,
+                "method": request.method,
+                "path": request.url.path,
+            }))
+            raise
     elapsed_ms = (time.perf_counter() - started) * 1000
     _METRICS["http_requests_total"] += 1
     _METRICS["http_latency_ms_sum"] += elapsed_ms
@@ -306,25 +391,18 @@ def require_user(
     x_restock_user: str = Header(default=DEFAULT_USER_ID),
 ) -> str:
     token: str | None = None
-    if authorization and authorization.startswith("Bearer "):
-        token = authorization.removeprefix("Bearer ")
+    if authorization is not None:
+        token = _authorization_token(authorization)
+        if token is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="invalid API token",
+            )
     elif session_cookie:
         token = session_cookie
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid API token")
-    environment = os.getenv("RESTOCK_ENV", "development")
-    configured = os.getenv("RESTOCK_API_TOKEN")
-    legacy_expected = configured or LOCAL_DEMO_TOKEN
-    if environment != "production" and token == legacy_expected:
-        user_id = x_restock_user
-    else:
-        secret = os.getenv("RESTOCK_SESSION_SECRET", "")
-        if not secret:
-            raise HTTPException(status_code=503, detail="RESTOCK_SESSION_SECRET is not configured")
-        try:
-            user_id = session_auth.verify(token, secret)
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    user_id = _resolve_api_token(token, x_restock_user)
     now = datetime.now(timezone.utc)
     window = _REQUESTS[user_id]
     cutoff = now - timedelta(minutes=1)

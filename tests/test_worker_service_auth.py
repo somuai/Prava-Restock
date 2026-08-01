@@ -125,6 +125,77 @@ def test_worker_scan_is_authenticated_leased_and_duplicate_safe(
     assert len(repository.list_workflows(str(item.user_id))) == 1
 
 
+def test_trigger_scan_never_runs_waitlist_email_delivery(
+    tmp_path, monkeypatch
+) -> None:
+    repository = RestockRepository(Database(f"sqlite:///{tmp_path / 'scan.db'}"))
+    repository.create_schema()
+    monkeypatch.setattr(service_routes, "REPOSITORY", repository)
+    monkeypatch.setenv("RESTOCK_WORKER_SERVICE_TOKEN", SERVICE_TOKEN)
+    observed = []
+
+    def retry(*_args, **_kwargs):
+        observed.append("called")
+        raise AssertionError("trigger scan must not send email")
+
+    monkeypatch.setattr(service_routes, "retry_waitlist_welcome_emails", retry)
+
+    response = TestClient(app).post(
+        "/api/v1/service/worker/scan",
+        headers={"Authorization": f"Bearer {SERVICE_TOKEN}"},
+    )
+
+    assert response.status_code == 200
+    assert "waitlist_welcome_emails" not in response.json()
+    assert observed == []
+
+
+def test_waitlist_email_endpoint_is_separately_authenticated_and_bounded(
+    tmp_path, monkeypatch
+) -> None:
+    repository = RestockRepository(Database(f"sqlite:///{tmp_path / 'email.db'}"))
+    repository.create_schema()
+    monkeypatch.setattr(service_routes, "REPOSITORY", repository)
+    monkeypatch.setenv("RESTOCK_WORKER_SERVICE_TOKEN", SERVICE_TOKEN)
+    monkeypatch.setenv("RESTOCK_WAITLIST_EMAIL_BATCH_SIZE", "99")
+    monkeypatch.setenv("RESTOCK_WAITLIST_EMAIL_TIMEOUT_SECONDS", "4")
+    monkeypatch.setenv("RESTOCK_WAITLIST_EMAIL_LEASE_SECONDS", "1")
+    observed = []
+
+    def retry(target, *, max_attempts, limit, lease_seconds):
+        observed.append((target, max_attempts, limit, lease_seconds))
+        return {
+            "eligible": 1,
+            "sent": 1,
+            "failed": 0,
+            "disabled": 0,
+            "lost_lease": 0,
+        }
+
+    monkeypatch.setattr(service_routes, "retry_waitlist_welcome_emails", retry)
+    client = TestClient(app)
+
+    assert client.post(
+        "/api/v1/service/worker/waitlist-emails"
+    ).status_code == 401
+    response = client.post(
+        "/api/v1/service/worker/waitlist-emails",
+        headers={"Authorization": f"Bearer {SERVICE_TOKEN}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "completed",
+        "eligible": 1,
+        "sent": 1,
+        "failed": 0,
+        "disabled": 0,
+        "lost_lease": 0,
+    }
+    # Batch is hard-capped at five; lease covers 5 * 4s plus a 30s margin.
+    assert observed == [(repository, 3, 5, 50)]
+
+
 def test_worker_uses_fresh_exact_quote_for_prava_amount(tmp_path, monkeypatch) -> None:
     repository = RestockRepository(Database(f"sqlite:///{tmp_path / 'service.db'}"))
     repository.create_schema()

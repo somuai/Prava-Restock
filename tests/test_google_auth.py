@@ -45,7 +45,9 @@ def claims(
 
 def token_user(response) -> str:
     assert response.status_code == 200
-    return session_auth.verify(response.json()["access_token"], SECRET)
+    return session_auth.verify(
+        response.json()["access_token"], PLACEHOLDER_SESSION_SIGNING_VALUE
+    )
 
 
 def test_google_login_provisions_new_subject_exactly_once(tmp_path, monkeypatch) -> None:
@@ -135,7 +137,7 @@ def test_authenticated_owner_can_explicitly_link_google_identity(
     monkeypatch.setenv("RESTOCK_AUTH_MODE", "hybrid")
     monkeypatch.setattr(api, "verify_google_identity", lambda _: claims())
     owner_id = str(demo_user().user_id)
-    owner_token = session_auth.mint(owner_id, SECRET)
+    owner_token = session_auth.mint(owner_id, PLACEHOLDER_SESSION_SIGNING_VALUE)
 
     linked = TestClient(api.app).post(
         "/api/v1/auth/google/link",
@@ -240,7 +242,9 @@ def test_google_cookie_is_secure_httponly_and_supports_logout(
     assert current_user.status_code == 200
     assert current_user.json()["user_id"] == user_id
 
-    signed_out = client.post("/api/v1/auth/logout")
+    signed_out = client.post(
+        "/api/v1/auth/logout", headers={"Origin": "http://testserver"}
+    )
     assert signed_out.status_code == 200
     assert signed_out.json() == {"status": "signed_out"}
     deletion = signed_out.headers["set-cookie"]

@@ -6,6 +6,7 @@ import hashlib
 
 from common import password_auth
 from common import session_auth
+from demo.seed_reset import demo_user
 from ui import api
 from storage import Database, RestockRepository
 
@@ -59,6 +60,163 @@ def test_solo_login_mints_existing_signed_session(monkeypatch) -> None:
     assert body["token_type"] == "bearer"
     assert body["expires_in"] == 900
     assert session_auth.verify(body["access_token"], SECRET) == user_id
+
+
+def test_cookie_authenticated_unsafe_requests_require_trusted_origin(monkeypatch) -> None:
+    monkeypatch.setenv(
+        "RESTOCK_ALLOWED_ORIGINS",
+        "https://app.restock.example,http://localhost:5173",
+    )
+    token = session_auth.mint("user-1", SECRET)
+
+    missing_client = TestClient(api.app)
+    missing_client.cookies.set(api.SESSION_COOKIE_NAME, token)
+    missing = missing_client.post("/api/v1/auth/logout")
+    cross_site_client = TestClient(api.app)
+    cross_site_client.cookies.set(api.SESSION_COOKIE_NAME, token)
+    cross_site = cross_site_client.post(
+        "/api/v1/auth/logout",
+        headers={"Origin": "https://attacker.example"},
+    )
+    allowed_client = TestClient(api.app)
+    allowed_client.cookies.set(api.SESSION_COOKIE_NAME, token)
+    allowed = allowed_client.post(
+        "/api/v1/auth/logout",
+        headers={"Origin": "https://app.restock.example"},
+    )
+    same_origin_client = TestClient(api.app)
+    same_origin_client.cookies.set(api.SESSION_COOKIE_NAME, token)
+    same_origin = same_origin_client.post(
+        "/api/v1/auth/logout",
+        headers={"Origin": "http://testserver"},
+    )
+
+    assert missing.status_code == 403
+    assert missing.json() == {"detail": "untrusted request origin"}
+    assert cross_site.status_code == 403
+    assert cross_site.json() == {"detail": "untrusted request origin"}
+    assert allowed.status_code == 200
+    assert same_origin.status_code == 200
+
+
+def test_origin_check_does_not_block_safe_or_bearer_authenticated_requests(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("RESTOCK_SESSION_SECRET", SECRET)
+    token = session_auth.mint("user-1", SECRET)
+    cross_site = {"Origin": "https://attacker.example"}
+
+    safe_client = TestClient(api.app)
+    safe_client.cookies.set(api.SESSION_COOKIE_NAME, token)
+    safe = safe_client.get("/health", headers=cross_site)
+    bearer_client = TestClient(api.app)
+    bearer_client.cookies.set(api.SESSION_COOKIE_NAME, token)
+    bearer = bearer_client.post(
+        "/api/v1/auth/logout",
+        headers={**cross_site, "Authorization": f"Bearer {token}"},
+    )
+
+    assert safe.status_code == 200
+    assert bearer.status_code == 200
+
+
+def test_production_cookie_origin_does_not_trust_spoofed_host(monkeypatch) -> None:
+    monkeypatch.setenv("RESTOCK_ENV", "production")
+    monkeypatch.setenv("RESTOCK_ALLOWED_ORIGINS", "https://app.restock.example")
+    token = session_auth.mint("user-1", SECRET)
+    client = TestClient(api.app)
+    client.cookies.set(api.SESSION_COOKIE_NAME, token)
+
+    response = client.post(
+        "/api/v1/auth/logout",
+        headers={
+            "Host": "attacker.example",
+            "Origin": "http://attacker.example",
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "untrusted request origin"}
+
+
+def test_malformed_bearer_never_falls_back_to_cookie_or_bypasses_origin(
+    tmp_path, monkeypatch
+) -> None:
+    repository = RestockRepository(Database(f"sqlite:///{tmp_path / 'csrf.db'}"))
+    repository.create_schema()
+    user = demo_user()
+    repository.upsert_user(user)
+    user_id = str(user.user_id)
+    baseline_tenant_ids = {
+        tenant["tenant_id"] for tenant in repository.list_tenants(user_id)
+    }
+    token = session_auth.mint(user_id, SECRET)
+    monkeypatch.setattr(api, "REPOSITORY", repository)
+    monkeypatch.setenv("RESTOCK_SESSION_SECRET", SECRET)
+    monkeypatch.setenv("RESTOCK_ALLOWED_ORIGINS", "https://app.restock.example")
+
+    cross_site = TestClient(api.app)
+    cross_site.cookies.set(api.SESSION_COOKIE_NAME, token)
+    blocked = cross_site.post(
+        "/api/v1/tenants",
+        headers={
+            "Origin": "https://attacker.example",
+            "Authorization": f"bearer {token}",
+        },
+        json={"name": "Must not exist", "kind": "household"},
+    )
+    assert blocked.status_code == 403
+
+    trusted_origin = TestClient(api.app)
+    trusted_origin.cookies.set(api.SESSION_COOKIE_NAME, token)
+    rejected = trusted_origin.post(
+        "/api/v1/tenants",
+        headers={
+            "Origin": "https://app.restock.example",
+            "Authorization": f"bearer {token}",
+        },
+        json={"name": "Still must not exist", "kind": "household"},
+    )
+    assert rejected.status_code == 401
+    assert rejected.json() == {"detail": "invalid API token"}
+    assert {
+        tenant["tenant_id"] for tenant in repository.list_tenants(user_id)
+    } == baseline_tenant_ids
+
+    invalid_bearer = TestClient(api.app)
+    invalid_bearer.cookies.set(api.SESSION_COOKIE_NAME, token)
+    invalid_blocked = invalid_bearer.post(
+        "/api/v1/tenants",
+        headers={
+            "Origin": "https://attacker.example",
+            "Authorization": "Bearer invalid-session-token",
+        },
+        json={"name": "Invalid token must not exist", "kind": "household"},
+    )
+    assert invalid_blocked.status_code == 403
+
+    invalid_trusted = invalid_bearer.post(
+        "/api/v1/tenants",
+        headers={
+            "Origin": "https://app.restock.example",
+            "Authorization": "Bearer invalid-session-token",
+        },
+        json={"name": "Invalid token still must not exist", "kind": "household"},
+    )
+    assert invalid_trusted.status_code == 401
+    assert invalid_trusted.json() == {"detail": "invalid or expired session"}
+    assert {
+        tenant["tenant_id"] for tenant in repository.list_tenants(user_id)
+    } == baseline_tenant_ids
+
+    bearer_client = TestClient(api.app)
+    created = bearer_client.post(
+        "/api/v1/tenants",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"name": "My household", "kind": "household"},
+    )
+    assert created.status_code == 201
+    assert created.json()["name"] == "My household"
 
 
 def test_solo_login_failure_is_generic_and_does_not_echo_password(monkeypatch, caplog) -> None:

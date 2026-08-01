@@ -1,0 +1,33 @@
+name: waitlist welcome email delivery
+
+on:
+  schedule:
+    - cron: "12,27,42,57 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: restock-waitlist-welcome-email-delivery
+  cancel-in-progress: false
+
+jobs:
+  deliver:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Deliver one bounded welcome-email batch
+        env:
+          RESTOCK_PUBLIC_API_URL: ${{ secrets.RESTOCK_PUBLIC_API_URL }}
+          RESTOCK_WORKER_SERVICE_TOKEN: ${{ secrets.RESTOCK_WORKER_SERVICE_TOKEN }}
+        run: |
+          test -n "$RESTOCK_PUBLIC_API_URL"
+          test -n "$RESTOCK_WORKER_SERVICE_TOKEN"
+          curl --fail-with-body \
+            --retry 1 \
+            --retry-all-errors \
+            --max-time 90 \
+            -X POST \
+            -H "Authorization: Bearer $RESTOCK_WORKER_SERVICE_TOKEN" \
+            "${RESTOCK_PUBLIC_API_URL%/}/api/v1/service/worker/waitlist-emails"

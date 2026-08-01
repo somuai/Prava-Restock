@@ -7,7 +7,7 @@ import secrets
 from typing import Any
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
-from sqlalchemy import delete, func, select, text, update
+from sqlalchemy import and_, delete, func, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 
 from payments.models import TrackedItem, User
@@ -34,6 +34,7 @@ from storage.schema import (
     SlackDeliveryRow,
     TenantRow,
     WaitlistLeadRow,
+    WaitlistWelcomeEmailRow,
 )
 
 
@@ -189,6 +190,14 @@ class RestockRepository:
             with self.database.session() as session:
                 session.add(row)
                 session.flush()
+                session.add(
+                    WaitlistWelcomeEmailRow(
+                        lead_id=row.lead_id,
+                        status="pending",
+                        attempts=0,
+                    )
+                )
+                session.flush()
             return True
         except IntegrityError:
             with self.database.session() as session:
@@ -200,6 +209,152 @@ class RestockRepository:
                 if existing is None:
                     raise
             return False
+
+    def claim_waitlist_welcome_deliveries(
+        self,
+        *,
+        owner_id: str,
+        max_attempts: int,
+        limit: int,
+        lease_seconds: int,
+    ) -> list[dict[str, Any]]:
+        """Atomically reserve retryable deliveries for one bounded worker."""
+
+        if (
+            not owner_id.strip()
+            or len(owner_id) > 100
+            or max_attempts < 1
+            or limit < 1
+            or lease_seconds < 1
+        ):
+            raise ValueError("retry bounds must be positive")
+        now = datetime.now(timezone.utc)
+        lease_expires_at = now + timedelta(seconds=lease_seconds)
+        available = or_(
+            WaitlistWelcomeEmailRow.status.in_(("pending", "failed")),
+            and_(
+                WaitlistWelcomeEmailRow.status == "sending",
+                WaitlistWelcomeEmailRow.lease_expires_at < now,
+            ),
+        )
+        with self.database.session() as session:
+            candidate_ids = list(
+                session.scalars(
+                    select(WaitlistWelcomeEmailRow.delivery_id)
+                    .where(
+                        available,
+                        WaitlistWelcomeEmailRow.attempts < max_attempts,
+                    )
+                    .order_by(
+                        WaitlistWelcomeEmailRow.updated_at,
+                        WaitlistWelcomeEmailRow.delivery_id,
+                    )
+                    .limit(limit)
+                ).all()
+            )
+            claimed: list[dict[str, Any]] = []
+            for delivery_id in candidate_ids:
+                reserved = session.execute(
+                    update(WaitlistWelcomeEmailRow)
+                    .where(
+                        WaitlistWelcomeEmailRow.delivery_id == delivery_id,
+                        available,
+                        WaitlistWelcomeEmailRow.attempts < max_attempts,
+                    )
+                    .values(
+                        status="sending",
+                        attempts=WaitlistWelcomeEmailRow.attempts + 1,
+                        last_attempted_at=now,
+                        claim_owner=owner_id,
+                        lease_expires_at=lease_expires_at,
+                        last_error=None,
+                        updated_at=now,
+                    )
+                )
+                if reserved.rowcount != 1:
+                    continue
+                delivery, lead = session.execute(
+                    select(WaitlistWelcomeEmailRow, WaitlistLeadRow)
+                    .join(
+                        WaitlistLeadRow,
+                        WaitlistLeadRow.lead_id
+                        == WaitlistWelcomeEmailRow.lead_id,
+                    )
+                    .where(WaitlistWelcomeEmailRow.delivery_id == delivery_id)
+                ).one()
+                claimed.append(
+                    {
+                        **_row_dict(delivery),
+                        "email_normalized": lead.email_normalized,
+                        "display_name": lead.display_name,
+                    }
+                )
+            return claimed
+
+    def finalize_waitlist_welcome_delivery(
+        self,
+        *,
+        delivery_id: str,
+        owner_id: str,
+        status: str,
+        last_error: str | None = None,
+    ) -> bool:
+        """Finalize a sending delivery only when its lease owner matches."""
+
+        if status not in {"sent", "failed"}:
+            raise ValueError("invalid waitlist welcome delivery status")
+        if last_error not in {None, "delivery_failed"}:
+            raise ValueError("waitlist welcome error must be sanitized")
+        if (status == "sent") != (last_error is None):
+            raise ValueError("waitlist welcome outcome is inconsistent")
+        now = datetime.now(timezone.utc)
+        with self.database.session() as session:
+            result = session.execute(
+                update(WaitlistWelcomeEmailRow)
+                .where(
+                    WaitlistWelcomeEmailRow.delivery_id == delivery_id,
+                    WaitlistWelcomeEmailRow.status == "sending",
+                    WaitlistWelcomeEmailRow.claim_owner == owner_id,
+                )
+                .values(
+                    status=status,
+                    claim_owner=None,
+                    lease_expires_at=None,
+                    sent_at=now if status == "sent" else None,
+                    last_error=last_error,
+                    updated_at=now,
+                )
+            )
+            return result.rowcount == 1
+
+    def release_waitlist_welcome_delivery(
+        self,
+        *,
+        delivery_id: str,
+        owner_id: str,
+    ) -> bool:
+        """Owner-only requeue when no provider attempt actually occurred."""
+
+        now = datetime.now(timezone.utc)
+        with self.database.session() as session:
+            result = session.execute(
+                update(WaitlistWelcomeEmailRow)
+                .where(
+                    WaitlistWelcomeEmailRow.delivery_id == delivery_id,
+                    WaitlistWelcomeEmailRow.status == "sending",
+                    WaitlistWelcomeEmailRow.claim_owner == owner_id,
+                    WaitlistWelcomeEmailRow.attempts > 0,
+                )
+                .values(
+                    status="pending",
+                    attempts=WaitlistWelcomeEmailRow.attempts - 1,
+                    claim_owner=None,
+                    lease_expires_at=None,
+                    last_error=None,
+                    updated_at=now,
+                )
+            )
+            return result.rowcount == 1
 
     @staticmethod
     def _validate_identity_fields(

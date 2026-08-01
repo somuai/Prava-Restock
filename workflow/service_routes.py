@@ -10,6 +10,10 @@ from uuid import uuid4
 from fastapi import APIRouter, Header, HTTPException, status
 
 from common.service_auth import ServiceAuthError, verify_bearer
+from common.waitlist_email import (
+    bounded_delivery_settings,
+    retry_waitlist_welcome_emails,
+)
 from merchant.quote_provider import HomeQuoteError, build_home_quote_provider
 from payments.models import User
 from storage import Database, RestockRepository
@@ -157,3 +161,36 @@ def scan_due_items(
         "failed": sum(result.get("status") == "failed" for result in results),
         "results": results,
     }
+
+
+@router.post("/waitlist-emails")
+def deliver_waitlist_welcome_emails(
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Run a small, isolated, service-authenticated email outbox batch."""
+
+    require_worker_service(authorization)
+    repository = get_repository()
+    try:
+        batch_size, lease_seconds = bounded_delivery_settings(
+            configured_batch=int(
+                os.getenv("RESTOCK_WAITLIST_EMAIL_BATCH_SIZE", "5")
+            ),
+            configured_lease_seconds=int(
+                os.getenv("RESTOCK_WAITLIST_EMAIL_LEASE_SECONDS", "60")
+            ),
+        )
+        summary = retry_waitlist_welcome_emails(
+            repository,
+            max_attempts=max(
+                1, int(os.getenv("RESTOCK_WAITLIST_EMAIL_MAX_ATTEMPTS", "3"))
+            ),
+            limit=batch_size,
+            lease_seconds=lease_seconds,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="waitlist email delivery unavailable",
+        ) from exc
+    return {"status": "completed", **summary}

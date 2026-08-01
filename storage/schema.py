@@ -109,6 +109,50 @@ class WaitlistLeadRow(Base):
     )
 
 
+class WaitlistWelcomeEmailRow(Base):
+    """Durable delivery state; recipient data remains on the lead row."""
+
+    __tablename__ = "waitlist_welcome_emails"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'failed', 'sending', 'sent')",
+            name="ck_waitlist_welcome_email_status",
+        ),
+        CheckConstraint(
+            "attempts >= 0",
+            name="ck_waitlist_welcome_email_attempts_nonnegative",
+        ),
+    )
+
+    delivery_id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid4())
+    )
+    lead_id: Mapped[str] = mapped_column(
+        ForeignKey("waitlist_leads.lead_id"), unique=True, nullable=False
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), default="pending", nullable=False, index=True
+    )
+    attempts: Mapped[int] = mapped_column(default=0, nullable=False)
+    last_attempted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    claim_owner: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_error: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+
+
 class TenantRow(Base):
     __tablename__ = "tenants"
 

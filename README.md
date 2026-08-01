@@ -55,11 +55,12 @@ passwords are never stored. Generate a hash interactively with
 directly into platform secret storage.
 
 Successful login returns a short-lived signed session, sets the same value in a
-`Secure`, `HttpOnly`, `SameSite=Lax` cookie for the same-origin PWA, and allows
-the web/native clients to retain the short-lived bearer in session-only or
-device-secure storage. Browser storage is cleared and the cookie is deleted on
-sign-out. Production login attempts are rate-limited through shared Postgres
-state, and the API fails closed if that shared throttle is unavailable.
+`Secure`, `HttpOnly`, `SameSite=Lax` cookie for the same-origin PWA. The browser
+uses that cookie only and does not retain the bearer in JavaScript-accessible
+storage; native wrappers may retain the short-lived bearer in device-secure
+storage. The cookie is deleted on sign-out. Production login attempts are
+rate-limited through shared Postgres state, and the API fails closed if that
+shared throttle is unavailable.
 
 Run the scheduler as a separate process with `.venv/bin/python -m workflow.worker`. The `Procfile` keeps web and worker commands separate so multiple web replicas cannot duplicate trigger scans. For the student deployment, `.github/workflows/production-scheduler.yml` calls the authenticated, database-leased `/api/v1/service/worker/scan` endpoint instead, avoiding the cost of an always-on worker process.
 
@@ -94,7 +95,7 @@ Runtime modes are returned by `/capabilities`. `HOME_MERCHANT_MODE` controls cat
 
 ## Workflow and persistence
 
-Phase 9 implemented a resumable database-backed state machine, Postgres-compatible SQLAlchemy repositories, an initial Alembic migration, unique active-workflow and idempotency constraints, authenticated action/resume endpoints, scheduler leases, sanitized mode-tagged audit entries, and cadence recalibration after completed Home purchases. SQLite is the zero-cost local/demo default. The public student deployment uses Neon's free Postgres tier, so no paid database plan is required at the current scale.
+Phase 9 implemented a resumable database-backed state machine, Postgres-compatible SQLAlchemy repositories, Alembic migrations through `20260801_11`, unique active-workflow and idempotency constraints, authenticated action/resume endpoints, scheduler leases, sanitized mode-tagged audit entries, and cadence recalibration after completed Home purchases. SQLite is the zero-cost local/demo default. The public student deployment uses Neon's free Postgres tier, so no paid database plan is required at the current scale.
 
 Run `.venv/bin/python demo/dry_run.py --mode offline` for all five deterministic seeded workflows. Use `--mode integration --item coffee` for the explicitly interactive Prava path; it opens the short-lived approval page and never makes the live Zepto payment path automatic.
 
@@ -108,10 +109,22 @@ Remotion, using the real Restock coffee, parcel, logo, and local fonts. It is a
 silent walkthrough of one restock from detection through approval. Waitlist
 emails are normalized and deduplicated in the separate `waitlist_leads` table;
 joining never creates a user, login identity, Prava mandate, or payment state.
+The join request only commits the lead and a welcome-email outbox entry, then
+returns; it never waits on an email provider. A separate service-authenticated
+welcome-email endpoint is invoked by its own free GitHub Actions schedule;
+trigger scans never perform email I/O. Each small batch claims outbox rows with
+expiring leases and retries each delivery at most
+`RESTOCK_WAITLIST_EMAIL_MAX_ATTEMPTS` times. Email remains off
+by default. To prepare Resend, set `RESTOCK_WAITLIST_EMAIL_MODE=resend`,
+`RESEND_API_KEY`, and `RESTOCK_WAITLIST_FROM_EMAIL` only in deployment secret
+management. Resend offers a limited free tier, but its current limits remain a
+provider policy rather than a Restock guarantee, and sending to arbitrary
+recipients requires a [verified sending domain](https://resend.com/docs/dashboard/domains/introduction).
+No provider account or paid plan is activated by this configuration.
 
 - **Slack:** `channels/slack_manifest.yaml` and the Bolt Socket Mode adapter are implemented, the private workspace app is installed, bot authentication and a real Socket Mode handshake pass, and live notification delivery plus a persisted Skip callback are verified. Resolved messages remove their buttons to prevent repeated actions. A deployed persistent Slack process with rotated credentials remains the activation gate; see [Slack evidence](docs/slack_evidence.md). No Marketplace submission is needed for the private demo workspace.
-- **WhatsApp:** the Cloud API adapter sends the three-button proactive template only after recorded opt-in. The webhook verifies Meta's HMAC signature and maps Approve/Skip actions to workflows; Adjust opens the amount UI. Configure the `WHATSAPP_*` values only in local/platform secrets.
-- **Guaranteed submission path:** the PWA remains functional and visibly disclosed if Slack or Meta setup is still awaiting external approval.
+- **WhatsApp (optional post-launch):** the Cloud API adapter remains available, but Meta number/template/webhook activation is deliberately outside the launch and hackathon submission path. If activated later, it requires recorded opt-in; the webhook verifies Meta's HMAC signature and maps Approve/Skip actions to workflows while Adjust opens the amount UI.
+- **Submission path:** the real Restock PWA is the guaranteed Home and Teams surface. It is not a mocked channel; only provider/payment steps shown inside it carry sandbox or simulation labels. Slack may supplement Teams when its persistent listener is deployed.
 
 No paid channel, store enrollment, hosting upgrade, or real Zepto payment is activated by repository code.
 
@@ -136,7 +149,7 @@ authorization, or provider-call failure clears that proof.
 
 ## Tenants and privacy
 
-Phase 11 implemented Household and Organization tenants, owner/admin/approver/member roles, expiring one-use invitations, tenant-scoped items, multi-approver policies, consent records, privacy export, and deletion/pseudonymization. An explicit skip vetoes a pending multi-approver purchase; otherwise all positive decisions must agree and meet the configured threshold. Production rejects the development user header and requires an HMAC-signed, expiring bearer session using `RESTOCK_SESSION_SECRET`.
+Phase 11 implemented Household and Organization tenants, owner/admin/approver/member roles, expiring one-use invitations, tenant-scoped items, multi-approver policies, consent records, privacy export, and deletion/pseudonymization. An explicit skip vetoes a pending multi-approver purchase; otherwise all positive decisions must agree and meet the configured threshold. Production rejects the development user header and requires an HMAC-signed, expiring session using `RESTOCK_SESSION_SECRET`, carried by an HttpOnly cookie in the browser or a bearer on native clients.
 
 ## Native wrappers
 

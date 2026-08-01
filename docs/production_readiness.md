@@ -7,7 +7,7 @@ the official hackathon window.
 
 ## Verified in code and CI
 
-- Durable versioned migrations through `20260801_10`; the latest revisions add
+- Durable versioned migrations through `20260801_11`; the latest revisions add
   Google identity, waitlist leads, and the null-safe manual-renewal workflow
   boundary in addition to merchant checkout attempts, durable auth throttles,
   completion-effect recovery, and the Slack delivery outbox.
@@ -29,7 +29,7 @@ the official hackathon window.
 - Sanitized audit, correlation IDs, structured request logs, and aggregate metrics.
 - Configurable retention plus SQLite and Postgres backup/restore tooling.
 - Local PostgreSQL production-mode proof completed against a disposable
-  PostgreSQL 17 database: migrations through `20260801_10`, repository and
+  PostgreSQL 17 database: migrations through `20260801_11`, repository and
   recovery behavior, `/ready`, lease fencing, custom-format backup, restore into
   a fresh database, and restored-row verification pass.
   See [PostgreSQL evidence](postgres_evidence.md).
@@ -86,4 +86,4 @@ document records only the last verified snapshot.
 | Slack | Adapter plus private-workspace delivery/callback evidence | Persistent deployed listener not activated |
 | WhatsApp | Template sender and signed webhook adapter | Optional post-launch; not a submission gate |
 | Native | Capacitor wrappers and simulator proof | Physical devices/stores pending |
-| Persistence | SQLite local/demo; Postgres path through `20260801_10` | Public service uses durable Postgres state |
+| Persistence | SQLite local/demo; Postgres path through `20260801_11` | Public service uses durable Postgres state |

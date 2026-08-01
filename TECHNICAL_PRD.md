@@ -43,7 +43,7 @@ User <──approve/adjust/skip──> Restock Backend <──session/polling─
 | **Orchestrator agent** | Tool-using loop (OpenAI Agents SDK) deciding what/when to propose, handling approve/adjust/skip, sequencing the Prava + merchant calls | Runs on a schedule tick; not a chat-request handler; trigger-type-agnostic |
 | **Prava client** | Implements the documented server-side Session REST API, payment-result polling, consume-once credential custody, and report-status | Prava has no Python SDK for this path; the browser package owns passkey UI |
 | **Merchant client** | Zepto/Swiggy MCP catalog/cart/quote operations plus a separate browser-payment executor; one-time invoice support for Teams | Catalog truth and final-payment execution are independently mode-tagged |
-| **Workflow and compatibility stores** | SQLite for local/demo; Postgres-compatible SQLAlchemy repositories with Alembic migrations through `20260801_10` for production | Persist references/state only; never raw credentials, approval URLs, or payment links |
+| **Workflow and compatibility stores** | SQLite for local/demo; Postgres-compatible SQLAlchemy repositories with Alembic migrations through `20260801_11` for production | Persist references/state only; never raw credentials, approval URLs, or payment links |
 | **UI (chat surface)** | Displays proactive notifications, approve/adjust/skip controls, and the audit/savings log | The real Restock PWA is the launch/submission surface. A single-workspace Slack Bolt adapter is implemented; the Meta webhook/template adapter remains optional post-launch. Runtime `/capabilities` discloses which external processes are actually active. |
 
 See `PRD.md` §10, "Distribution and surface," for why these user-facing surfaces remain independent of the merchant apps that Restock calls at the backend.
@@ -149,7 +149,7 @@ database diagram. The durable schema additionally includes tenants,
 memberships, invitations, consent, workflow runs, quotes, notification
 actions, idempotency records, delivery outboxes, checkout attempts, leases,
 and completion effects. The authoritative production schema is the Alembic
-chain through `20260801_10`; Pydantic models and migrations must evolve
+chain through `20260801_11`; Pydantic models and migrations must evolve
 together.
 
 ## 6. Trigger sources (v1 — deliberately simple, both implement the same interface)
@@ -387,7 +387,7 @@ retention.
 
 The implementation separates the FastAPI web process from a leased scheduler
 worker and persists resumable workflows through a Postgres-compatible
-SQLAlchemy repository with Alembic migrations through `20260801_10`. SQLite
+SQLAlchemy repository with Alembic migrations through `20260801_11`. SQLite
 remains the local/demo default. The public Railway service currently reports
 `demo_mode=false`, Prava sandbox configured, real money disabled, Home and
 Teams final execution as `disclosed_mock`, and no persistently deployed channel

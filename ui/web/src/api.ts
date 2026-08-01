@@ -98,17 +98,13 @@ function webSessionStorage(): Storage | null {
 
 export async function loadApiSessionToken(): Promise<string | null> {
   if (isNative()) return loadSessionToken();
-  return webSessionStorage()?.getItem(WEB_SESSION_KEY) || null;
+  return null;
 }
 
 export async function storeApiSessionToken(token: string): Promise<void> {
   if (isNative()) {
     await saveSessionToken(token);
-    return;
   }
-  const storage = webSessionStorage();
-  if (!storage) throw new Error("Session storage is unavailable");
-  storage.setItem(WEB_SESSION_KEY, token);
 }
 
 export async function clearApiSessionToken(): Promise<void> {
@@ -120,7 +116,7 @@ export async function clearApiSessionToken(): Promise<void> {
 }
 
 async function requestHeaders(): Promise<Record<string, string>> {
-  const token = await loadApiSessionToken() || (import.meta.env.DEV ? "restock-local-demo-token" : "");
+  const token = await loadApiSessionToken();
   return {
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     "Content-Type": "application/json",

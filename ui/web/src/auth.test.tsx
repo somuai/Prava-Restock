@@ -61,35 +61,35 @@ describe("production login surface", () => {
     expect(markup).not.toContain("Owner recovery access");
   });
 
-  it("stores web sessions only in session storage", async () => {
-    const values = new Map<string, string>();
+  it("never persists bearer sessions in browser storage", async () => {
     const sessionStorage = {
-      getItem: (key: string) => values.get(key) || null,
-      setItem: (key: string, value: string) => values.set(key, value),
-      removeItem: (key: string) => values.delete(key),
-      clear: () => values.clear(),
+      getItem: vi.fn(() => "legacy-browser-token"),
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+      clear: vi.fn(),
       key: () => null,
       length: 0,
     } satisfies Storage;
-    const localStorage = { setItem: vi.fn() };
+    const localStorage = { getItem: vi.fn(), setItem: vi.fn(), removeItem: vi.fn() };
     vi.stubGlobal("window", { sessionStorage, localStorage });
 
     await storeApiSessionToken("rst1.test.signature");
 
-    expect(await loadApiSessionToken()).toBe("rst1.test.signature");
+    expect(await loadApiSessionToken()).toBeNull();
+    expect(sessionStorage.getItem).not.toHaveBeenCalled();
+    expect(sessionStorage.setItem).not.toHaveBeenCalled();
     expect(localStorage.setItem).not.toHaveBeenCalled();
 
     await clearApiSessionToken();
-    expect(await loadApiSessionToken()).toBeNull();
+    expect(sessionStorage.removeItem).toHaveBeenCalledWith("restock_session");
   });
 
-  it("posts the Google credential with cookies enabled and preserves bearer storage", async () => {
-    const values = new Map<string, string>();
+  it("posts the Google credential with cookies enabled without persisting the returned bearer", async () => {
     const sessionStorage = {
-      getItem: (key: string) => values.get(key) || null,
-      setItem: (key: string, value: string) => values.set(key, value),
-      removeItem: (key: string) => values.delete(key),
-      clear: () => values.clear(),
+      getItem: vi.fn(),
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+      clear: vi.fn(),
       key: () => null,
       length: 0,
     } satisfies Storage;
@@ -115,16 +115,16 @@ describe("production login surface", () => {
         body: JSON.stringify({ credential: "google-id-credential" }),
       }),
     );
-    expect(await loadApiSessionToken()).toBe("rst1.google.signature");
+    expect(await loadApiSessionToken()).toBeNull();
+    expect(sessionStorage.setItem).not.toHaveBeenCalled();
   });
 
-  it("links Google only through the current authenticated session", async () => {
-    const values = new Map<string, string>([["restock_session", "rst1.owner.signature"]]);
+  it("links Google in the browser through the HttpOnly cookie only", async () => {
     const sessionStorage = {
-      getItem: (key: string) => values.get(key) || null,
-      setItem: (key: string, value: string) => values.set(key, value),
-      removeItem: (key: string) => values.delete(key),
-      clear: () => values.clear(),
+      getItem: vi.fn(() => "legacy-browser-token"),
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+      clear: vi.fn(),
       key: () => null,
       length: 1,
     } satisfies Storage;
@@ -143,10 +143,11 @@ describe("production login surface", () => {
       expect.objectContaining({
         method: "POST",
         credentials: "include",
-        headers: expect.objectContaining({ Authorization: "Bearer rst1.owner.signature" }),
+        headers: expect.not.objectContaining({ Authorization: expect.anything() }),
         body: JSON.stringify({ credential: "fresh-google-credential" }),
       }),
     );
+    expect(sessionStorage.getItem).not.toHaveBeenCalled();
   });
 
   it("labels the official Google surface as a link action in profile mode", () => {
