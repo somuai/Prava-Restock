@@ -13,7 +13,15 @@ from merchant.quote_provider import HomeQuoteError, build_home_quote_provider
 from payments import prava_client
 from payments.models import TrackedItem, User
 from storage import Database, RestockRepository
-from storage.schema import SchedulerLeaseRow
+from storage.schema import (
+    MerchantCheckoutAttemptRow,
+    NotificationActionRow,
+    NotificationRow,
+    SchedulerLeaseRow,
+    TrackedItemRow,
+    TransactionRow,
+    UserRow,
+)
 from triggers import renewal_model
 from workflow import WorkflowService
 
@@ -195,6 +203,60 @@ def test_duplicate_trigger_is_suppressed_by_unique_active_item(repository) -> No
     service.begin(build_user(), build_home_item())
     with pytest.raises(ValueError, match="active workflow"):
         service.begin(build_user(), build_home_item())
+
+
+def test_initial_over_cap_proposal_never_reaches_prava_or_durable_workflow(
+    repository,
+) -> None:
+    prava = FakePrava()
+    checkout = FakeCheckout()
+    user = build_user().model_copy(update={"per_item_cap": Decimal("300")})
+    service = WorkflowService(
+        repository,
+        prava=prava,
+        home_checkout=checkout,
+    )
+
+    with pytest.raises(ValueError, match="cap"):
+        service.begin(user, build_home_item())
+
+    assert prava.calls == 0
+    assert prava.await_calls == 0
+    assert checkout.calls == 0
+    assert repository.list_workflows(str(USER_ID)) == []
+    assert repository.pending_notifications(str(USER_ID)) == []
+    assert repository.list_audit(str(USER_ID)) == []
+    with repository.database.session() as session:
+        for row_type in (
+            UserRow,
+            TrackedItemRow,
+            NotificationRow,
+            NotificationActionRow,
+            MerchantCheckoutAttemptRow,
+            TransactionRow,
+            SchedulerLeaseRow,
+        ):
+            assert session.query(row_type).count() == 0
+
+
+def test_resume_from_notified_cannot_reach_mandate_or_checkout(repository) -> None:
+    prava = FakePrava()
+    checkout = FakeCheckout()
+    service = WorkflowService(
+        repository,
+        prava=prava,
+        home_checkout=checkout,
+    )
+    run = service.begin(build_user(), build_home_item())
+    assert run["state"] == "notified"
+
+    with pytest.raises(ValueError, match="not waiting for passkey approval"):
+        service.resume_after_passkey(run["run_id"])
+
+    assert prava.await_calls == 0
+    assert checkout.calls == 0
+    assert repository.get_workflow(run["run_id"])["state"] == "notified"
+    assert repository.transaction_for_run(run["run_id"]) is None
 
 
 def test_manual_renewal_persists_notification_without_payment_boundaries(
