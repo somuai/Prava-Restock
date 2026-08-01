@@ -170,6 +170,99 @@ def test_create_session_uses_documented_request_contract(monkeypatch) -> None:
     assert result["session_token"] == "session-token-contract"
 
 
+def test_create_intent_forwards_request_timeout_to_http_transport(monkeypatch) -> None:
+    monkeypatch.setenv("PRAVA_API_KEY", "sk_test_unit_key")
+    monkeypatch.setenv("PRAVA_SANDBOX_URL", "https://sandbox.api.prava.space")
+    captured = {}
+
+    def fake_urlopen(_request, **kwargs):
+        captured["timeout"] = kwargs["timeout"]
+        return FakeResponse(
+            {
+                "session_id": "sess_timeout",
+                "session_token": "session-token-timeout",
+                "iframe_url": "https://sandbox.collect.prava.space/timeout",
+                "order_id": "ord_timeout",
+                "expires_at": "2099-12-31T23:59:59Z",
+            }
+        )
+
+    monkeypatch.setattr(prava_client, "urlopen", fake_urlopen)
+
+    prava_client.create_intent(
+        "zepto",
+        "9.99",
+        "Timeout forwarding check",
+        {"currency": "INR", "request_timeout_seconds": 60},
+    )
+
+    assert captured["timeout"] == 60
+
+
+@pytest.mark.parametrize(
+    "invalid_timeout",
+    [True, False, float("nan"), float("inf"), 0, -1],
+)
+def test_create_intent_rejects_non_finite_or_non_positive_request_timeout(
+    monkeypatch,
+    invalid_timeout,
+) -> None:
+    monkeypatch.setenv("PRAVA_API_KEY", "sk_test_unit_key")
+    monkeypatch.setenv("PRAVA_SANDBOX_URL", "https://sandbox.api.prava.space")
+    monkeypatch.setattr(
+        prava_client,
+        "urlopen",
+        lambda *_args, **_kwargs: pytest.fail(
+            "invalid request timeout must be rejected before transport"
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="request_timeout_seconds must be a finite positive number",
+    ):
+        prava_client.create_intent(
+            "zepto",
+            "9.99",
+            "Invalid timeout check",
+            {"currency": "INR", "request_timeout_seconds": invalid_timeout},
+        )
+
+
+@pytest.mark.parametrize(
+    "invalid_timeout",
+    [True, False, float("nan"), float("inf"), 0, -1],
+)
+def test_private_session_transport_cannot_bypass_request_timeout_validation(
+    monkeypatch,
+    invalid_timeout,
+) -> None:
+    monkeypatch.setattr(
+        prava_client,
+        "urlopen",
+        lambda *_args, **_kwargs: pytest.fail(
+            "invalid request timeout must be rejected before transport"
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="request_timeout_seconds must be a finite positive number",
+    ):
+        prava_client._create_session(
+            "user-1",
+            "user@example.com",
+            "9.99",
+            "INR",
+            "Zepto",
+            "https://www.zeptonow.com",
+            "IN",
+            "Invalid timeout check",
+            "9.99",
+            request_timeout_seconds=invalid_timeout,
+        )
+
+
 def test_get_payment_result_uses_documented_request_contract(monkeypatch) -> None:
     monkeypatch.setenv("PRAVA_API_KEY", "sk_test_unit_key")
     monkeypatch.setenv("PRAVA_SANDBOX_URL", "https://sandbox.api.prava.space")

@@ -15,3 +15,18 @@ The short-lived approval URL and generated one-time token/CVV were not recorded 
 ## Documented sandbox limitations
 
 Prava currently publishes no deterministic fixtures for a rejected passkey, an expired session under clock control, or webhook delivery. Those integration cases remain explicit skips rather than simulated claims. Unit tests cover their downstream handling without calling the live sandbox.
+
+## Official-window API-contract recheck — 1 August 2026
+
+The compatibility wrapper previously ignored its configured request timeout
+after the Session transport was extracted. A regression test now proves that a
+60-second timeout reaches the HTTP transport, while invalid, boolean, and
+non-finite timeout values are rejected before a network call.
+
+At `2026-08-01T05:09:36Z`, the isolated invalid-credential sandbox test reached
+the official sandbox with a deliberately invalid test credential and waited the
+full forwarded 60 seconds. The server did not return the documented HTTP 401
+`AUTH_1001`/`AUTH_1002` response; the client received a socket read timeout.
+This is recorded as a Prava sandbox contract failure or outage, not as a passing
+authentication-rejection test. No card, passkey, merchant checkout, or real-money
+operation was involved in this recheck.

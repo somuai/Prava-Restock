@@ -85,13 +85,16 @@ def test_invalid_credentials_are_rejected_by_real_sandbox(monkeypatch) -> None:
     require_sandbox_credentials()
     monkeypatch.setenv("PRAVA_API_KEY", "sk_test_invalid_credentials")
 
-    with pytest.raises(RuntimeError, match=r"Prava API 401 AUTH_100[12]"):
+    with pytest.raises(prava_client.PravaAPIError) as exc_info:
         prava_client.create_intent(
             "zepto",
             "9.99",
             "Restock invalid-credential check",
             {"currency": "INR", "request_timeout_seconds": 60},
         )
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.code in {"AUTH_1001", "AUTH_1002"}
 
 
 def test_pending_session_hits_client_poll_timeout_against_real_sandbox() -> None:

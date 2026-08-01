@@ -10,6 +10,7 @@ import os
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
+from math import isfinite
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
@@ -156,6 +157,22 @@ def _load_sandbox_config() -> tuple[str, str]:
     return api_key, base_url
 
 
+def _validate_request_timeout(value) -> float:
+    """Return a finite positive transport timeout, rejecting boolean sentinels."""
+
+    if isinstance(value, bool):
+        raise ValueError("request_timeout_seconds must be a finite positive number")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "request_timeout_seconds must be a finite positive number"
+        ) from exc
+    if not isfinite(parsed) or parsed <= 0:
+        raise ValueError("request_timeout_seconds must be a finite positive number")
+    return parsed
+
+
 def create_session(
     user_id,
     user_email,
@@ -170,8 +187,44 @@ def create_session(
     quantity=1,
     effective_until_minutes=15,
 ):
-    """Create one official Prava checkout session and return its full response."""
+    """Create one official Prava checkout session with the stable 20-second timeout."""
 
+    return _create_session(
+        user_id,
+        user_email,
+        total_amount,
+        currency,
+        merchant_name,
+        merchant_url,
+        merchant_country_iso2,
+        product_description,
+        unit_price,
+        product_id=product_id,
+        quantity=quantity,
+        effective_until_minutes=effective_until_minutes,
+        request_timeout_seconds=20,
+    )
+
+
+def _create_session(
+    user_id,
+    user_email,
+    total_amount,
+    currency,
+    merchant_name,
+    merchant_url,
+    merchant_country_iso2,
+    product_description,
+    unit_price,
+    product_id=None,
+    quantity=1,
+    effective_until_minutes=15,
+    *,
+    request_timeout_seconds=20,
+):
+    """Create one Prava session with a caller-selected transport timeout."""
+
+    request_timeout_seconds = _validate_request_timeout(request_timeout_seconds)
     parsed_total = Decimal(str(total_amount)).quantize(Decimal("0.01"))
     parsed_unit = Decimal(str(unit_price)).quantize(Decimal("0.01"))
     if parsed_total <= 0 or parsed_unit <= 0:
@@ -221,7 +274,7 @@ def create_session(
         method="POST",
     )
     try:
-        with urlopen(request, timeout=20) as response:
+        with urlopen(request, timeout=request_timeout_seconds) as response:
             result = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         raise _api_error(exc, "Prava session creation failed") from exc
@@ -250,7 +303,7 @@ def create_session(
 
 
 def create_intent(merchant, amount, item_description, constraints):
-    """Backward-compatible Phase-3 wrapper around :func:`create_session`."""
+    """Create a Phase-3-compatible intent using the Prava session transport."""
     parsed_amount = Decimal(str(amount))
     if parsed_amount <= 0:
         raise ValueError("amount must be positive")
@@ -276,8 +329,11 @@ def create_intent(merchant, amount, item_description, constraints):
     effective_until_minutes = int(constraints.get("effective_until_minutes", 15))
     if effective_until_minutes <= 0:
         raise ValueError("effective_until_minutes must be positive")
+    request_timeout_seconds = _validate_request_timeout(
+        constraints.get("request_timeout_seconds", 20)
+    )
 
-    result = create_session(
+    result = _create_session(
         constraints.get("user_id", "restock-sandbox-user"),
         constraints.get("user_email", "restock-sandbox@example.com"),
         amount_string,
@@ -290,6 +346,7 @@ def create_intent(merchant, amount, item_description, constraints):
         product_id=constraints.get("product_id"),
         quantity=int(constraints.get("quantity", 1)),
         effective_until_minutes=effective_until_minutes,
+        request_timeout_seconds=request_timeout_seconds,
     )
 
     intent_ref = str(result["session_id"])
