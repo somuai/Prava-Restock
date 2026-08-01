@@ -899,18 +899,26 @@ def test_currency_mismatched_initial_quote_never_reaches_prava(repository) -> No
 
 
 @pytest.mark.parametrize(
-    ("quote_update", "error_match"),
+    ("quote_case", "error_match"),
     [
-        ({"stock_status": "out_of_stock"}, "out of stock"),
-        ({"observed_at": datetime.now()}, "timezone-aware"),
-        ({"observed_at": datetime.now(timezone.utc) + timedelta(minutes=1)}, "future"),
-        ({"observed_at": datetime.now(timezone.utc) - timedelta(seconds=61)}, "expired"),
+        ("out_of_stock", "out of stock"),
+        ("naive", "timezone-aware"),
+        ("future", "future"),
+        ("expired", "expired"),
     ],
 )
 def test_caller_supplied_unusable_quote_is_rejected_before_prava(
-    repository, monkeypatch, quote_update, error_match
+    repository, monkeypatch, quote_case, error_match
 ) -> None:
     monkeypatch.setenv("ZEPTO_QUOTE_MAX_AGE_SECONDS", "60")
+    quote_update = {
+        "out_of_stock": {"stock_status": "out_of_stock"},
+        "naive": {"observed_at": datetime.now()},
+        # Construct clock-sensitive cases during the test instead of at module
+        # collection time, so a slow CI run cannot turn a future quote valid.
+        "future": {"observed_at": datetime.now(timezone.utc) + timedelta(minutes=1)},
+        "expired": {"observed_at": datetime.now(timezone.utc) - timedelta(seconds=61)},
+    }[quote_case]
     supplied = MerchantQuote.model_validate(
         quote("380").model_dump() | quote_update
     )
