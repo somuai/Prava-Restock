@@ -35,6 +35,12 @@ from sqlalchemy.exc import SQLAlchemyError
 from common import audit_store, notification_store
 from common import password_auth
 from common import session_auth
+from common.starter_items import (
+    STARTER_TEMPLATE_SUMMARIES,
+    StarterTemplateId,
+    build_starter_item,
+    starter_template_sku,
+)
 from common.google_identity import (
     GoogleIdentityConfigurationError,
     GoogleIdentityError,
@@ -426,6 +432,12 @@ class SoloLoginRequest(BaseModel):
 
 class GoogleLoginRequest(BaseModel):
     credential: str = Field(min_length=1, max_length=16_384)
+
+
+class StarterOnboardingRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    template_ids: list[StarterTemplateId] = Field(min_length=1, max_length=4)
 
 
 class WaitlistRequest(BaseModel):
@@ -953,6 +965,40 @@ def items(
         return repository.list_items(user_id, x_restock_tenant)
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/onboarding/starter-items")
+def starter_items(
+    _: str = Depends(require_user),
+) -> dict[str, Any]:
+    return {"items": STARTER_TEMPLATE_SUMMARIES}
+
+
+@app.post("/api/v1/onboarding/starter-items")
+def create_starter_items(
+    body: StarterOnboardingRequest,
+    response: Response,
+    user_id: str = Depends(require_user),
+    repository: RestockRepository = Depends(get_repository),
+) -> dict[str, Any]:
+    selected = list(dict.fromkeys(body.template_ids))
+    existing_skus = {
+        str(item.get("merchant_sku_id", ""))
+        for item in repository.list_items(user_id)
+    }
+    created = 0
+    for template_id in selected:
+        if starter_template_sku(template_id) in existing_skus:
+            continue
+        repository.upsert_item(build_starter_item(template_id, user_id=user_id))
+        created += 1
+    response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+    return {
+        "user_id": user_id,
+        "created": created,
+        "existing": len(selected) - created,
+        "items": repository.list_items(user_id),
+    }
 
 
 @app.get("/api/v1/tenants")

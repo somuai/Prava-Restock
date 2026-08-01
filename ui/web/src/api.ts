@@ -77,6 +77,13 @@ export type TrackedItem = {
   alternate_plan_label?: string | null;
 };
 
+export type StarterTemplateId = "coffee" | "milk" | "toothpaste" | "detergent";
+
+export type StarterTemplate = {
+  name: string;
+  description: string;
+};
+
 import { clearSessionToken, isNative, loadSessionToken, saveSessionToken } from "./native";
 
 const API_BASE = String(import.meta.env.VITE_RESTOCK_API_BASE_URL || "").replace(/\/$/, "");
@@ -195,6 +202,18 @@ export const api = {
   me: () => read<UserProfile>("/api/v1/me"),
   tenants: () => read<TenantSummary[]>("/api/v1/tenants"),
   items: () => read<TrackedItem[]>("/api/v1/items"),
+  starterItems: () => read<{ items: Record<StarterTemplateId, StarterTemplate> }>("/api/v1/onboarding/starter-items"),
+  createStarterItems: async (templateIds: StarterTemplateId[]) => {
+    const response = await fetch(endpoint("/api/v1/onboarding/starter-items"), {
+      method: "POST",
+      credentials: "include",
+      headers: await requestHeaders(),
+      body: JSON.stringify({ template_ids: templateIds }),
+    });
+    const body = await response.json();
+    if (!response.ok) throw new ApiError(response.status, body.detail || "Starter pantry setup failed");
+    return body as { created: number; existing: number; items: TrackedItem[] };
+  },
   notifications: () => read<Notification[]>("/api/v1/notifications/pending"),
   workflows: () => read<WorkflowRun[]>("/api/v1/workflows"),
   audit: () => read<AuditEntry[]>("/api/v1/audit"),

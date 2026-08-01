@@ -165,6 +165,25 @@ class ZeptoMCPClient:
     def select_saved_address(self, address_id: str) -> dict[str, Any]:
         return self.call("select_saved_address", {"addressId": address_id})
 
+    def get_location_serviceability(
+        self, latitude: float | str, longitude: float | str
+    ) -> dict[str, Any]:
+        return self.call(
+            "get_location_serviceability",
+            {"latitude": latitude, "longitude": longitude},
+        )
+
+    def select_store(
+        self,
+        store_id: str,
+        latitude: float | str,
+        longitude: float | str,
+    ) -> dict[str, Any]:
+        return self.call(
+            "select_store",
+            {"storeId": store_id, "latitude": latitude, "longitude": longitude},
+        )
+
     def search_products(self, query: str) -> dict[str, Any]:
         return self.call("search_products", {"query": query, "pageNumber": 0})
 

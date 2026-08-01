@@ -55,6 +55,7 @@ import {
   type AuditEntry,
   type Capabilities,
   type Notification,
+  type StarterTemplateId,
   type TenantSummary,
   type TrackedItem,
   type UserProfile,
@@ -546,6 +547,7 @@ function trackedHomeProduct(base: PantryProduct, item: TrackedItem): PantryProdu
   const lifecycle: ProductLifecycle = priceTriggered || due ? "attention" : "tracking";
   return {
     ...base,
+    itemId: item.item_id,
     name: item.name,
     merchant: item.preferred_merchant === "zepto" ? "Zepto" : item.preferred_merchant === "swiggy" ? "Swiggy" : base.merchant,
     category: item.category.replaceAll("_", " "),
@@ -558,6 +560,21 @@ function trackedHomeProduct(base: PantryProduct, item: TrackedItem): PantryProdu
     lifecycle,
     nextDue: remaining === null ? "after more purchase history" : status.toLowerCase(),
   };
+}
+
+function presentationProductForItem(item: TrackedItem, index: number): PantryProduct {
+  const sku = item.merchant_sku_id.toLowerCase();
+  const name = item.name.toLowerCase();
+  const matched = products.find((product) => {
+    if (product.id === "coffee") return sku.includes("coffee") || name.includes("coffee");
+    if (product.id === "milk") return sku.includes("milk") || name.includes("milk");
+    if (product.id === "toothpaste") return sku.includes("toothpaste") || name.includes("toothpaste") || name.includes("colgate");
+    if (product.id === "detergent") return sku.includes("detergent") || name.includes("detergent") || name.includes("surf excel");
+    if (product.id === "paper") return sku.includes("paper") || name.includes("paper");
+    if (product.id === "filter") return sku.includes("filter") || name.includes("filter");
+    return false;
+  });
+  return matched || products[index % products.length];
 }
 
 function trackedTeamSubscription(base: SubscriptionProduct, item: TrackedItem): SubscriptionProduct {
@@ -2319,6 +2336,94 @@ function AuthCheckingScreen() {
   );
 }
 
+const starterPantryOptions: Array<{
+  id: StarterTemplateId;
+  name: string;
+  detail: string;
+  image: string;
+}> = [
+  { id: "coffee", name: "Attikan Estate coffee", detail: "500 g · about every 21 days", image: "/app/assets/product-coffee-attikan-cutout.png" },
+  { id: "milk", name: "Amul Taaza milk", detail: "1 L · about every 7 days", image: "/app/assets/product-amul-taaza.png" },
+  { id: "toothpaste", name: "Colgate Strong Teeth", detail: "200 g · about every 45 days", image: "/app/assets/product-colgate-strong-teeth-cutout.png" },
+  { id: "detergent", name: "Surf Excel detergent", detail: "500 g · about every 35 days", image: "/app/assets/product-surf-excel-cutout.png" },
+];
+
+function StarterPantryOnboarding({
+  displayName,
+  onComplete,
+  onSkip,
+}: {
+  displayName: string;
+  onComplete: (items: StarterTemplateId[]) => Promise<void>;
+  onSkip: () => void;
+}) {
+  const [selected, setSelected] = useState<StarterTemplateId[]>(["coffee", "milk", "toothpaste"]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const toggle = (id: StarterTemplateId) => {
+    setSelected((current) => current.includes(id)
+      ? current.filter((candidate) => candidate !== id)
+      : [...current, id]);
+  };
+
+  return (
+    <main className="starter-onboarding">
+      <section className="starter-onboarding__paper" aria-labelledby="starter-title">
+        <Brand />
+        <div className="starter-onboarding__copy">
+          <p className="eyebrow">Welcome, {displayName.split(" ")[0]}</p>
+          <h1 id="starter-title">What should Restock watch first?</h1>
+          <p>Choose the essentials already in your routine. You can start small; Restock learns the cadence after completed purchases.</p>
+        </div>
+
+        <fieldset className="starter-grid">
+          <legend className="sr-only">Choose starter pantry items</legend>
+          {starterPantryOptions.map((option) => {
+            const checked = selected.includes(option.id);
+            return (
+              <label className="starter-item" data-selected={checked} key={option.id}>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggle(option.id)}
+                />
+                <span className="starter-item__image"><img src={option.image} alt="" /></span>
+                <span className="starter-item__copy">
+                  <strong>{option.name}</strong>
+                  <small>{option.detail}</small>
+                </span>
+                <span className="starter-item__check" aria-hidden="true"><Check size={15} weight="bold" /></span>
+              </label>
+            );
+          })}
+        </fieldset>
+
+        <p className="starter-onboarding__note">These are starter estimates, not live merchant quotes. Exact Zepto stock and price are checked before any approval.</p>
+        {error && <p className="login-error" role="alert">{error}</p>}
+        <footer className="starter-onboarding__actions">
+          <button type="button" className="starter-skip" onClick={onSkip} disabled={busy}>Start empty</button>
+          <button
+            type="button"
+            className="starter-submit"
+            disabled={busy || selected.length === 0}
+            onClick={() => {
+              setBusy(true);
+              setError("");
+              void onComplete(selected)
+                .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not set up your pantry."))
+                .finally(() => setBusy(false));
+            }}
+          >
+            {busy ? "Placing items…" : `Watch ${selected.length} item${selected.length === 1 ? "" : "s"}`}
+            <ArrowRight size={17} />
+          </button>
+        </footer>
+      </section>
+    </main>
+  );
+}
+
 export default function App() {
   const [view, setView] = useState<View>(initialViewFromUrl);
   const [selectedProduct, setSelectedProduct] = useState<PantryProduct | null>(null);
@@ -2342,6 +2447,7 @@ export default function App() {
   const [authState, setAuthState] = useState<"checking" | "required" | "ready">(
     import.meta.env.DEV ? "ready" : "checking",
   );
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
 
   useEffect(() => {
     const images = revealAssets.map((src) => {
@@ -2416,10 +2522,9 @@ export default function App() {
   );
   const visibleProducts = useMemo(() => {
     if (!backendConnected) return import.meta.env.DEV ? products : [];
-    const byId = new Map(trackedItems.filter((item) => item.track === "home").map((item) => [item.item_id, item]));
-    return products
-      .filter((product) => product.itemId && byId.has(product.itemId))
-      .map((product) => trackedHomeProduct(product, byId.get(product.itemId!)!));
+    return trackedItems
+      .filter((item) => item.track === "home")
+      .map((item, index) => trackedHomeProduct(presentationProductForItem(item, index), item));
   }, [backendConnected, trackedItems]);
   const visibleSubscriptions = useMemo(() => {
     if (!backendConnected) return import.meta.env.DEV ? subscriptions : [];
@@ -2467,6 +2572,26 @@ export default function App() {
           await api.login(password);
           await finishSignIn();
         } : undefined}
+      />
+    );
+  }
+
+  if (
+    backendConnected
+    && profile
+    && trackedItems.length === 0
+    && !onboardingDismissed
+  ) {
+    return (
+      <StarterPantryOnboarding
+        displayName={profile.display_name}
+        onSkip={() => setOnboardingDismissed(true)}
+        onComplete={async (templateIds) => {
+          const result = await api.createStarterItems(templateIds);
+          setTrackedItems(result.items);
+          setOnboardingDismissed(true);
+          setStatus(`${result.created} pantry item${result.created === 1 ? "" : "s"} added`);
+        }}
       />
     );
   }
