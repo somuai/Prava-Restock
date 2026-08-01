@@ -82,11 +82,14 @@ lockfile with integrity hashes. Runtime calls execute that image-local binary an
 never download code through npm/npx; CI verifies it in a container with networking
 disabled. This makes the executable reproducible, but it does not provision Zepto
 authorization. `mcp-remote` stores OAuth state in
-`MCP_REMOTE_CONFIG_DIR` (defaulted by the image to `/home/restock/.mcp-auth`). Before
-enabling live Zepto calls on Railway, attach a persistent encrypted volume at that
-path and complete the interactive OAuth/mobile-OTP flow through an operator-controlled
-session. An ephemeral filesystem will lose authorization on redeploy. Never copy the
-local OAuth cache into the image, repository, logs, or Railway variables.
+`MCP_REMOTE_CONFIG_DIR` (defaulted by the image to `/home/restock/.mcp-auth`). The
+zero-added-cost deployment path stores a minimal three-file OAuth bundle in Railway's
+encrypted `ZEPTO_MCP_AUTH_CACHE_B64` runtime variable, which must then be sealed. The container
+validates filenames and size, materializes the files with private permissions before
+startup, and removes the bundle from the API process environment. Never copy the
+cache into the image, repository, database, or logs. Seal the Railway variable after
+setting it so its value cannot be retrieved from the UI, CLI, or API. A persistent
+volume mounted at this path remains an optional alternative, not a requirement.
 `MCP_REMOTE_BINARY` must remain unset in production: the image rejects any
 override of its integrity-locked `/opt/zepto-mcp/node_modules/.bin/mcp-remote`.
 The public capability response labels cache presence `configured_unverified`.
