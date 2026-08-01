@@ -26,6 +26,7 @@ MCP_REMOTE_REPO_BINARY = (
 )
 MCP_AUTHORIZATION_VERIFICATION_TTL_SECONDS = 300
 _MCP_AUTHORIZATION_VERIFIED_AT: float | None = None
+_RATE_LIMITED_UNTIL: float = 0.0
 
 
 class ZeptoMCPError(RuntimeError):
@@ -44,6 +45,7 @@ READ_ONLY_TOOLS = frozenset(
     {
         "list_saved_addresses",
         "get_location_serviceability",
+        "get_past_order_items",
         "search_products",
         "view_cart",
         "get_payment_methods",
@@ -60,7 +62,7 @@ def _retry_after(payload: Any) -> float | None:
         for key in ("retryAfter", "retry_after", "retryAfterSeconds", "retry_after_seconds"):
             if payload.get(key) is not None:
                 try:
-                    return max(0.0, min(float(payload[key]), 5.0))
+                    return max(0.0, min(float(payload[key]), 60.0))
                 except (TypeError, ValueError):
                     pass
         for value in payload.values():
@@ -207,20 +209,32 @@ class ZeptoMCPClient:
     async def _call_async(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Retry one provider-throttled read, but never retry a mutating tool."""
 
+        global _RATE_LIMITED_UNTIL
+        if name in READ_ONLY_TOOLS and time.monotonic() < _RATE_LIMITED_UNTIL:
+            raise ZeptoRateLimitError(
+                f"Zepto read cooldown is active for {name}",
+                retry_after_seconds=max(1.0, _RATE_LIMITED_UNTIL - time.monotonic()),
+            )
         attempts = 2 if name in READ_ONLY_TOOLS else 1
         for attempt in range(attempts):
             try:
-                return await self._call_once_async(name, arguments)
+                payload = await self._call_once_async(name, arguments)
+                _RATE_LIMITED_UNTIL = 0.0
+                return payload
             except ZeptoRateLimitError as exc:
-                if attempt + 1 >= attempts:
-                    raise
                 delay = exc.retry_after_seconds
                 if delay is None:
                     try:
-                        delay = float(os.getenv("ZEPTO_RATE_LIMIT_RETRY_SECONDS", "1"))
+                        delay = float(os.getenv("ZEPTO_RATE_LIMIT_RETRY_SECONDS", "30"))
                     except ValueError:
-                        delay = 1.0
-                await asyncio.sleep(max(0.0, min(delay, 5.0)))
+                        delay = 30.0
+                delay = max(0.0, min(delay, 60.0))
+                _RATE_LIMITED_UNTIL = time.monotonic() + delay
+                if attempt + 1 >= attempts:
+                    raise ZeptoRateLimitError(
+                        str(exc), retry_after_seconds=delay
+                    ) from exc
+                await asyncio.sleep(delay)
         raise AssertionError("unreachable")
 
     def call(self, name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -262,6 +276,9 @@ class ZeptoMCPClient:
 
     def search_products(self, query: str) -> dict[str, Any]:
         return self.call("search_products", {"query": query, "pageNumber": 0})
+
+    def get_past_order_items(self) -> dict[str, Any]:
+        return self.call("get_past_order_items")
 
     def update_cart(self, arguments: dict[str, Any]) -> dict[str, Any]:
         return self.call("update_cart", arguments)

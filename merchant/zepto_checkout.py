@@ -10,7 +10,15 @@ from urllib.parse import urlparse
 
 from merchant import mock_checkout
 from merchant.health_check import check_merchant_availability
-from merchant.models import CheckoutStatus, ExecutionMode, MerchantCheckoutResult, MerchantQuote, StockStatus
+from merchant.models import (
+    CheckoutStatus,
+    ExecutionMode,
+    MerchantAddressSummary,
+    MerchantCatalogProduct,
+    MerchantCheckoutResult,
+    MerchantQuote,
+    StockStatus,
+)
 from merchant.zepto_mcp import ZeptoMCPClient, ZeptoMCPError
 from payments import prava_client
 from storage.repository import RestockRepository
@@ -876,8 +884,10 @@ def quote_from_search(
         raise ZeptoMCPError("exact Zepto product did not contain a current price")
     available_quantity = product.get("availableQuantity")
     stock_status = (
-        StockStatus.OUT_OF_STOCK
-        if available_quantity is not None and Decimal(str(available_quantity)) <= 0
+        StockStatus.UNKNOWN
+        if available_quantity is None
+        else StockStatus.OUT_OF_STOCK
+        if Decimal(str(available_quantity)) <= 0
         else StockStatus.IN_STOCK
     )
     observed_at = datetime.now(timezone.utc)
@@ -893,6 +903,89 @@ def quote_from_search(
         observed_at=observed_at,
         execution_mode=ExecutionMode.REAL,
     )
+
+
+def list_saved_address_summaries(
+    *, client: ZeptoMCPClient | None = None
+) -> list[MerchantAddressSummary]:
+    """Return opaque saved-address references without exposing street addresses."""
+
+    payload = (client or ZeptoMCPClient()).list_saved_addresses()
+    addresses = payload.get("addresses") if isinstance(payload, dict) else None
+    if not isinstance(addresses, list):
+        raise ZeptoMCPError("Zepto did not return saved addresses")
+    summaries: list[MerchantAddressSummary] = []
+    for address in addresses:
+        if not isinstance(address, dict):
+            continue
+        reference = address.get("id") or address.get("addressId")
+        label = address.get("label") or address.get("name")
+        if reference and label:
+            summaries.append(
+                MerchantAddressSummary(reference=str(reference), label=str(label))
+            )
+    if not summaries:
+        raise ZeptoMCPError("Zepto account has no usable saved address")
+    return summaries
+
+
+def search_catalog(
+    query: str,
+    *,
+    address_ref: str,
+    client: ZeptoMCPClient | None = None,
+) -> list[MerchantCatalogProduct]:
+    """Search Zepto at one verified saved address and return current exact SKUs."""
+
+    if not query.strip():
+        raise ValueError("catalog query is required")
+    if not address_ref.strip():
+        raise ValueError("saved address reference is required")
+    mcp_client = client or ZeptoMCPClient()
+    known_addresses = {
+        address.reference for address in list_saved_address_summaries(client=mcp_client)
+    }
+    if address_ref not in known_addresses:
+        raise ZeptoMCPError("saved address reference does not belong to this Zepto account")
+    mcp_client.select_saved_address(address_ref)
+    payload = mcp_client.search_products(query.strip())
+    products = payload.get("products") if isinstance(payload, dict) else None
+    if not isinstance(products, list):
+        raise ZeptoMCPError("Zepto search response did not contain products")
+    results: list[MerchantCatalogProduct] = []
+    for product in products:
+        if not isinstance(product, dict):
+            continue
+        variant_id = product.get("productVariantId") or product.get("id")
+        store_product_id = product.get("storeProductId") or product.get("id")
+        name = product.get("name")
+        raw_price = product.get("price")
+        raw_available = product.get("availableQuantity")
+        if not all(value is not None for value in (variant_id, store_product_id, name, raw_price, raw_available)):
+            continue
+        try:
+            available = int(Decimal(str(raw_available)))
+            amount = Decimal(str(raw_price)) / _ZEPTO_PRICE_MINOR_UNITS
+        except (ArithmeticError, ValueError):
+            continue
+        if amount <= 0 or available < 0:
+            continue
+        results.append(
+            MerchantCatalogProduct(
+                merchant="zepto",
+                merchant_sku_id=str(variant_id),
+                store_product_id=str(store_product_id),
+                name=str(name),
+                amount=amount,
+                currency="INR",
+                available_quantity=available,
+                stock_status=(
+                    StockStatus.IN_STOCK if available > 0 else StockStatus.OUT_OF_STOCK
+                ),
+                execution_mode=ExecutionMode.REAL,
+            )
+        )
+    return results
 
 
 def fetch_real_price_quote(
@@ -936,6 +1029,10 @@ def check_current_price(
             )
         return quote.amount
 
+    if os.getenv("RESTOCK_ENV", "development") == "production":
+        raise RuntimeError(
+            "production price checks cannot use deterministic demo prices"
+        )
     item_key = str(item_id)
     check_count = _PRICE_CHECK_COUNTS.get(item_key, 0)
     _PRICE_CHECK_COUNTS[item_key] = check_count + 1

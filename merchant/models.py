@@ -45,6 +45,27 @@ class MerchantQuote(MerchantModel):
     execution_mode: ExecutionMode
 
 
+class MerchantAddressSummary(MerchantModel):
+    """Minimal saved-address data safe to return to an authenticated UI."""
+
+    reference: str = Field(min_length=1, max_length=255)
+    label: str = Field(min_length=1, max_length=120)
+
+
+class MerchantCatalogProduct(MerchantModel):
+    """A current provider result, not a Restock-owned catalog fixture."""
+
+    merchant: str
+    merchant_sku_id: str = Field(min_length=1, max_length=255)
+    store_product_id: str = Field(min_length=1, max_length=255)
+    name: str = Field(min_length=1, max_length=300)
+    amount: Decimal = Field(gt=Decimal("0"))
+    currency: str = Field(min_length=3, max_length=3)
+    available_quantity: int = Field(ge=0)
+    stock_status: StockStatus
+    execution_mode: ExecutionMode
+
+
 class MerchantCheckoutResult(MerchantModel):
     status: CheckoutStatus
     merchant_order_id: str | None = None

@@ -331,8 +331,11 @@ complete_checkout(credential_reference, merchant_sku_id, amount, idempotency_key
 saved-address selection, product/cart tools, exact-price preview, and status
 reconciliation. The final card-form attempt is a separate Playwright boundary.
 Merchant/catalog mode and payment mode are disclosed independently. The public
-deployment currently configures both as `disclosed_mock`; a real mode requires
-fresh provider authorization and explicit operator enablement.
+deployment configures the catalog path for real Zepto calls while leaving final
+payment separately disabled/disclosed until Prava production access. Production
+onboarding accepts only a saved address and exact SKU returned by Zepto; it never
+creates template SKUs or falls back to deterministic prices. `/capabilities`
+separately reports whether the provider OAuth session is currently operational.
 
 Real Home proposals must be based on a fresh exact-cart quote for the tracked `merchant_sku_id`, positive `quantity`, and opaque `merchant_address_ref`. Initial quoting prepares and verifies the exact cart before preview; pre-checkout revalidation previews the already-prepared cart again. The Zepto device ID is supplied only through deployment configuration (`ZEPTO_DEVICE_ID`) and must never be persisted in `TrackedItem`, logs, or API payloads. Merchant clients remain injected so credential-free tests cannot make live calls by accident.
 

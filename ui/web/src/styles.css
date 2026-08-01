@@ -3585,6 +3585,51 @@ button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visibl
   line-height: 1.55;
 }
 
+.starter-live-controls {
+  display: grid;
+  grid-template-columns: minmax(180px, .72fr) minmax(320px, 1.28fr);
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.starter-live-controls form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.starter-live-controls label {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  color: #66665e;
+  font-family: "Geist Pixel Square", monospace;
+  font-size: 9px;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+.starter-live-controls input,
+.starter-live-controls select {
+  width: 100%;
+  min-height: 50px;
+  padding: 0 15px;
+  color: #171815;
+  background: #f1eee5;
+  border: 1px solid rgba(49, 56, 45, .18);
+  border-radius: 0;
+  font: 550 14px/1.2 "Geist", sans-serif;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.starter-live-controls input:focus,
+.starter-live-controls select:focus {
+  outline: 3px solid rgba(24, 98, 77, .2);
+  border-color: rgba(24, 98, 77, .55);
+}
+
 .starter-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3704,6 +3749,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visibl
   .starter-onboarding__paper { min-height: 100vh; padding: 24px 18px 30px; }
   .starter-onboarding__copy { margin-top: 40px; }
   .starter-grid { grid-template-columns: 1fr; }
+  .starter-live-controls,
+  .starter-live-controls form { grid-template-columns: 1fr; }
   .starter-onboarding__actions { align-items: stretch; flex-direction: column-reverse; }
   .starter-submit { width: 100%; }
 }

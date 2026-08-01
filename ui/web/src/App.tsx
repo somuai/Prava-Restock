@@ -54,8 +54,9 @@ import {
   clearApiSessionToken,
   type AuditEntry,
   type Capabilities,
+  type MerchantAddress,
+  type MerchantCatalogProduct,
   type Notification,
-  type StarterTemplateId,
   type TenantSummary,
   type TrackedItem,
   type UserProfile,
@@ -563,6 +564,30 @@ function trackedHomeProduct(base: PantryProduct, item: TrackedItem): PantryProdu
 }
 
 function presentationProductForItem(item: TrackedItem, index: number): PantryProduct {
+  if (item.merchant_address_ref) {
+    return {
+      id: `live-${index}`,
+      itemId: item.item_id,
+      name: item.name,
+      image: "/app/assets/restock-mark.png",
+      imageAlt: "Restock exact-product marker",
+      brand: "Zepto catalog",
+      category: item.category.replaceAll("_", " "),
+      size: item.quantity ? `Quantity ${item.quantity}` : "Exact SKU",
+      tone: "watching",
+      status: "Watching",
+      price: moneyLabel(item.last_observed_price, item.currency),
+      merchant: "Zepto",
+      lastBought: dateLabel(item.last_purchased_at),
+      daysRemaining: "learning from real purchases",
+      cadence: item.typical_cadence_days ? `every ${Number(item.typical_cadence_days.toFixed(1))} days` : "Still learning",
+      trigger: "Predicted depletion",
+      ingredients: "Product details remain at Zepto",
+      nutrition: "Restock stores the exact SKU, current observed price, quantity and saved-address reference—not invented catalog copy.",
+      lifecycle: "tracking",
+      nextDue: "after purchase history establishes a clock",
+    };
+  }
   const sku = item.merchant_sku_id.toLowerCase();
   const name = item.name.toLowerCase();
   const matched = products.find((product) => {
@@ -577,7 +602,7 @@ function presentationProductForItem(item: TrackedItem, index: number): PantryPro
   return matched || products[index % products.length];
 }
 
-function trackedTeamSubscription(base: SubscriptionProduct, item: TrackedItem): SubscriptionProduct {
+function trackedTeamSubscription(item: TrackedItem): SubscriptionProduct {
   const current = moneyLabel(item.current_plan_amount, item.currency);
   const alternate = moneyLabel(item.alternate_plan_amount, item.currency);
   const currentValue = Number(item.current_plan_amount || 0);
@@ -588,22 +613,31 @@ function trackedTeamSubscription(base: SubscriptionProduct, item: TrackedItem): 
   const renewalDays = daysFromToday(item.renewal_date);
   const decisionDue = renewalDays !== null && renewalDays <= 3;
   return {
-    ...base,
     id: "teamtool",
+    itemId: item.item_id,
     name: item.name,
     category: "SaaS subscription",
     logo: "/app/assets/restock-mark.png",
     color: "#17624d",
-    currentPlan: "Current plan",
+    currentPlan: "Tracked invoice",
     currentAmount: current,
     alternatePlan: item.alternate_plan_label || "Alternate plan",
     alternateAmount: alternate,
     renewal: dateLabel(item.renewal_date),
+    cadence: "Renewal date supplied by owner",
+    owner: "Billing owner not supplied",
     savings,
     status: decisionDue ? "Decision due" : "Watching",
+    note: "The invoice date and amounts below are the values supplied to Restock. Vendor dashboard data is not inferred.",
     description: "A persisted team subscription loaded from the Restock production database.",
     currency: item.currency === "INR" ? "INR" : "USD",
+    priceBasis: "owner-supplied hosted invoice",
+    quantity: "Subscription object not connected by vendor OAuth",
+    usage: "Not supplied",
+    usageDetail: "Restock does not invent seats or usage when a vendor billing API is not connected.",
+    paymentMethod: "Prava approval required",
     invoiceStatus: decisionDue ? "Approval due" : "Not due",
+    planFeatures: ["Hosted invoice reference", "Explicit renewal action", "Code-owned spend cap"],
     alternateDescription: `Move to ${item.alternate_plan_label || "the alternate plan"} only after a distinct switch approval.`,
   };
 }
@@ -2419,35 +2453,53 @@ function AuthCheckingScreen() {
   );
 }
 
-const starterPantryOptions: Array<{
-  id: StarterTemplateId;
-  name: string;
-  detail: string;
-  image: string;
-}> = [
-  { id: "coffee", name: "Attikan Estate coffee", detail: "500 g · about every 21 days", image: "/app/assets/product-coffee-attikan-cutout.png" },
-  { id: "milk", name: "Amul Taaza milk", detail: "1 L · about every 7 days", image: "/app/assets/product-amul-taaza.png" },
-  { id: "toothpaste", name: "Colgate Strong Teeth", detail: "200 g · about every 45 days", image: "/app/assets/product-colgate-strong-teeth-cutout.png" },
-  { id: "detergent", name: "Surf Excel detergent", detail: "500 g · about every 35 days", image: "/app/assets/product-surf-excel-cutout.png" },
-];
-
 function StarterPantryOnboarding({
   displayName,
   onComplete,
   onSkip,
 }: {
   displayName: string;
-  onComplete: (items: StarterTemplateId[]) => Promise<void>;
+  onComplete: (item: TrackedItem) => Promise<void>;
   onSkip: () => void;
 }) {
-  const [selected, setSelected] = useState<StarterTemplateId[]>(["coffee", "milk", "toothpaste"]);
+  const [addresses, setAddresses] = useState<MerchantAddress[]>([]);
+  const [addressRef, setAddressRef] = useState("");
+  const [query, setQuery] = useState("coffee");
+  const [products, setProducts] = useState<MerchantCatalogProduct[]>([]);
+  const [selected, setSelected] = useState<MerchantCatalogProduct | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  const toggle = (id: StarterTemplateId) => {
-    setSelected((current) => current.includes(id)
-      ? current.filter((candidate) => candidate !== id)
-      : [...current, id]);
+  useEffect(() => {
+    let active = true;
+    setBusy(true);
+    void api.zeptoAddresses()
+      .then(({ addresses: next }) => {
+        if (!active) return;
+        setAddresses(next);
+        setAddressRef(next[0]?.reference || "");
+      })
+      .catch((reason: unknown) => {
+        if (active) setError(reason instanceof Error ? reason.message : "Could not connect to Zepto.");
+      })
+      .finally(() => { if (active) setBusy(false); });
+    return () => { active = false; };
+  }, []);
+
+  const runSearch = async () => {
+    if (!addressRef || query.trim().length < 2) return;
+    setBusy(true);
+    setError("");
+    setSelected(null);
+    try {
+      const result = await api.zeptoProducts(query.trim(), addressRef);
+      setProducts(result.products);
+      if (!result.products.length) setError("No current Zepto products matched that search.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not search Zepto.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -2457,24 +2509,44 @@ function StarterPantryOnboarding({
         <div className="starter-onboarding__copy">
           <p className="eyebrow">Welcome, {displayName.split(" ")[0]}</p>
           <h1 id="starter-title">What should Restock watch first?</h1>
-          <p>Choose the essentials already in your routine. You can start small; Restock learns the cadence after completed purchases.</p>
+          <p>Choose an exact product from your connected Zepto account. Stock, SKU and price come from Zepto now—not from a Restock sample.</p>
         </div>
 
-        <fieldset className="starter-grid">
-          <legend className="sr-only">Choose starter pantry items</legend>
-          {starterPantryOptions.map((option) => {
-            const checked = selected.includes(option.id);
+        <div className="starter-live-controls">
+          <label>
+            <span>Saved delivery address</span>
+            <select value={addressRef} onChange={(event) => setAddressRef(event.target.value)} disabled={busy || !addresses.length}>
+              {addresses.map((address) => <option key={address.reference} value={address.reference}>{address.label}</option>)}
+            </select>
+          </label>
+          <form onSubmit={(event) => { event.preventDefault(); void runSearch(); }}>
+            <label>
+              <span>Find a pantry product</span>
+              <input value={query} onChange={(event) => setQuery(event.target.value)} minLength={2} maxLength={120} placeholder="Coffee, milk, toothpaste…" />
+            </label>
+            <button type="submit" className="starter-submit" disabled={busy || !addressRef || query.trim().length < 2}>
+              {busy ? "Checking Zepto…" : "Search live catalog"}
+            </button>
+          </form>
+        </div>
+
+        <fieldset className="starter-grid" hidden={!products.length}>
+          <legend className="sr-only">Choose a live Zepto product</legend>
+          {products.map((option) => {
+            const checked = selected?.merchant_sku_id === option.merchant_sku_id;
             return (
-              <label className="starter-item" data-selected={checked} key={option.id}>
+              <label className="starter-item" data-selected={checked} key={option.merchant_sku_id}>
                 <input
-                  type="checkbox"
+                  type="radio"
+                  name="zepto-product"
                   checked={checked}
-                  onChange={() => toggle(option.id)}
+                  disabled={option.stock_status !== "in_stock"}
+                  onChange={() => setSelected(option)}
                 />
-                <span className="starter-item__image"><img src={option.image} alt="" /></span>
+                <span className="starter-item__image"><Storefront size={34} weight="duotone" /></span>
                 <span className="starter-item__copy">
                   <strong>{option.name}</strong>
-                  <small>{option.detail}</small>
+                  <small>{moneyLabel(option.amount, option.currency)} · {option.stock_status === "in_stock" ? `${option.available_quantity} available` : "Out of stock"}</small>
                 </span>
                 <span className="starter-item__check" aria-hidden="true"><Check size={15} weight="bold" /></span>
               </label>
@@ -2482,23 +2554,30 @@ function StarterPantryOnboarding({
           })}
         </fieldset>
 
-        <p className="starter-onboarding__note">These are starter estimates, not live merchant quotes. Exact Zepto stock and price are checked before any approval.</p>
+        <p className="starter-onboarding__note">Only the provider’s opaque address and exact SKU are stored. Your street address remains with Zepto.</p>
         {error && <p className="login-error" role="alert">{error}</p>}
         <footer className="starter-onboarding__actions">
           <button type="button" className="starter-skip" onClick={onSkip} disabled={busy}>Start empty</button>
           <button
             type="button"
             className="starter-submit"
-            disabled={busy || selected.length === 0}
+            disabled={busy || !selected || !addressRef}
             onClick={() => {
+              if (!selected) return;
               setBusy(true);
               setError("");
-              void onComplete(selected)
+              void api.createHomeCatalogItem({
+                query,
+                merchant_sku_id: selected.merchant_sku_id,
+                merchant_address_ref: addressRef,
+                category: "grocery",
+                quantity: 1,
+              }).then(onComplete)
                 .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not set up your pantry."))
                 .finally(() => setBusy(false));
             }}
           >
-            {busy ? "Placing items…" : `Watch ${selected.length} item${selected.length === 1 ? "" : "s"}`}
+            {busy ? "Adding product…" : "Watch this product"}
             <ArrowRight size={17} />
           </button>
         </footer>
@@ -2613,11 +2692,7 @@ export default function App() {
   const visibleSubscriptions = useMemo(() => {
     if (!backendConnected) return import.meta.env.DEV ? subscriptions : [];
     const tracked = trackedItems.filter((item) => item.track === "teams");
-    return tracked.map((item, index) => {
-      const base = subscriptions.find((subscription) => subscription.itemId === item.item_id)
-        || subscriptions[index % subscriptions.length];
-      return trackedTeamSubscription(base, item);
-    });
+    return tracked.map((item) => trackedTeamSubscription(item));
   }, [backendConnected, trackedItems]);
 
   useEffect(() => {
@@ -2671,11 +2746,10 @@ export default function App() {
       <StarterPantryOnboarding
         displayName={profile.display_name}
         onSkip={() => setOnboardingDismissed(true)}
-        onComplete={async (templateIds) => {
-          const result = await api.createStarterItems(templateIds);
-          setTrackedItems(result.items);
+        onComplete={async (item) => {
+          setTrackedItems((current) => [...current, item]);
           setOnboardingDismissed(true);
-          setStatus(`${result.created} pantry item${result.created === 1 ? "" : "s"} added`);
+          setStatus(`${item.name} is now being watched`);
         }}
       />
     );

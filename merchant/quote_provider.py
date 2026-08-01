@@ -110,6 +110,10 @@ class HomeQuoteProvider:
         if item.preferred_merchant.value != "zepto":
             raise HomeQuoteError("real Home quoting currently supports exact Zepto SKUs only")
         if zepto_checkout.merchant_mode() is not ExecutionMode.REAL:
+            if self.environment.get("RESTOCK_ENV", "development") == "production":
+                raise HomeQuoteError(
+                    "production Home quoting requires the live Zepto catalog"
+                )
             amount = item.last_observed_price or item.last_purchase_amount
             if amount is None:
                 raise HomeQuoteError("mock quote requires an observed or prior purchase price")

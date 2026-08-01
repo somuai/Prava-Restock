@@ -5,13 +5,17 @@ export type Capabilities = {
   reviewer_access_configured?: boolean;
   prava_mode: string;
   home_merchant_mode: string;
+  home_catalog_operational?: boolean;
+  home_onboarding_mode?: string;
   home_payment_mode: string;
+  swiggy_catalog_mode?: string;
   teams_billing_mode: string;
   teams_checkout_runtime_configured?: boolean;
   teams_checkout_runtime_status?: string;
   teams_real_money_enabled?: boolean;
   real_money_enabled: boolean;
   slack_configured: boolean;
+  waitlist_email_configured?: boolean;
   whatsapp_configured: boolean;
   demo_mode: boolean;
 };
@@ -68,6 +72,8 @@ export type TrackedItem = {
   category: string;
   preferred_merchant: string;
   merchant_sku_id: string;
+  merchant_address_ref?: string | null;
+  quantity?: number | null;
   currency: string;
   status: string;
   typical_cadence_days?: number | null;
@@ -89,6 +95,23 @@ export type StarterTemplateId = "coffee" | "milk" | "toothpaste" | "detergent";
 export type StarterTemplate = {
   name: string;
   description: string;
+};
+
+export type MerchantAddress = {
+  reference: string;
+  label: string;
+};
+
+export type MerchantCatalogProduct = {
+  merchant: "zepto";
+  merchant_sku_id: string;
+  store_product_id: string;
+  name: string;
+  amount: string;
+  currency: "INR";
+  available_quantity: number;
+  stock_status: "in_stock" | "out_of_stock";
+  execution_mode: "real";
 };
 
 import { clearSessionToken, isNative, loadSessionToken, saveSessionToken } from "./native";
@@ -220,6 +243,29 @@ export const api = {
     const body = await response.json();
     if (!response.ok) throw new ApiError(response.status, body.detail || "Starter pantry setup failed");
     return body as { created: number; existing: number; items: TrackedItem[] };
+  },
+  zeptoAddresses: () => read<{ addresses: MerchantAddress[] }>("/api/v1/integrations/zepto/addresses"),
+  zeptoProducts: (query: string, addressRef: string) => read<{ products: MerchantCatalogProduct[] }>(
+    `/api/v1/integrations/zepto/products?query=${encodeURIComponent(query)}&address_ref=${encodeURIComponent(addressRef)}`,
+  ),
+  createHomeCatalogItem: async (input: {
+    query: string;
+    merchant_sku_id: string;
+    merchant_address_ref: string;
+    category?: "grocery" | "stationery" | "health" | "other";
+    quantity?: number;
+    typical_cadence_days?: number;
+    price_threshold?: string;
+  }) => {
+    const response = await fetch(endpoint("/api/v1/items/home"), {
+      method: "POST",
+      credentials: "include",
+      headers: await requestHeaders(),
+      body: JSON.stringify(input),
+    });
+    const body = await response.json();
+    if (!response.ok) throw new ApiError(response.status, body.detail || "Live Zepto item setup failed");
+    return body as TrackedItem;
   },
   createTeamsSubscription: async (input: {
     vendor_name: string;

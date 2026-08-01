@@ -252,6 +252,8 @@ class WorkflowService:
     def _validate_quote_usable(quote: MerchantQuote) -> None:
         if quote.stock_status is StockStatus.OUT_OF_STOCK:
             raise ValueError("merchant quote is out of stock")
+        if quote.stock_status is StockStatus.UNKNOWN:
+            raise ValueError("merchant quote does not confirm the exact SKU is in stock")
         ttl_seconds = int(os.getenv("ZEPTO_QUOTE_MAX_AGE_SECONDS", "60"))
         if ttl_seconds <= 0:
             raise ValueError("quote TTL must be positive")

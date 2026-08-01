@@ -82,22 +82,22 @@ After deployment, verify every public endpoint with:
 
 The hosted API is connected to a free Neon Postgres database and Prava's
 sandbox, with `demo_mode=false`. Its public `/capabilities` response remains
-authoritative: Prava is sandbox-configured, merchant payment and Teams billing
-remain `disclosed_mock`, real money is disabled, and channel integrations are
+authoritative: Home catalog mode, Home payment mode, and Teams billing are
+reported independently; real money is disabled, and channel integrations are
 reported configured only after their deployed process authenticates. Secrets
 are held in platform secret storage, not committed or baked into the image.
 
 ## What is real and what is simulated
 
 - **Real:** deterministic trigger logic, code-owned spend caps, the OpenAI Agents SDK tool surface, and Prava sandbox Session API integration. The currently assigned sandbox test card reaches Prava's hosted security step but is blocked by Prava's **Security Check Failed / No Passkey** state; this is a provider-side sandbox provisioning issue, not a completed mandate claim.
-- **Real merchant boundary:** Zepto OAuth/MCP client, address selection, live exact-SKU price lookup, cart preview, exact-price quote normalization, stock handling, and payment-status reconciliation interface. Similar search results are rejected rather than substituted.
+- **Real merchant boundary:** Zepto OAuth/MCP client, authenticated saved-address labels, live product search, exact-SKU onboarding, current-price lookup, cart preview, exact-price quote normalization, stock handling, and payment-status reconciliation interface. Similar search results are rejected rather than substituted. Production never creates starter/template SKUs or substitutes deterministic prices when Zepto is unavailable.
 - **Disclosed simulation in the deployed environment:** final Zepto live-money charge and Restock Teams billing-portal fulfillment. Zepto publishes no merchant payment sandbox, so the final charge stays disabled unless an operator explicitly enables a compatible-card checkout. Teams now has a production-ready hosted-invoice boundary, but the deployed mode remains `disclosed_mock` until Prava production access, a reviewed executor, and an explicitly approved real payment are present.
 - **Hosted runtime:** the current application is published with durable
   Postgres state, password authentication, and sandbox Prava configuration.
   Real-money execution remains disabled and every unavailable boundary remains
   mode-tagged. `/capabilities` is authoritative for the running environment.
 
-Runtime modes are returned by `/capabilities`. `HOME_MERCHANT_MODE` controls catalog/cart quoting independently from `HOME_PAYMENT_MODE`, which controls the final charge. Both default to `disclosed_mock`, so production can truthfully expose a real Zepto quote with a disclosed simulated payment. A real charge additionally requires `ZEPTO_REAL_PAYMENT_ENABLED=1`, production Prava configuration, and an allowlisted payment-browser executor; it is never enabled in CI.
+Runtime modes are returned by `/capabilities`. `HOME_MERCHANT_MODE` controls catalog/cart quoting independently from `HOME_PAYMENT_MODE`, which controls the final charge. Production Home onboarding accepts only products returned by the authenticated Zepto catalog and fails closed on OAuth, provider, stock, or rate-limit failures. Local fixtures remain available only to tests and the explicit offline dry run. A real charge additionally requires `ZEPTO_REAL_PAYMENT_ENABLED=1`, production Prava configuration, and an allowlisted payment-browser executor; it is never enabled in CI.
 
 Teams targets hosted invoice links because they expose a payable, tokenized
 surface without asking Restock to store or automate a vendor-account password.

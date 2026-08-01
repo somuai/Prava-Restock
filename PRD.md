@@ -134,7 +134,7 @@ See §10, Distribution and surface, for the PWA-first launch surface, optional c
 | --- | --- | --- |
 | Trigger, orchestration, spend caps, workflow recovery | Real code with credential-free CI coverage | Active; `demo_mode=false` |
 | Prava | Real sandbox Session creation, passkey handoff, polling, credential normalization, and status reporting are implemented | Sandbox configured; the assigned card is currently blocked at Prava's Security Check Failed / No Passkey step; no production money |
-| Zepto/Swiggy | Real catalog/cart/quote adapters and an explicit browser-payment executor | Catalog and final payment both `disclosed_mock` on the public service |
+| Zepto/Swiggy | Real catalog/cart/quote adapters and an explicit browser-payment executor | Zepto catalog is configured as the production onboarding source and fails closed until provider OAuth is operational; final payment remains separately disclosed/disabled |
 | Restock Teams billing | Hosted-link/manual-required workflow and one-time hosted-invoice adapter; Prava recurring charging is documented but not integrated or sandbox-proved by Restock | Fulfillment `disclosed_mock`; recurring disabled |
 | Slack | Bolt/Socket Mode adapter built; private-workspace delivery/callback evidence recorded | Persistent deployed listener active with rotated credentials |
 | WhatsApp | Cloud API template/webhook adapter built | Optional post-launch; deliberately outside the launch/submission gate |

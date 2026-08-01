@@ -204,6 +204,95 @@ def test_real_price_check_calls_zepto_search(monkeypatch) -> None:
     ) == Decimal("412.5")
 
 
+def test_saved_addresses_are_sanitized_and_catalog_results_are_real() -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.selected = None
+
+        def list_saved_addresses(self):
+            return {
+                "addresses": [
+                    {
+                        "id": "address-1",
+                        "label": "Home",
+                        "addressLine": "must never leave the provider adapter",
+                    }
+                ]
+            }
+
+        def select_saved_address(self, address_id):
+            self.selected = address_id
+            return {"selected": True}
+
+        def search_products(self, query):
+            assert query == "coffee"
+            return {
+                "products": [
+                    {
+                        "productVariantId": "coffee-500g",
+                        "storeProductId": "store-coffee-500g",
+                        "name": "Exact Coffee 500 g",
+                        "price": 38000,
+                        "availableQuantity": 3,
+                    },
+                    {
+                        "productVariantId": "sold-out",
+                        "storeProductId": "store-sold-out",
+                        "name": "Sold out coffee",
+                        "price": 25000,
+                        "availableQuantity": 0,
+                    },
+                ]
+            }
+
+    fake = FakeClient()
+    addresses = zepto_checkout.list_saved_address_summaries(client=fake)
+    assert [address.model_dump(mode="json") for address in addresses] == [
+        {"reference": "address-1", "label": "Home"}
+    ]
+
+    products = zepto_checkout.search_catalog(
+        "coffee", address_ref="address-1", client=fake
+    )
+    assert fake.selected == "address-1"
+    assert products[0].amount == Decimal("380")
+    assert products[0].merchant_sku_id == "coffee-500g"
+    assert products[0].execution_mode is ExecutionMode.REAL
+    assert products[1].stock_status is StockStatus.OUT_OF_STOCK
+
+
+def test_catalog_refuses_an_address_not_owned_by_the_connected_account() -> None:
+    class FakeClient:
+        def list_saved_addresses(self):
+            return {"addresses": [{"id": "address-1", "label": "Home"}]}
+
+        def select_saved_address(self, address_id):
+            raise AssertionError("an unverified address must never be selected")
+
+    with pytest.raises(ZeptoMCPError, match="does not belong"):
+        zepto_checkout.search_catalog(
+            "coffee", address_ref="address-other", client=FakeClient()
+        )
+
+
+def test_search_quote_does_not_claim_stock_when_quantity_is_missing() -> None:
+    quote = zepto_checkout.quote_from_search(
+        {
+            "products": [
+                {
+                    "productVariantId": "coffee-500g",
+                    "name": "Coffee",
+                    "price": 38000,
+                }
+            ]
+        },
+        merchant_sku_id="coffee-500g",
+        product_name="Coffee",
+    )
+
+    assert quote.stock_status is StockStatus.UNKNOWN
+
+
 class FakeZeptoCartClient:
     def __init__(
         self,

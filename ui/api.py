@@ -51,6 +51,9 @@ from channels.slack_routes import router as slack_service_router
 from workflow.service_routes import router as worker_service_router
 from merchant import saas_invoice_checkout, swiggy_checkout, zepto_checkout
 from merchant.zepto_mcp import (
+    ZeptoMCPClient,
+    ZeptoMCPError,
+    ZeptoRateLimitError,
     mcp_authorization_verified_recently,
     mcp_remote_runtime_ready,
 )
@@ -340,6 +343,13 @@ def runtime_modes() -> dict[str, str | bool]:
         os.getenv("ZEPTO_CART_PREPARATION_ENABLED") == "1"
         and bool(os.getenv("ZEPTO_DEVICE_ID", "").strip())
     )
+    home_catalog_real = zepto_checkout.merchant_mode().value == "real"
+    home_catalog_operational = (
+        home_catalog_real
+        and mcp_runtime_ready
+        and cart_ready
+        and oauth_status == "verified_recently"
+    )
     return {
         "auth_mode": _auth_mode(),
         "google_auth_configured": bool(os.getenv("GOOGLE_CLIENT_ID", "").strip()),
@@ -360,7 +370,16 @@ def runtime_modes() -> dict[str, str | bool]:
         ),
         "prava_mode": prava_mode,
         "home_merchant_mode": zepto_checkout.merchant_mode().value,
+        "home_catalog_operational": home_catalog_operational,
+        "home_onboarding_mode": (
+            "live_zepto"
+            if home_catalog_real
+            else "local_fixtures"
+            if not production
+            else "unavailable"
+        ),
         "home_payment_mode": zepto_checkout.payment_mode().value,
+        "swiggy_catalog_mode": os.getenv("SWIGGY_CATALOG_MODE", "unavailable"),
         "swiggy_payment_mode": swiggy_checkout.payment_mode().value,
         "teams_billing_mode": saas_invoice_checkout.billing_mode().value,
         "teams_checkout_runtime_configured": (
@@ -392,6 +411,10 @@ def runtime_modes() -> dict[str, str | bool]:
         "zepto_mcp_runtime_configured": mcp_runtime_ready,
         "zepto_oauth_status": oauth_status,
         "slack_configured": slack_configured,
+        "waitlist_email_configured": all(
+            os.getenv(name, "").strip()
+            for name in ("RESEND_API_KEY", "RESTOCK_WAITLIST_FROM_EMAIL")
+        ),
         "whatsapp_configured": all(
             os.getenv(name, "").strip()
             for name in (
@@ -488,6 +511,20 @@ class StarterOnboardingRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     template_ids: list[StarterTemplateId] = Field(min_length=1, max_length=4)
+
+
+class HomeCatalogItemRequest(BaseModel):
+    """Create a Home item only after resolving it against Zepto's live catalog."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    query: str = Field(min_length=2, max_length=120)
+    merchant_sku_id: str = Field(min_length=1, max_length=255)
+    merchant_address_ref: str = Field(min_length=1, max_length=255)
+    category: Literal["grocery", "stationery", "health", "other"] = "grocery"
+    quantity: int = Field(default=1, ge=1, le=20, strict=True)
+    typical_cadence_days: float | None = Field(default=None, gt=0, le=730)
+    price_threshold: Decimal | None = Field(default=None, gt=Decimal("0"))
 
 
 class TeamsSubscriptionRequest(BaseModel):
@@ -1095,6 +1132,112 @@ def starter_items(
     return {"items": STARTER_TEMPLATE_SUMMARIES}
 
 
+def _require_real_zepto_catalog() -> None:
+    if zepto_checkout.merchant_mode().value != "real":
+        raise HTTPException(
+            status_code=503,
+            detail="live Zepto catalog is not enabled",
+        )
+
+
+def _raise_zepto_http(exc: Exception) -> None:
+    if isinstance(exc, ZeptoRateLimitError):
+        raise HTTPException(
+            status_code=429,
+            detail="Zepto is rate-limiting catalog requests; try again shortly",
+            headers={"Retry-After": str(max(1, int(exc.retry_after_seconds or 30)))},
+        ) from exc
+    raise HTTPException(
+        status_code=503,
+        detail="Zepto connection is unavailable; reconnect the provider and retry",
+    ) from exc
+
+
+@app.get("/api/v1/integrations/zepto/addresses")
+def zepto_saved_addresses(
+    _: str = Depends(require_user),
+) -> dict[str, Any]:
+    """Return labels and opaque IDs only; street addresses stay at Zepto."""
+
+    _require_real_zepto_catalog()
+    try:
+        addresses = zepto_checkout.list_saved_address_summaries()
+    except (ZeptoMCPError, RuntimeError, OSError) as exc:
+        _raise_zepto_http(exc)
+    return {"addresses": [address.model_dump(mode="json") for address in addresses]}
+
+
+@app.get("/api/v1/integrations/zepto/products")
+def zepto_products(
+    query: str = Query(min_length=2, max_length=120),
+    address_ref: str = Query(min_length=1, max_length=255),
+    _: str = Depends(require_user),
+) -> dict[str, Any]:
+    """Search the current Zepto catalog for one authenticated saved address."""
+
+    _require_real_zepto_catalog()
+    try:
+        products = zepto_checkout.search_catalog(query, address_ref=address_ref)
+    except (ZeptoMCPError, RuntimeError, OSError) as exc:
+        _raise_zepto_http(exc)
+    return {"products": [product.model_dump(mode="json") for product in products]}
+
+
+@app.post("/api/v1/items/home", status_code=201)
+def create_home_catalog_item(
+    body: HomeCatalogItemRequest,
+    user_id: str = Depends(require_user),
+    repository: RestockRepository = Depends(get_repository),
+) -> dict[str, Any]:
+    """Persist only a fresh exact-SKU result selected from Zepto."""
+
+    from payments.models import TrackedItem
+
+    _require_real_zepto_catalog()
+    try:
+        products = zepto_checkout.search_catalog(
+            body.query,
+            address_ref=body.merchant_address_ref,
+        )
+    except (ZeptoMCPError, RuntimeError, OSError) as exc:
+        _raise_zepto_http(exc)
+    selected = next(
+        (
+            product
+            for product in products
+            if product.merchant_sku_id == body.merchant_sku_id
+        ),
+        None,
+    )
+    if selected is None:
+        raise HTTPException(
+            status_code=409,
+            detail="selected Zepto SKU is no longer present; search again",
+        )
+    if selected.stock_status.value != "in_stock":
+        raise HTTPException(status_code=409, detail="selected Zepto SKU is out of stock")
+    item = TrackedItem(
+        item_id=uuid4(),
+        user_id=UUID(user_id),
+        name=selected.name,
+        track="home",
+        trigger_type="predicted",
+        category=body.category,
+        sensitive_flag=False,
+        preferred_merchant="zepto",
+        merchant_sku_id=selected.merchant_sku_id,
+        merchant_address_ref=body.merchant_address_ref,
+        quantity=body.quantity,
+        currency=selected.currency,
+        status="active",
+        typical_cadence_days=body.typical_cadence_days,
+        last_observed_price=selected.amount,
+        price_threshold=body.price_threshold,
+    )
+    repository.upsert_item(item)
+    return item.model_dump(mode="json")
+
+
 @app.post("/api/v1/onboarding/starter-items")
 def create_starter_items(
     body: StarterOnboardingRequest,
@@ -1102,6 +1245,11 @@ def create_starter_items(
     user_id: str = Depends(require_user),
     repository: RestockRepository = Depends(get_repository),
 ) -> dict[str, Any]:
+    if os.getenv("RESTOCK_ENV", "development") == "production":
+        raise HTTPException(
+            status_code=409,
+            detail="starter estimates are disabled in production; choose a live Zepto product",
+        )
     selected = list(dict.fromkeys(body.template_ids))
     existing_skus = {
         str(item.get("merchant_sku_id", ""))

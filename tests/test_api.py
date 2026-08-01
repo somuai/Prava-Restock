@@ -336,3 +336,90 @@ def test_authenticated_v1_endpoints_and_action(tmp_path, monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["state"] == "skipped"
     assert response.headers["x-content-type-options"] == "nosniff"
+
+
+def test_live_zepto_onboarding_persists_only_provider_resolved_product(
+    tmp_path, monkeypatch
+) -> None:
+    from merchant.models import MerchantCatalogProduct
+
+    repository = RestockRepository(Database(f"sqlite:///{tmp_path / 'catalog.db'}"))
+    repository.create_schema()
+    repository.upsert_user(demo_user())
+    monkeypatch.setattr(api, "REPOSITORY", repository)
+    monkeypatch.setenv("HOME_MERCHANT_MODE", "real")
+    monkeypatch.setattr(
+        api.zepto_checkout,
+        "list_saved_address_summaries",
+        lambda: [
+            api.zepto_checkout.MerchantAddressSummary(
+                reference="address-1", label="Home"
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        api.zepto_checkout,
+        "search_catalog",
+        lambda query, *, address_ref: [
+            MerchantCatalogProduct(
+                merchant="zepto",
+                merchant_sku_id="real-coffee-variant",
+                store_product_id="real-coffee-store-product",
+                name="Current Zepto Coffee 500 g",
+                amount="389",
+                currency="INR",
+                available_quantity=2,
+                stock_status="in_stock",
+                execution_mode="real",
+            )
+        ],
+    )
+
+    addresses = client.get(
+        "/api/v1/integrations/zepto/addresses", headers=AUTH_HEADERS
+    )
+    assert addresses.status_code == 200
+    assert addresses.json() == {
+        "addresses": [{"reference": "address-1", "label": "Home"}]
+    }
+
+    response = client.post(
+        "/api/v1/items/home",
+        headers=AUTH_HEADERS,
+        json={
+            "query": "coffee",
+            "merchant_sku_id": "real-coffee-variant",
+            "merchant_address_ref": "address-1",
+            "category": "grocery",
+            "quantity": 1,
+            "price_threshold": "400",
+        },
+    )
+    assert response.status_code == 201
+    item = response.json()
+    assert item["merchant_sku_id"] == "real-coffee-variant"
+    assert item["merchant_address_ref"] == "address-1"
+    assert item["last_observed_price"] == "389"
+    assert item["last_purchased_at"] is None
+
+
+def test_production_rejects_estimated_starter_items(tmp_path, monkeypatch) -> None:
+    repository = RestockRepository(Database(f"sqlite:///{tmp_path / 'starter.db'}"))
+    repository.create_schema()
+    repository.upsert_user(demo_user())
+    monkeypatch.setattr(api, "REPOSITORY", repository)
+    monkeypatch.setenv("RESTOCK_ENV", "production")
+    secret = "production-starter-test-secret-over-32-characters"
+    monkeypatch.setenv("RESTOCK_SESSION_SECRET", secret)
+    headers = {
+        "Authorization": f"Bearer {session_auth.mint(api.DEFAULT_USER_ID, secret)}"
+    }
+
+    response = client.post(
+        "/api/v1/onboarding/starter-items",
+        headers=headers,
+        json={"template_ids": ["coffee"]},
+    )
+
+    assert response.status_code == 409
+    assert "live Zepto product" in response.json()["detail"]

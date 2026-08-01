@@ -69,6 +69,17 @@ def test_disclosed_mock_quote_is_deterministic_and_exact(repository, monkeypatch
     assert first.quote_reference == second.quote_reference
 
 
+def test_production_never_falls_back_to_a_deterministic_quote(
+    repository, monkeypatch
+) -> None:
+    monkeypatch.setenv("RESTOCK_ENV", "production")
+    monkeypatch.setenv("HOME_MERCHANT_MODE", "disclosed_mock")
+    item = setup_item(repository)
+
+    with pytest.raises(HomeQuoteError, match="live Zepto catalog"):
+        build_home_quote_provider(repository)(item)
+
+
 def test_real_provider_passes_only_exact_item_context(repository, monkeypatch) -> None:
     monkeypatch.setenv("HOME_MERCHANT_MODE", "real")
     monkeypatch.setenv("ZEPTO_DEVICE_ID", "device-env-only")
