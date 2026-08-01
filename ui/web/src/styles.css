@@ -3849,6 +3849,13 @@ button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visibl
   cursor: pointer;
 }
 .login-recovery[open] summary { color: var(--ink); }
+
+.login-recovery__hint {
+  margin: 0.7rem 0 0;
+  color: var(--ink-soft);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
 .login-legal {
   display: flex;
   flex-wrap: wrap;

@@ -56,7 +56,8 @@ describe("production login surface", () => {
       />,
     );
 
-    expect(markup).toContain("Temporary reviewer access");
+    expect(markup).toContain("Prava reviewer access");
+    expect(markup).toContain("pre-seeded review pantry");
     expect(markup).toContain("Reviewer password");
     expect(markup).not.toContain("Owner recovery access");
   });

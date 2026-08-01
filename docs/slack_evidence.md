@@ -21,8 +21,9 @@ handler now replaces action buttons with a terminal confirmation after success a
 treats an already-processed workflow as idempotent instead of logging it as an
 unexpected failure.
 
-The remaining channel activation gate is to run the listener persistently in the
-deployed environment with rotated, non-exposed credentials.
+The listener is now deployed persistently in the Railway `restock-slack` service
+with rotated, non-exposed credentials. Its most recent startup log confirms
+`Bolt app is running!`; the service is healthy alongside the API and worker.
 
 The app intentionally holds `chat:write` rather than broader channel-read scopes.
 Notification delivery succeeded with that least-privilege scope.

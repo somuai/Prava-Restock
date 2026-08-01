@@ -2294,9 +2294,12 @@ export function LoginScreen({
 
           {authMode === "hybrid" && onPasswordLogin && (
             <details className="login-recovery">
-              <summary>{reviewerAccess ? "Temporary reviewer access" : "Owner recovery access"}</summary>
+              <summary>{reviewerAccess ? "Prava reviewer access" : "Owner recovery access"}</summary>
               <form onSubmit={(event) => void submit(event)}>
                 <label htmlFor="solo-password">{reviewerAccess ? "Reviewer password" : "Recovery password"}</label>
+                {reviewerAccess && (
+                  <p className="login-recovery__hint">This opens a pre-seeded review pantry; it is not a sign-up flow.</p>
+                )}
                 <input
                   id="solo-password"
                   name="password"
@@ -2309,7 +2312,7 @@ export function LoginScreen({
                 />
                 <p className="login-error" role="alert" aria-live="assertive">{error}</p>
                 <button className="login-submit" type="submit" disabled={busy || !password}>
-                  {busy ? "Checking access…" : "Use recovery access"}
+                  {busy ? "Checking access…" : reviewerAccess ? "Open reviewer pantry" : "Use recovery access"}
                 </button>
               </form>
             </details>
