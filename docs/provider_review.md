@@ -23,4 +23,5 @@ blocker, not an end-to-end success claim. No live purchase is attempted.
 
 Fresh Google sign-in is also available. It creates a new Restock account and
 shows the first-run starter-pantry onboarding, rather than exposing the
-reviewer's seeded fixtures.
+reviewer's seeded fixtures. If someone chose **Start empty**, the empty pantry
+keeps an **Add pantry items** control so the starter selection can be reopened.

@@ -573,6 +573,19 @@ button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visibl
   letter-spacing: -.035em;
 }
 .shelf-empty span { font-size: 12px; }
+.shelf-empty__action {
+  justify-self: center;
+  margin-top: 8px;
+  border: 1px solid color-mix(in srgb, var(--forest) 42%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--paper) 90%, transparent);
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--forest) 16%, transparent);
+  color: var(--forest);
+  font: 700 12px/1 "Inter", sans-serif;
+  letter-spacing: .02em;
+  padding: 10px 15px;
+}
+.shelf-empty__action:hover { transform: translateY(-1px); background: var(--paper); }
 
 .product-detail,
 .subscription-detail {

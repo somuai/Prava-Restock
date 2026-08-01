@@ -1211,12 +1211,14 @@ function LivingPantry({
   products: trackedProducts,
   onOpen,
   onPreview,
+  onStartPantry,
   workflows,
   notification,
 }: {
   products: PantryProduct[];
   onOpen: (product: PantryProduct) => void;
   onPreview: () => void;
+  onStartPantry?: () => void;
   workflows: WorkflowRun[];
   notification?: Notification;
 }) {
@@ -1339,6 +1341,11 @@ function LivingPantry({
           <div className="shelf-empty">
             <strong>Everything is stocked.</strong>
             <span>The next item will appear here when its trigger fires.</span>
+            {onStartPantry && (
+              <button type="button" className="shelf-empty__action" onClick={onStartPantry}>
+                Add pantry items
+              </button>
+            )}
           </div>
         )}
       </section>
@@ -2785,6 +2792,7 @@ export default function App() {
           products={visibleProducts}
           onOpen={openProduct}
           onPreview={() => sound("hover")}
+          onStartPantry={() => setOnboardingDismissed(false)}
           workflows={workflows}
           notification={homeNotification}
         />
