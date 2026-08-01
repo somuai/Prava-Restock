@@ -62,7 +62,7 @@ storage. The cookie is deleted on sign-out. Production login attempts are
 rate-limited through shared Postgres state, and the API fails closed if that
 shared throttle is unavailable.
 
-Run the scheduler as a separate process with `.venv/bin/python -m workflow.worker`. The `Procfile` keeps web and worker commands separate so multiple web replicas cannot duplicate trigger scans. For the student deployment, `.github/workflows/production-scheduler.yml` calls the authenticated, database-leased `/api/v1/service/worker/scan` endpoint instead, avoiding the cost of an always-on worker process.
+Run the scheduler as a separate process with `.venv/bin/python -m workflow.worker`. The `Procfile` keeps web and worker commands separate so multiple web replicas cannot duplicate trigger scans. Railway now runs that worker as its own leased service; `.github/workflows/production-scheduler.yml` remains a credentialed fallback for a deployment that cannot keep an always-on worker running.
 
 ## Deployment
 

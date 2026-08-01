@@ -5,7 +5,7 @@ import pytest
 
 from merchant import mock_checkout, zepto_checkout
 from merchant.models import ExecutionMode, MerchantQuote, StockStatus
-from merchant.zepto_mcp import ZeptoMCPClient, ZeptoMCPError
+from merchant.zepto_mcp import ZeptoMCPClient, ZeptoMCPError, ZeptoRateLimitError
 
 
 @pytest.fixture(autouse=True)
@@ -347,6 +347,39 @@ def test_preview_order_never_confirms_order(monkeypatch) -> None:
             },
         )
     ]
+
+
+def test_rate_limited_read_is_retried_once_without_waiting(monkeypatch) -> None:
+    client = ZeptoMCPClient()
+    attempts = 0
+
+    async def fake_call_once(name, arguments):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise ZeptoRateLimitError("429", retry_after_seconds=0)
+        return {"products": []}
+
+    monkeypatch.setattr(client, "_call_once_async", fake_call_once)
+
+    assert client.search_products("coffee") == {"products": []}
+    assert attempts == 2
+
+
+def test_rate_limited_cart_mutation_is_never_retried(monkeypatch) -> None:
+    client = ZeptoMCPClient()
+    attempts = 0
+
+    async def fake_call_once(name, arguments):
+        nonlocal attempts
+        attempts += 1
+        raise ZeptoRateLimitError("429", retry_after_seconds=0)
+
+    monkeypatch.setattr(client, "_call_once_async", fake_call_once)
+
+    with pytest.raises(ZeptoRateLimitError, match="429"):
+        client.update_cart({"cartItems": []})
+    assert attempts == 1
 
 
 def test_exact_cart_preparation_refuses_substitution_before_cart_mutation(monkeypatch) -> None:

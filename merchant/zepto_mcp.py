@@ -32,6 +32,54 @@ class ZeptoMCPError(RuntimeError):
     pass
 
 
+class ZeptoRateLimitError(ZeptoMCPError):
+    """Zepto refused a call because its provider-side request budget is exhausted."""
+
+    def __init__(self, message: str, *, retry_after_seconds: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+
+
+READ_ONLY_TOOLS = frozenset(
+    {
+        "list_saved_addresses",
+        "get_location_serviceability",
+        "search_products",
+        "view_cart",
+        "get_payment_methods",
+        "check_payment_status",
+        "list_order_history",
+    }
+)
+
+
+def _retry_after(payload: Any) -> float | None:
+    """Extract a bounded Retry-After hint without trusting provider payload shape."""
+
+    if isinstance(payload, Mapping):
+        for key in ("retryAfter", "retry_after", "retryAfterSeconds", "retry_after_seconds"):
+            if payload.get(key) is not None:
+                try:
+                    return max(0.0, min(float(payload[key]), 5.0))
+                except (TypeError, ValueError):
+                    pass
+        for value in payload.values():
+            found = _retry_after(value)
+            if found is not None:
+                return found
+    if isinstance(payload, list):
+        for value in payload:
+            found = _retry_after(value)
+            if found is not None:
+                return found
+    return None
+
+
+def _is_rate_limited(value: Any) -> bool:
+    text = str(value).lower()
+    return "429" in text or "too many requests" in text or "rate limit" in text
+
+
 def resolve_mcp_remote_binary() -> str:
     """Resolve only the locked bridge; production cannot replace the image binary."""
 
@@ -126,7 +174,7 @@ class ZeptoMCPClient:
     def __init__(self, *, timeout_seconds: float = 45) -> None:
         self.timeout_seconds = timeout_seconds
 
-    async def _call_async(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def _call_once_async(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         try:
             server = StdioServerParameters(
                 command=resolve_mcp_remote_binary(),
@@ -137,15 +185,43 @@ class ZeptoMCPClient:
                     await session.initialize()
                     result = await session.call_tool(name, arguments)
         except Exception as exc:
+            if _is_rate_limited(exc):
+                raise ZeptoRateLimitError(
+                    f"Zepto rate-limited {name}; wait before trying again"
+                ) from exc
             clear_mcp_authorization_verification()
             raise ZeptoMCPError(f"Zepto MCP call failed: {name}") from exc
         if getattr(result, "isError", False):
-            clear_mcp_authorization_verification()
             payload = _content_to_payload(result)
+            if _is_rate_limited(payload):
+                raise ZeptoRateLimitError(
+                    f"Zepto rate-limited {name}; wait before trying again",
+                    retry_after_seconds=_retry_after(payload),
+                )
+            clear_mcp_authorization_verification()
             raise ZeptoMCPError(f"Zepto tool {name} returned an error: {payload}")
         payload = _content_to_payload(result)
         record_mcp_authorization_success()
         return payload
+
+    async def _call_async(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Retry one provider-throttled read, but never retry a mutating tool."""
+
+        attempts = 2 if name in READ_ONLY_TOOLS else 1
+        for attempt in range(attempts):
+            try:
+                return await self._call_once_async(name, arguments)
+            except ZeptoRateLimitError as exc:
+                if attempt + 1 >= attempts:
+                    raise
+                delay = exc.retry_after_seconds
+                if delay is None:
+                    try:
+                        delay = float(os.getenv("ZEPTO_RATE_LIMIT_RETRY_SECONDS", "1"))
+                    except ValueError:
+                        delay = 1.0
+                await asyncio.sleep(max(0.0, min(delay, 5.0)))
+        raise AssertionError("unreachable")
 
     def call(self, name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
         try:

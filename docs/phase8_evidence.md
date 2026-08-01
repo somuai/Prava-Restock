@@ -17,6 +17,15 @@ The Restock Home merchant boundary uses Zepto's official remote MCP server throu
 
 No order was confirmed, no payment link was created, no one-time credential was entered into Zepto, and no real money was spent.
 
+## Provider-health recheck — 2 August 2026
+
+A new read-only `list_saved_addresses` call completed through Zepto's official
+MCP OAuth bridge and returned two saved addresses. The provider-side HTTP 429
+reported during an earlier check was no longer present. Restock retries a
+rate-limited read-only MCP operation at most once with a bounded delay. It never
+automatically retries address/store selection, cart mutation, order preview, or
+payment-order creation, because those operations can have side effects.
+
 ## Disclosure boundary
 
 - Real: Prava sandbox approval and Zepto OAuth/catalog/address/exact-SKU price/cart/quote operations.

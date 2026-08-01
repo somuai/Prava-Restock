@@ -51,17 +51,18 @@ number/business approval remains provider-controlled.
 
 ## External launch gates
 
-- Keep the current managed Postgres deployment migrated and provision a separate
-  worker service before relying on continuous background scans. The worker may
-  require paid hosting and therefore is not activated automatically.
+- Keep the current managed Postgres deployment migrated. A separate Railway
+  worker is now deployed and running with a database lease; continuous scans no
+  longer depend on a web-process scheduler.
 - Configure permanent high-entropy session/API secrets in platform secret storage.
 - Repeat the proven restore drill against the final disposable managed Postgres
   service before production cutover.
   Run `pg_dump`/`pg_restore` from a client whose major version is at least the
   managed server's major version; `PG_DUMP_BIN` and `PG_RESTORE_BIN` can select
   explicitly installed compatible binaries.
-- Run the Slack listener as a persistent deployed process with rotated credentials.
-  Live notification delivery and a persisted workflow callback are complete.
+- Keep the deployed Slack Socket Mode listener healthy and rotate its credentials
+  after the event. Live notification delivery, a persisted workflow callback,
+  and the persistent Railway process are complete.
 - Optional after launch: configure Meta's WhatsApp assets and complete a real
   template/webhook round trip. This is not a hackathon submission gate.
 - Validate push/deep links on physical devices and enroll in stores only after approval.
@@ -69,10 +70,11 @@ number/business approval remains provider-controlled.
   and compatible real card. Default checkout remains disclosed simulation.
 
 The public Railway service runs the current application with `demo_mode=false`
-and Prava sandbox configuration present. Real money is disabled, Home and Teams
-final execution remain disclosed simulation, and channel listeners are not
-persistently deployed. Its live `/capabilities` response is authoritative; this
-document records only the last verified snapshot.
+and Prava sandbox configuration present. Real money is disabled and Home and
+Teams final execution remain disclosed simulation. The API, leased worker, and
+Slack listener are deployed as separate Railway services. Its live
+`/capabilities` response is authoritative; this document records only the last
+verified snapshot.
 
 ## Truthful current matrix
 
@@ -83,7 +85,24 @@ document records only the last verified snapshot.
 | Home catalog/cart/quote | Real-capable Zepto/Swiggy adapters | `disclosed_mock` |
 | Home final payment | Operator-gated browser executor | `disclosed_mock`; real money disabled |
 | Teams billing | One-time hosted-invoice adapter | Fulfillment `disclosed_mock`; recurring disabled |
-| Slack | Adapter plus private-workspace delivery/callback evidence | Persistent deployed listener not activated |
+| Slack | Adapter plus private-workspace delivery/callback evidence | Persistent deployed listener active |
 | WhatsApp | Template sender and signed webhook adapter | Optional post-launch; not a submission gate |
 | Native | Capacitor wrappers and simulator proof | Physical devices/stores pending |
 | Persistence | SQLite local/demo; Postgres path through `20260801_11` | Public service uses durable Postgres state |
+
+## Remaining provider gates
+
+- Prava production credentials and the production enablement decision are due
+  from Prava on 2 August 2026. Until then, the official sandbox host and test
+  credential remain the only enabled Prava boundary.
+- The hackathon-provided Linq access and its authoritative integration contract
+  are also due on 2 August 2026. No endpoint, credential name, SDK shape, or
+  security property is assumed before those materials arrive.
+- A fresh read-only Zepto MCP authorization check on 2 August 2026 completed
+  successfully and returned saved addresses. The earlier provider-side 429 was
+  not present. Read-only calls now receive one bounded retry on 429; mutating
+  cart and payment calls are never automatically retried.
+- NANDA's reusable Prava payments adapter is implemented in a draft upstream
+  pull request. Its deterministic upstream gate is green; a fresh interactive
+  Prava sandbox/passkey proof remains required before marking the pull request
+  ready.
