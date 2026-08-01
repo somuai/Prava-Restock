@@ -7,14 +7,17 @@ the official hackathon window.
 
 ## Verified in code and CI
 
-- Durable versioned migrations through `20260722_07`; the latest revisions add
-  merchant checkout attempts, durable auth throttles, and completion-effect
-  recovery in addition to the Slack delivery outbox.
+- Durable versioned migrations through `20260801_10`; the latest revisions add
+  Google identity, waitlist leads, and the null-safe manual-renewal workflow
+  boundary in addition to merchant checkout attempts, durable auth throttles,
+  completion-effect recovery, and the Slack delivery outbox.
 - Separate web, leased worker, and optional Slack processes.
-- Tenant isolation, RBAC, signed expiring sessions, bearer-only API semantics,
+- Tenant isolation, RBAC, signed expiring sessions, cookie-only browser
+  sessions with native bearer support,
   security headers, CORS allow-listing, and rate limiting.
-- Production-safe solo-owner login using a configured scrypt password hash and
-  short-lived signed session; the web PWA keeps the session in session storage only.
+- Production-safe solo-owner and Google login using a short-lived signed
+  session; the web PWA uses only the Secure, HttpOnly cookie while native
+  wrappers may keep the bearer in device-secure storage.
   Login-attempt windows are durable in PostgreSQL and serialized across replicas.
 - The spend-cap policy is enforced by an Agents SDK tool-input Guardrail before
   Prava Session creation.
@@ -26,7 +29,7 @@ the official hackathon window.
 - Sanitized audit, correlation IDs, structured request logs, and aggregate metrics.
 - Configurable retention plus SQLite and Postgres backup/restore tooling.
 - Local PostgreSQL production-mode proof completed against a disposable
-  PostgreSQL 17 database: migrations through `20260722_07`, repository and
+  PostgreSQL 17 database: migrations through `20260801_10`, repository and
   recovery behavior, `/ready`, lease fencing, custom-format backup, restore into
   a fresh database, and restored-row verification pass.
   See [PostgreSQL evidence](postgres_evidence.md).
@@ -48,8 +51,9 @@ number/business approval remains provider-controlled.
 
 ## External launch gates
 
-- Provision managed Postgres and a separate worker service. This may require paid
-  hosting and therefore is not activated automatically.
+- Keep the current managed Postgres deployment migrated and provision a separate
+  worker service before relying on continuous background scans. The worker may
+  require paid hosting and therefore is not activated automatically.
 - Configure permanent high-entropy session/API secrets in platform secret storage.
 - Repeat the proven restore drill against the final disposable managed Postgres
   service before production cutover.
@@ -58,28 +62,28 @@ number/business approval remains provider-controlled.
   explicitly installed compatible binaries.
 - Run the Slack listener as a persistent deployed process with rotated credentials.
   Live notification delivery and a persisted workflow callback are complete.
-- Configure Meta's WhatsApp test/production assets and complete a real template/webhook
-  round trip.
+- Optional after launch: configure Meta's WhatsApp assets and complete a real
+  template/webhook round trip. This is not a hackathon submission gate.
 - Validate push/deep links on physical devices and enroll in stores only after approval.
 - Execute any real Zepto/Swiggy payment only with an explicit operator confirmation
   and compatible real card. Default checkout remains disclosed simulation.
 
-The public Railway service runs the current application, but it is a credential-free,
-unactivated demo runtime until those gates are completed. Its `/capabilities` response
-is the authoritative disclosure and currently reports `demo_mode=true`, real money
-disabled, Prava sandbox unconfigured, channel integrations unconfigured, and merchant
-and billing execution as disclosed simulation.
+The public Railway service runs the current application with `demo_mode=false`
+and Prava sandbox configuration present. Real money is disabled, Home and Teams
+final execution remain disclosed simulation, and channel listeners are not
+persistently deployed. Its live `/capabilities` response is authoritative; this
+document records only the last verified snapshot.
 
 ## Truthful current matrix
 
 | Boundary | Implemented | Public runtime |
 | --- | --- | --- |
-| Trigger/orchestrator/workflow | Real deterministic code and CI | Demo mode |
-| Prava | Real sandbox Session/passkey/polling/report-status client | `sandbox_unconfigured` |
+| Trigger/orchestrator/workflow | Real deterministic code and CI | Active; `demo_mode=false` |
+| Prava | Real sandbox Session/passkey/polling/report-status client | Sandbox configured; no production money |
 | Home catalog/cart/quote | Real-capable Zepto/Swiggy adapters | `disclosed_mock` |
 | Home final payment | Operator-gated browser executor | `disclosed_mock`; real money disabled |
 | Teams billing | One-time hosted-invoice adapter | Fulfillment `disclosed_mock`; recurring disabled |
 | Slack | Adapter plus private-workspace delivery/callback evidence | Persistent deployed listener not activated |
-| WhatsApp | Template sender and signed webhook adapter | Meta assets and provider activation pending |
+| WhatsApp | Template sender and signed webhook adapter | Optional post-launch; not a submission gate |
 | Native | Capacitor wrappers and simulator proof | Physical devices/stores pending |
-| Persistence | SQLite local/demo; Postgres path through `20260722_07` | Public service remains unactivated demo |
+| Persistence | SQLite local/demo; Postgres path through `20260801_10` | Public service uses durable Postgres state |

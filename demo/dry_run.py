@@ -8,7 +8,9 @@ import webbrowser
 
 from demo.seed_reset import demo_user, load_seed_items
 from payments import prava_client
+from payments.models import TriggerType
 from storage import Database, RestockRepository
+from triggers import consumption_model, renewal_model
 from workflow import WorkflowService
 
 
@@ -59,6 +61,16 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _trigger_explanation(item) -> str:
+    """Return the deterministic reason the seeded item enters the workflow."""
+
+    if item.trigger_type is TriggerType.PREDICTED:
+        proposal = consumption_model.propose(item)
+        return proposal["message"].rsplit(" Reorder from ", 1)[0]
+    proposal = renewal_model.propose(item)
+    return proposal["message"].rsplit(" Approve, adjust, or skip?", 1)[0]
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv or [])
     items = load_seed_items()
@@ -88,6 +100,15 @@ def main(argv: list[str] | None = None) -> int:
     completed = 0
     for index, item in enumerate(items, start=1):
         print(f"\n[{index}/{len(items)}] {item.name} ({item.track.value})")
+        should_fire = (
+            consumption_model.should_fire(item)
+            if item.trigger_type is TriggerType.PREDICTED
+            else renewal_model.should_fire(item)
+        )
+        if not should_fire:
+            print("  outcome: not fired — no trigger condition is currently met")
+            continue
+        print(f"  outcome: fired — {_trigger_explanation(item)}")
         run = service.begin(demo_user(), item)
         print("  1. triggered and intent created")
         print("  2. proactive notification persisted")

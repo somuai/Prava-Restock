@@ -14,14 +14,14 @@ Show the Home/Teams tabs and point out the current sandbox and disclosed-mock ba
 2. Open the real Zepto evidence: OAuth, product search, reversible cart, exact `confirmOrder=false` quote. State clearly that no Zepto merchant payment sandbox exists.
 3. Tap Approve. Open the real Prava sandbox page and complete the documented test-card/passkey flow.
 4. Return to the PWA. Show `completed`, with the final Zepto live-money step labeled `disclosed_mock`.
-5. Briefly show the over-15% price path requiring reapproval and the out-of-stock path creating no transaction.
+5. Briefly show that any price increase, or a decrease greater than 15%, requires reapproval; then show the out-of-stock path creating no transaction.
 
 ## 2:15–3:25 — Restock Teams
 
 1. Switch to Teams. Show the renewal notification in the Slack-style surface or real private Slack workspace when configured.
 2. Explain that the cheaper plan is proposed but never selected automatically.
 3. Tap the explicit Switch plan action and show the same Prava approval boundary.
-4. State that the vendor billing call is disclosed simulation until Prava confirms standing recurring mandates; the one-time approval workflow is real.
+4. State that Prava documents recurring mandate charging, but Restock has not integrated or sandbox-proved that separate boundary. The demo therefore uses the real hosted-link/manual-required decision workflow and labels vendor fulfillment as disclosed simulation.
 
 ## 3:25–4:10 — Safety proof
 

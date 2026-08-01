@@ -118,7 +118,7 @@ setup, and any simulated boundary must be identified plainly in the submission.
 - Proactive notification UI with approve/adjust/skip, identical pattern for both tracks.
 - Savings/audit log after every autonomous action.
 
-See §10, Distribution and surface, for the primary WhatsApp/Slack surfaces, the hackathon mock boundary, and why Restock is not embedded in a merchant’s app.
+See §10, Distribution and surface, for the PWA-first launch surface, optional channel adapters, and why Restock is not embedded in a merchant’s app.
 
 **Not part of the guaranteed judged flow:**
 
@@ -132,12 +132,12 @@ See §10, Distribution and surface, for the primary WhatsApp/Slack surfaces, the
 
 | Boundary | Built capability | Current public activation |
 | --- | --- | --- |
-| Trigger, orchestration, spend caps, workflow recovery | Real code with credential-free CI coverage | Active in demo mode |
-| Prava | Real sandbox Session creation, passkey handoff, polling, credential normalization, and status reporting are implemented | `sandbox_unconfigured` on the public service; no production money |
+| Trigger, orchestration, spend caps, workflow recovery | Real code with credential-free CI coverage | Active; `demo_mode=false` |
+| Prava | Real sandbox Session creation, passkey handoff, polling, credential normalization, and status reporting are implemented | Sandbox configured on the public service; no production money |
 | Zepto/Swiggy | Real catalog/cart/quote adapters and an explicit browser-payment executor | Catalog and final payment both `disclosed_mock` on the public service |
-| Restock Teams billing | One-time hosted-invoice adapter; recurring mandates explicitly unsupported | Fulfillment `disclosed_mock` |
+| Restock Teams billing | Hosted-link/manual-required workflow and one-time hosted-invoice adapter; Prava recurring charging is documented but not integrated or sandbox-proved by Restock | Fulfillment `disclosed_mock`; recurring disabled |
 | Slack | Bolt/Socket Mode adapter built; private-workspace delivery/callback evidence recorded | Persistent deployed listener with rotated credentials still gated |
-| WhatsApp | Cloud API template/webhook adapter built | Meta number, token, opt-in, template, and webhook activation still gated |
+| WhatsApp | Cloud API template/webhook adapter built | Optional post-launch; deliberately outside the launch/submission gate |
 | Native | Capacitor Android/iOS wrappers built and simulator-tested | Physical-device/store distribution not activated |
 
 The running `/capabilities` response, not a static document, is authoritative
@@ -204,7 +204,7 @@ User <--approve/adjust/skip--> Restock Backend <--session/polling--> Prava
 | Orchestrator agent | Tool-using loop (OpenAI Agents SDK) deciding what/when to propose, sequencing Prava + merchant calls | Scheduled tick, not a chat handler; trigger-type-agnostic |
 | Prava client | Server-side Session creation, payment-result polling, one-time credential custody, and terminal status reporting | The browser Prava flow owns passkey approval; no mandate webhook is assumed |
 | Merchant client | Zepto/Swiggy MCP catalog/cart/quote operations plus a separate Playwright payment boundary; one-time hosted invoice support for Teams | Catalog truth and final-payment execution expose independent real/simulated modes |
-| Workflow store | SQLite for local/demo use; Postgres-compatible SQLAlchemy repositories and Alembic migrations through `20260722_07` for production | Persists references and state only, never raw payment credentials or approval URLs |
+| Workflow store | SQLite for local/demo use; Postgres-compatible SQLAlchemy repositories and Alembic migrations through `20260801_10` for production | Persists references and state only, never raw payment credentials or approval URLs |
 | UI and channels | PWA decision inbox plus Slack and WhatsApp adapters | Built capability is distinct from provider activation; `/capabilities` is authoritative at runtime |
 
 See §10, Distribution and surface, for why this architecture is independent of every merchant app and where users actually interact with Restock.
@@ -227,7 +227,7 @@ vendor’s billing surface; it does not live inside the vendor’s dashboard.
 
 The user-facing surface is track-specific:
 
-- **Restock Home — WhatsApp first.** The primary consumer surface is the WhatsApp Business Platform, using proactive template messages with interactive Approve, Adjust, and Skip buttons. This is not a fallback. It gives Restock near-zero install friction and uses the dominant channel for this kind of transactional commerce messaging in India today. A PWA with web push is the secondary option for users who would rather not use WhatsApp.
+- **Restock Home — PWA at launch.** The Restock PWA is the primary launch and hackathon surface, with proactive Approve, Adjust, and Skip controls and explicit sandbox/simulation labels at affected provider steps. The WhatsApp Cloud API adapter remains a post-launch option for near-zero-friction delivery after Meta setup; activating it is not a launch or submission gate.
 - **Restock Teams — Slack.** Small teams and founders already handle billing alerts and approvals where they work. Restock Teams meets that audience in Slack, not WhatsApp.
 - **Native delivery — wrapper built, store launch deferred.** The shared PWA is
   wrapped with Capacitor for Android and iOS. Physical-device push/deep-link
@@ -235,7 +235,7 @@ The user-facing surface is track-specific:
   Paying for and maintaining an App Store presence before notification-action
   retention is demonstrated would still be premature.
 
-**Hackathon scope:** Meta's test-number path can be exercised before full production verification, while a production-branded WhatsApp number still requires the relevant Meta onboarding, number, billing, opt-in, and template approvals. Meta documents template review as taking up to 24 hours; it does not publish a guaranteed 1–2 week business-verification SLA. The guaranteed demo surface therefore remains a mocked chat experience reproducing the proactive message and Approve, Adjust, and Skip controls. Any test-number integration is labeled separately and must not be presented as a verified production WhatsApp deployment.
+**Hackathon scope:** The real Restock PWA is the submission surface; it is not a mocked WhatsApp client. The WhatsApp adapter may remain in the codebase, but Meta onboarding, number, billing, opt-in, template, and webhook activation are optional post-launch work and are not a submission gate. Any future test-number integration must be labeled separately and must not be presented as a verified production WhatsApp deployment.
 
 ### 11. Design principles
 
@@ -333,7 +333,7 @@ AuditLogEntry
 This public model explains the agent contract. The durable database additionally
 contains tenants, memberships, invitations, consent, workflow runs, quotes,
 notification actions, idempotency records, delivery outboxes, checkout attempts,
-leases, and completion effects. The Alembic chain through `20260722_07` is the
+leases, and completion effects. The Alembic chain through `20260801_10` is the
 authoritative production schema.
 
 ### 13. Trigger sources
@@ -426,8 +426,8 @@ Phase 8 proof items:
 
 - Never call `complete_merchant_checkout` without a `MandateResult` showing passkey approval.
 - Never propose an amount exceeding `per_item_cap` or `monthly_cap` — a Guardrail on `request_prava_intent`, not a prompt instruction the model could get wrong.
-- If a fresh exact-SKU quote deviates from the approved quote by more than 15%,
-  or the item is out of stock, the workflow must re-route to the user rather
+- If a fresh exact-SKU quote increases at all or decreases by more than 15%
+  from the approved quote, or the item is out of stock, the workflow must re-route to the user rather
   than proceed. This remains a Phase 8 live-boundary proof item, not an Agents
   SDK Guardrail claim.
 - For known-date items: never auto-select `switch_to_alternate` without explicit approval, even when strictly cheaper — a plan switch can carry consequences (feature loss, contract terms) the amount alone doesn’t capture.
@@ -505,7 +505,7 @@ time rather than assuming.
 | Scenario | Handling |
 | --- | --- |
 | Merchant reports out-of-stock | Notify user; no transaction created; re-checked next cycle |
-| Price deviates >15% from last purchase | Require explicit re-approval |
+| Price increases at all, or decreases >15% from the approved quote | Require explicit re-approval |
 | Cheaper alternate plan available (Teams) | Propose the switch; never auto-select it |
 | Mandate/passkey rejected or times out | `Intent.status = expired`; item re-enters normal check cycle |
 | Merchant/billing API error or timeout | Retry with backoff (max 2), then notify user and log the failure |
@@ -570,7 +570,8 @@ restaurant-delivery platform like Zomato or Swiggy's core product.
 The implementation separates the FastAPI service, leased scheduler worker, and
 optional channel listener. SQLite is the local/demo default. Production uses
 the Postgres-compatible repository and Alembic migrations through
-`20260722_07`; a managed database, separate worker, secrets, and restore drill
+`20260801_10`; the public deployment already uses managed Postgres. A separate
+worker, final production secrets, and a restore drill against the final target
 remain external cutover gates. Real-money checkout stays disabled until an
 operator explicitly authorizes a controlled purchase.
 
@@ -579,7 +580,7 @@ operator explicitly authorizes a controlled purchase.
 A structured, sanitized log line is emitted at every workflow transition.
 User-facing audit and notification compatibility stores use SQLite locally;
 the resumable production path uses Postgres-compatible repositories with
-Alembic migrations through `20260722_07`. Runtime request logs, metrics, and
+Alembic migrations through `20260801_10`. Runtime request logs, metrics, and
 the user-facing audit/savings feed remain separate, and none may contain raw
 credentials or approval URLs.
 
@@ -627,11 +628,10 @@ vs. effort rather than by how they’re listed in Appendix A.
    (highest priority — this is the product’s core value prop, not
    a nice-to-have). A web dashboard nobody has open defeats the entire “reaches you before
    you ask” thesis. The PWA, Slack adapter, WhatsApp Cloud API adapter, and
-   Capacitor wrappers are built. Slack deployment with rotated credentials,
-   Meta number/template/webhook configuration, physical-device verification,
-   and store publication remain external activation gates. Meta publishes
-   template-review guidance of up to 24 hours and no confirmed 1–2 week
-   business-verification SLA is claimed.
+   Capacitor wrappers are built. The PWA is the launch/submission surface;
+   Slack deployment with rotated credentials, physical-device verification,
+   and store publication remain external activation gates. WhatsApp activation
+   is optional post-launch work, not a launch or submission gate.
 2. **One-time invoice path built; recurring integration is pending:** Real SaaS billing integration. The mock exists because a subscription renewal is
 merchant-initiated (recurring), not agent-initiated (one-time) like a grocery reorder — a genuinely different transaction shape from what’s built. Two paths:
    - Path A (platform contract now documented; Restock integration pending):
@@ -688,8 +688,9 @@ done yet” inventory, not the plan to close it.
 
 - No real ML forecasting model — deterministic exponential smoothing only, for the
 predicted-trigger track.
-- No real SaaS billing-portal integration — the known-date track’s checkout is a disclosed
-mock; the renewal date and Prava mandate flow around it are real.
+- No real SaaS billing-portal fulfillment — hosted-link items use the bounded
+  approval workflow but finish at a disclosed mock; `manual_required` items
+  produce a notification only and never create a Prava purchase proposal.
 - Household/Organization tenants and approval policies are implemented, but
   reusable mandate charging is not enabled until Restock integrates and proves
   the documented mandate-charge boundary under the same approval policy.

@@ -20,4 +20,7 @@ def test_dry_run_completes_all_seeded_items(capsys) -> None:
     output = capsys.readouterr().out
     assert "[1/5]" in output
     assert "[5/5]" in output
+    assert output.count("outcome: fired —") == 5
+    assert "run out" in output
+    assert "renews in" in output
     assert "Summary: 5/5 items completed." in output

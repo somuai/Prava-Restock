@@ -43,8 +43,8 @@ User <──approve/adjust/skip──> Restock Backend <──session/polling─
 | **Orchestrator agent** | Tool-using loop (OpenAI Agents SDK) deciding what/when to propose, handling approve/adjust/skip, sequencing the Prava + merchant calls | Runs on a schedule tick; not a chat-request handler; trigger-type-agnostic |
 | **Prava client** | Implements the documented server-side Session REST API, payment-result polling, consume-once credential custody, and report-status | Prava has no Python SDK for this path; the browser package owns passkey UI |
 | **Merchant client** | Zepto/Swiggy MCP catalog/cart/quote operations plus a separate browser-payment executor; one-time invoice support for Teams | Catalog truth and final-payment execution are independently mode-tagged |
-| **Workflow and compatibility stores** | SQLite for local/demo; Postgres-compatible SQLAlchemy repositories with Alembic migrations through `20260722_07` for production | Persist references/state only; never raw credentials, approval URLs, or payment links |
-| **UI (chat surface)** | Displays proactive notifications, approve/adjust/skip controls, and the audit/savings log | The guaranteed surface is the disclosed WhatsApp-style/Slack-style PWA. A real single-workspace Slack Bolt adapter and a Meta test-number webhook/template adapter are implemented; whether the external accounts are configured is exposed at runtime. Meta publishes template review guidance of up to 24 hours, but no fixed business-verification SLA is claimed. |
+| **Workflow and compatibility stores** | SQLite for local/demo; Postgres-compatible SQLAlchemy repositories with Alembic migrations through `20260801_10` for production | Persist references/state only; never raw credentials, approval URLs, or payment links |
+| **UI (chat surface)** | Displays proactive notifications, approve/adjust/skip controls, and the audit/savings log | The real Restock PWA is the launch/submission surface. A single-workspace Slack Bolt adapter is implemented; the Meta webhook/template adapter remains optional post-launch. Runtime `/capabilities` discloses which external processes are actually active. |
 
 See `PRD.md` §10, "Distribution and surface," for why these user-facing surfaces remain independent of the merchant apps that Restock calls at the backend.
 
@@ -149,7 +149,7 @@ database diagram. The durable schema additionally includes tenants,
 memberships, invitations, consent, workflow runs, quotes, notification
 actions, idempotency records, delivery outboxes, checkout attempts, leases,
 and completion effects. The authoritative production schema is the Alembic
-chain through `20260722_07`; Pydantic models and migrations must evolve
+chain through `20260801_10`; Pydantic models and migrations must evolve
 together.
 
 ## 6. Trigger sources (v1 — deliberately simple, both implement the same interface)
@@ -265,7 +265,7 @@ Phase 8 proof items:**
 
 - Never call `complete_merchant_checkout` without a `MandateResult` showing passkey approval.
 - Never propose an amount exceeding `per_item_cap` or that would exceed `monthly_cap` for the period — a Guardrail on `request_prava_intent`, not a prompt instruction the model could get wrong.
-- If merchant-reported price deviates from `last_purchase_amount` by more than a configured tolerance (e.g., 15%), or the item is out of stock, do not proceed silently — re-route to `notify_user` for explicit re-approval.
+- If a fresh merchant quote increases above the approved amount at all, or decreases by more than 15%, or the item is out of stock, do not proceed silently — re-route to `notify_user` for explicit re-approval.
 - For known-date items (Restock Teams): never auto-select `switch_to_alternate` without explicit approval, even when it's strictly cheaper — a plan switch can have consequences (feature loss, contract terms) the amount alone doesn't capture.
 
 ## 8. End-to-end sequence (autonomous purchase, happy path)
@@ -364,7 +364,7 @@ Standard tool-calling loop; no fine-tuning required for the hackathon scope. Mod
 | Scenario | Handling |
 |---|---|
 | Merchant reports out-of-stock | Notify user with the situation; no transaction created; item re-checked next cycle |
-| Price deviates >15% from last purchase | Do not auto-proceed; require explicit re-approval (§7) |
+| Price increases at all, or decreases >15% from the approved quote | Do not auto-proceed; require explicit re-approval (§7) |
 | Mandate/passkey rejected or times out | `Intent.status = expired`; item re-enters the normal check cycle |
 | Merchant API error/timeout | Retry with backoff, max 2 attempts, then notify user of failure and log it |
 | Duplicate trigger while an Intent is already pending for that item | Suppress duplicate notification |
@@ -387,12 +387,13 @@ retention.
 
 The implementation separates the FastAPI web process from a leased scheduler
 worker and persists resumable workflows through a Postgres-compatible
-SQLAlchemy repository with Alembic migrations through `20260722_07`. SQLite
-remains the local/demo default. The public Railway service is an unactivated
-demo: `demo_mode=true`, Prava sandbox unconfigured, channels unconfigured,
-real money disabled, and merchant/billing execution disclosed as simulation.
-`/capabilities` is authoritative. Provider credentials, managed Postgres, a
-separate worker, and the restore drill remain production activation gates.
+SQLAlchemy repository with Alembic migrations through `20260801_10`. SQLite
+remains the local/demo default. The public Railway service currently reports
+`demo_mode=false`, Prava sandbox configured, real money disabled, Home and
+Teams final execution as `disclosed_mock`, and no persistently deployed channel
+listeners. `/capabilities` is authoritative; this text is only the last verified
+snapshot. Provider production access, final-payment enablement, persistent
+channel processes, and the final restore drill remain activation gates.
 
 ## 15. Observability
 
@@ -406,7 +407,7 @@ Every durable state transition writes a sanitized domain-audit entry with run, u
 - One-time hosted SaaS invoice quoting is implemented; its unattended final payment remains a disclosed mock. Prava now documents active-mandate charging, but Restock has not integrated or sandbox-proved that charge/report boundary, so recurring Teams charging remains disabled.
 - Multi-user Household/Organization membership, roles, invitations, consent, and multi-approver policy are implemented; shared approval is not treated as reusable payment authority until Restock's mandate-charge integration enforces the same policy.
 - Capacitor Android/iOS wrappers are implemented and simulator-built; store enrollment, physical-device push validation, and publication remain external launch gates.
-- The guaranteed submission surface remains the disclosed PWA. The real Slack adapter and Meta test-number adapter must still disclose whether external credentials/setup are active.
+- The real Restock PWA is the guaranteed submission surface, not a mocked channel. The Slack adapter must disclose whether its external process is active; WhatsApp activation is optional post-launch and not a submission gate.
 - Home adapters cover real Zepto and Swiggy catalog/cart quoting. Zepto's unattended final payment remains disclosed-mock by default; Swiggy card payment remains an explicit browser boundary and is never silently replaced by COD.
 - Long-term, the correct solution for authenticated billing platforms is OAuth-based delegated access to the platform's own billing API (e.g., Stripe Billing API, Chargebee API) — scoped and revocable access to the subscription object specifically, never the user's login credentials. This mirrors Prava's own trust model at the SaaS-account layer rather than the payment layer, and is explicitly preferred over any browser-automation approach to login.
 
