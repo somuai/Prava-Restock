@@ -294,7 +294,21 @@ def _zepto_oauth_status() -> str:
         os.getenv("MCP_REMOTE_CONFIG_DIR", str(Path.home() / ".mcp-auth"))
     ).expanduser()
     try:
-        configured = config_dir.is_dir() and any(entry.is_file() for entry in config_dir.iterdir())
+        configured = False
+        for version_dir in config_dir.glob("mcp-remote-*"):
+            token_files = list(version_dir.glob("*_tokens.json"))
+            for token_file in token_files:
+                prefix = token_file.name.removesuffix("_tokens.json")
+                required = (
+                    version_dir / f"{prefix}_client_info.json",
+                    version_dir / f"{prefix}_code_verifier.txt",
+                    token_file,
+                )
+                if all(path.is_file() for path in required):
+                    configured = True
+                    break
+            if configured:
+                break
     except OSError:
         configured = False
     return "configured_unverified" if configured else "unknown"

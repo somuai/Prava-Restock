@@ -182,8 +182,13 @@ def test_zepto_oauth_capability_reports_presence_without_verification(
     monkeypatch.setattr(api, "mcp_authorization_verified_recently", lambda: False)
     assert api.runtime_modes()["zepto_oauth_status"] == "unknown"
 
-    cache.mkdir()
-    (cache / "oauth-state.json").write_text("not inspected")
+    version = cache / "mcp-remote-0.1.37"
+    version.mkdir(parents=True)
+    prefix = "9b36d85502a1fef918a5db7d2b8d830b"
+    (version / f"{prefix}_tokens.json").write_text("not inspected")
+    assert api.runtime_modes()["zepto_oauth_status"] == "unknown"
+    (version / f"{prefix}_client_info.json").write_text("not inspected")
+    (version / f"{prefix}_code_verifier.txt").write_text("not inspected")
     assert api.runtime_modes()["zepto_oauth_status"] == "configured_unverified"
 
     monkeypatch.setattr(api, "mcp_authorization_verified_recently", lambda: True)
