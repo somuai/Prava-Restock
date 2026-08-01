@@ -21,6 +21,7 @@ dependencies = [
     "psycopg[binary]==3.3.4",
     "slack-bolt==1.30.0",
     "playwright==1.52.0",
+    "google-auth==2.50.0",
 ]
 
 [tool.pytest.ini_options]

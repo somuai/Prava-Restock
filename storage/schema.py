@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import Boolean, JSON, DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, JSON, DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -25,6 +25,88 @@ class UserRow(Base):
     per_item_cap: Mapped[float] = mapped_column(Numeric(18, 2))
     per_transaction_cap: Mapped[float] = mapped_column(Numeric(18, 2))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class AuthIdentityRow(Base):
+    """External login identity; email is metadata, never an account join key."""
+
+    __tablename__ = "auth_identities"
+    __table_args__ = (
+        UniqueConstraint("provider", "subject", name="uq_auth_identity_subject"),
+        UniqueConstraint("user_id", "provider", name="uq_user_auth_provider"),
+    )
+
+    identity_id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid4())
+    )
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.user_id"), nullable=False, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(30), nullable=False)
+    subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
+
+
+class WaitlistLeadRow(Base):
+    """Public pilot interest, intentionally separate from users and auth."""
+
+    __tablename__ = "waitlist_leads"
+
+    lead_id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid4())
+    )
+    email_normalized: Mapped[str] = mapped_column(
+        String(320), unique=True, nullable=False, index=True
+    )
+    display_name: Mapped[str | None] = mapped_column(
+        String(200), nullable=True
+    )
+    track_interest: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )
+    first_use_category: Mapped[str | None] = mapped_column(
+        String(80), nullable=True
+    )
+    preferred_channel: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), default="joined", nullable=False, index=True
+    )
+    pilot_email_consent_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    research_opt_in: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    privacy_notice_version: Mapped[str] = mapped_column(
+        String(40), nullable=False
+    )
+    landing_variant: Mapped[str | None] = mapped_column(
+        String(80), nullable=True
+    )
+    entry_demo_track: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )
+    utm_source: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    utm_medium: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    utm_campaign: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    referrer_host: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
 
 
 class TenantRow(Base):
@@ -110,7 +192,16 @@ class TrackedItemRow(Base):
 
 class WorkflowRunRow(Base):
     __tablename__ = "workflow_runs"
-    __table_args__ = (UniqueConstraint("active_item_key", name="uq_active_item_workflow"),)
+    __table_args__ = (
+        UniqueConstraint("active_item_key", name="uq_active_item_workflow"),
+        CheckConstraint(
+            "(proposed_action = 'flag_for_manual_renewal' "
+            "AND proposed_amount IS NULL AND merchant IS NULL) OR "
+            "((proposed_action IS NULL OR proposed_action <> 'flag_for_manual_renewal') "
+            "AND proposed_amount IS NOT NULL AND merchant IS NOT NULL)",
+            name="ck_workflow_payment_proposal_shape",
+        ),
+    )
 
     run_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id"), index=True)
@@ -119,9 +210,11 @@ class WorkflowRunRow(Base):
     state: Mapped[str] = mapped_column(String(40), index=True)
     active_item_key: Mapped[str | None] = mapped_column(String(36), nullable=True)
     trigger_reason: Mapped[str] = mapped_column(String(80))
-    proposed_amount: Mapped[float] = mapped_column(Numeric(18, 2))
+    proposed_amount: Mapped[float | None] = mapped_column(
+        Numeric(18, 2), nullable=True
+    )
     currency: Mapped[str] = mapped_column(String(3))
-    merchant: Mapped[str] = mapped_column(String(80))
+    merchant: Mapped[str | None] = mapped_column(String(80), nullable=True)
     proposed_action: Mapped[str | None] = mapped_column(String(40), nullable=True)
     quote: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     prava_intent_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)

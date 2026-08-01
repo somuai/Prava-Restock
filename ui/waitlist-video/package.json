@@ -1,0 +1,23 @@
+{
+  "name": "restock-waitlist-video",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "render": "remotion render src/index.ts RestockFeatureFilm out/restock-feature-demo-with-audio.mp4 --codec=h264 --crf=16 --pixel-format=yuv420p && remotion ffmpeg -y -i out/restock-feature-demo-with-audio.mp4 -map 0:v:0 -c:v copy -an out/restock-feature-demo.mp4 && rm out/restock-feature-demo-with-audio.mp4",
+    "poster": "remotion still src/index.ts RestockFeatureFilm out/restock-feature-poster.png --frame=314",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.501",
+    "@remotion/fonts": "4.0.501",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "remotion": "4.0.501"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "@types/react": "19.2.17",
+    "typescript": "5.9.3"
+  }
+}

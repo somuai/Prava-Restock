@@ -10,13 +10,56 @@ After installing the project, run `.venv/bin/python demo/dry_run.py` to exercise
 
 ## Local API
 
-Run `.venv/bin/alembic upgrade head`, then `.venv/bin/uvicorn ui.api:app --reload`. Public liveness and capability endpoints are `/health`, `/ready`, and `/capabilities`. Development may use the documented local demo token. Production uses the password-only solo-owner login at `POST /api/v1/auth/login`, which maps to `RESTOCK_SOLO_USER_ID` and returns a short-lived `rst1` signed session; that user UUID must already exist in the production database. Configure only the scrypt hash in `RESTOCK_SOLO_PASSWORD_HASH`; plaintext passwords are never stored. Generate the hash interactively with `.venv/bin/python scripts/generate_solo_password_hash.py` and put its output directly into platform secret storage.
+Run `.venv/bin/alembic upgrade head`, then `.venv/bin/uvicorn ui.api:app --reload`. Public liveness and capability endpoints are `/health`, `/ready`, and `/capabilities`. Production serves the public waitlist from `/`; set `RESTOCK_SERVE_WAITLIST=1` to exercise that production route locally. Development may use the documented local demo token. Production supports Google Identity Services, the existing solo-owner password, or both through `RESTOCK_AUTH_MODE=google|solo|hybrid`. The runtime `/capabilities` response supplies the public Google web-client ID to the PWA, so no environment-specific OAuth identifier is baked into the frontend bundle.
 
 After cloning, run `.venv/bin/python scripts/install_git_hooks.py` once. It
 configures Git to use the tracked `.githooks/pre-commit` hook, which blocks
 staged OpenAI, Prava, Slack, Meta/WhatsApp, and generic credential assignments.
 The legacy `/audit-log` and `/notifications/pending` compatibility endpoints are
 development-only; production clients use the user-scoped `/api/v1` equivalents.
+
+## Authentication
+
+Google sign-in uses the free [Google Identity Services web
+flow](https://developers.google.com/identity/gsi/web/guides/get-google-api-clientid)
+and requests only the default OpenID profile and email claims. Restock sends
+Google's short-lived ID token to `POST /api/v1/auth/google`, follows Google's
+[server-side verification
+guidance](https://developers.google.com/identity/gsi/web/guides/verify-google-id-token)
+for its signature, issuer, audience, expiry, and verified email, and keys the
+account only by Google's stable `sub` claim. Matching email addresses never
+silently merge accounts. An existing signed-in owner can explicitly add Google
+from the profile in hybrid mode.
+
+One Google Cloud configuration step remains operator-owned:
+
+1. Create an OAuth client with application type **Web application**.
+2. Add the exact application origins under **Authorized JavaScript origins**:
+   `http://localhost:5173` for Vite development,
+   `http://127.0.0.1:8765` when using the production-style local preview, and
+   the production PWA origin (scheme and hostname only) for deployment.
+3. Configure the OAuth branding screen with the production homepage, the
+   published `/app/privacy.html`, and `/app/terms.html`. No sensitive scopes or
+   paid Google service are required.
+4. Put the public `*.apps.googleusercontent.com` value in `GOOGLE_CLIENT_ID` in
+   platform secrets. Do not create, store, or supply a Google client secret for
+   this browser ID-token flow.
+5. Set `RESTOCK_AUTH_MODE=hybrid` to keep the owner password as collapsed
+   recovery access, or `google` to offer Google only. Add the production PWA
+   origin to `RESTOCK_ALLOWED_ORIGINS`, run `alembic upgrade head`, and redeploy.
+
+For `solo` or `hybrid`, `RESTOCK_SOLO_USER_ID` must identify an existing user.
+Configure only its scrypt hash in `RESTOCK_SOLO_PASSWORD_HASH`; plaintext
+passwords are never stored. Generate a hash interactively with
+`.venv/bin/python scripts/generate_solo_password_hash.py` and put the output
+directly into platform secret storage.
+
+Successful login returns a short-lived signed session, sets the same value in a
+`Secure`, `HttpOnly`, `SameSite=Lax` cookie for the same-origin PWA, and allows
+the web/native clients to retain the short-lived bearer in session-only or
+device-secure storage. Browser storage is cleared and the cookie is deleted on
+sign-out. Production login attempts are rate-limited through shared Postgres
+state, and the API fails closed if that shared throttle is unavailable.
 
 Run the scheduler as a separate process with `.venv/bin/python -m workflow.worker`. The `Procfile` keeps web and worker commands separate so multiple web replicas cannot duplicate trigger scans. For the student deployment, `.github/workflows/production-scheduler.yml` calls the authenticated, database-leased `/api/v1/service/worker/scan` endpoint instead, avoiding the cost of an always-on worker process.
 
@@ -58,6 +101,13 @@ Run `.venv/bin/python demo/dry_run.py --mode offline` for all five deterministic
 ## Demo PWA and channels
 
 The React/TypeScript PWA lives in `ui/web` and is served from `/app` in the production Docker image. Run `npm ci && npm run dev` there for local frontend development, or `npm run build` for the deployable bundle. Its Restock-owned decision inbox uses a conversational Home hierarchy and a denser Teams approval hierarchy, with explicit preview/sandbox/simulation disclosure at the affected step. Typography, color, logo usage, and interaction rules are documented in the [design system](docs/design-system.md).
+
+The public waitlist lives in `ui/waitlist` and is served from `/`. Its
+right-hand feature film is rendered from code in `ui/waitlist-video` with
+Remotion, using the real Restock coffee, parcel, logo, and local fonts. It is a
+silent walkthrough of one restock from detection through approval. Waitlist
+emails are normalized and deduplicated in the separate `waitlist_leads` table;
+joining never creates a user, login identity, Prava mandate, or payment state.
 
 - **Slack:** `channels/slack_manifest.yaml` and the Bolt Socket Mode adapter are implemented, the private workspace app is installed, bot authentication and a real Socket Mode handshake pass, and live notification delivery plus a persisted Skip callback are verified. Resolved messages remove their buttons to prevent repeated actions. A deployed persistent Slack process with rotated credentials remains the activation gate; see [Slack evidence](docs/slack_evidence.md). No Marketplace submission is needed for the private demo workspace.
 - **WhatsApp:** the Cloud API adapter sends the three-button proactive template only after recorded opt-in. The webhook verifies Meta's HMAC signature and maps Approve/Skip actions to workflows; Adjust opens the amount UI. Configure the `WHATSAPP_*` values only in local/platform secrets.

@@ -469,3 +469,136 @@ Final result: passed
 - No actionable P0, P1, or P2 issue remains.
 
 Final result: passed
+
+---
+
+# Waitlist design QA
+
+Reference: `https://redacted-pearl.vercel.app/`
+
+The reference was used for its conversion structure only: a sparse split-screen
+hero, one primary call to action, a product demonstration opposite the copy,
+mobile stacking, and a compact waitlist dialog. Restock keeps its own typography,
+warm neutral canvas, deep-green palette, controls, and disclosure language.
+
+## Evidence
+
+- Reference desktop capture:
+  `docs/design-research/waitlist-implementation/reference-desktop-1280x720.png`
+- Restock desktop capture:
+  `docs/design-research/waitlist-implementation/desktop-1280x720.png`
+- Combined desktop comparison:
+  `docs/design-research/waitlist-implementation/comparison-desktop-pass1.png`
+- Restock mobile capture:
+  `docs/design-research/waitlist-implementation/mobile-390x844-full.png`
+- Combined mobile comparison:
+  `docs/design-research/waitlist-implementation/comparison-mobile-pass1.png`
+- Combined mobile-dialog comparison:
+  `docs/design-research/waitlist-implementation/comparison-mobile-modal-pass1.png`
+- Minimum-width capture:
+  `docs/design-research/waitlist-implementation/mobile-320x720.png`
+
+## Checks
+
+- Desktop 1280 × 720: passed. The primary promise, CTA, trust copy, and feature
+  film fit in one viewport with no crowding, clipping, or horizontal overflow.
+- Mobile 390 × 844: passed. The copy and demonstration stack in the intended
+  reading order, with a full-width 52px CTA and no horizontal overflow.
+- Mobile 320 × 720: passed. The layout remains readable at the supported minimum
+  width; measured document and viewport widths are both 320px.
+- Modal: passed. Focus moves to the email field, Escape closes the dialog,
+  focus returns to the CTA, the close target is 44px, and the modal remains
+  legible inside the mobile viewport.
+- Submission path: passed. A synthetic email produced the truthful confirmation
+  state and a single normalized `waitlist_leads` row.
+- Motion: passed. The 9-second 960 × 1080 H.264 film has no audio stream, loops
+  silently, uses real Restock product and parcel assets, and permanently labels
+  the experience as an interactive preview with no order or charge.
+- Reduced motion: passed by implementation inspection. The video is removed
+  under `prefers-reduced-motion: reduce` and replaced by its poster frame.
+- Console: passed. No warning or error entries were recorded during the tested
+  landing, modal, and successful-submission states.
+
+## Visual review
+
+The implementation preserves the reference’s one-glance hierarchy while making
+the proof specific to Restock: tracked item, dual trigger, current Zepto quote,
+spend cap, user decision, Prava sandbox boundary, and restocked cadence. No
+generated lifestyle imagery or generic phone mockup remains.
+
+final result: passed
+
+---
+
+# Waitlist refinement QA — typography, motion, copy, and sign-in handoff
+
+## Comparison target
+
+- Source visual truth:
+  `docs/design-research/waitlist-implementation/reference-desktop-1280x720.png`
+  (the supplied sparse split-screen waitlist reference), plus the existing
+  Restock PWA typography and brand lockup in `ui/web/src/styles.css`.
+- Final desktop implementation:
+  `docs/design-research/waitlist-implementation/desktop-pass2-1280x720.png`.
+- Final mobile implementation:
+  `docs/design-research/waitlist-implementation/mobile-pass2-390x844-full.png`.
+- Final mobile form:
+  `docs/design-research/waitlist-implementation/mobile-modal-pass2-390x844.png`.
+- Side-by-side full-view comparison:
+  `docs/design-research/waitlist-implementation/comparison-desktop-pass2.jpg`.
+- Desktop source and implementation are both 1280 × 720 CSS pixels at 1×.
+  Mobile was rendered at a 390 × 844 CSS-pixel viewport at 1×; its full-page
+  capture is 390 × 1186.
+- State: first film scene, with the waitlist form captured separately as the
+  focused conversion state.
+
+## Required fidelity surfaces
+
+- **Fonts and typography:** the public page now imports the exact Inter Variable
+  and Radio Canada Big Variable files used by the PWA, reuses the same Geist
+  Pixel Square file for micro-labels, and matches the PWA's 600-weight,
+  `-0.045em` display treatment. The brand lockup is the same 31px mark, 9px gap,
+  and 20px/600 wordmark.
+- **Spacing and layout rhythm:** the desktop composition keeps the reference's
+  sparse split-screen hierarchy while the mobile layout stacks copy, legal
+  links, and film with no horizontal overflow. The 362 × 524 mobile dialog fits
+  inside the 390 × 844 viewport and preserves 44px-or-larger controls.
+- **Colors and tokens:** Restock's warm canvas, deep green, neutral ink, soft
+  dividers, and focus color remain unchanged; no reference-brand colors were
+  copied.
+- **Image and asset quality:** the film uses Restock's real coffee packshot,
+  logo, and existing visual assets. No generated lifestyle image, fake device,
+  placeholder, or improvised CSS illustration is used.
+- **Copy and content:** “Private pilot · India,” “Interactive preview,”
+  “Controlled pilot,” and the earlier generic marketing phrases are absent from
+  the public page and film. The page states what Restock does in one sentence;
+  the film labels each product state in direct language.
+
+## Iteration history
+
+- [P2 fixed] Waitlist display type used harder tracking and non-system weights
+  (`660`, `680`, `760`) that drifted from the main product. All public typography
+  now follows the existing Restock font families, weights, and lockup metrics.
+- [P2 fixed] The 9-second film changed state too quickly to read. The final
+  render is 15 seconds at 30fps, with five overlapping scenes and a 2.6-second
+  fully visible hold per scene.
+- [P2 fixed] Pilot/preview labels and generic launch copy competed with the
+  feature. They were removed and replaced with direct waitlist and product
+  language.
+- [P2 fixed] Authentication stopped at an unfinished entry point. The header's
+  Sign in link now hands off to the completed Restock authentication surface;
+  Google, owner-password, and hybrid modes are server-configurable.
+
+## Verification
+
+- Desktop document and viewport are both exactly 1280 × 720.
+- Mobile document width and viewport width are both exactly 390px.
+- The feature film autoplays muted, loops, and is exactly 15.000 seconds,
+  960 × 1080 H.264 at 30fps with no audio stream.
+- Waitlist unit tests: 3 passed; production build passed.
+- Main PWA unit tests: 13 passed; production build passed.
+- Backend tests: 339 passed, 1 skipped, 7 deselected.
+- Browser console: no errors or warnings.
+- No actionable P0, P1, or P2 issue remains.
+
+final result: passed

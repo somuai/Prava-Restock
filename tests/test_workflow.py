@@ -14,6 +14,7 @@ from payments import prava_client
 from payments.models import TrackedItem, User
 from storage import Database, RestockRepository
 from storage.schema import SchedulerLeaseRow
+from triggers import renewal_model
 from workflow import WorkflowService
 
 
@@ -24,6 +25,7 @@ class FakePrava:
     def __init__(self, outcome: str = "approved") -> None:
         self.outcome = outcome
         self.calls = 0
+        self.await_calls = 0
         self.amounts: list[Decimal] = []
         self.retired: list[str] = []
         self.reports: list[tuple] = []
@@ -37,6 +39,7 @@ class FakePrava:
         return reference
 
     def await_mandate(self, intent_ref):
+        self.await_calls += 1
         if self.outcome != "approved":
             return {"status": self.outcome, "intent_ref": intent_ref}
         return {
@@ -120,7 +123,7 @@ def build_home_item() -> TrackedItem:
     )
 
 
-def build_teams_item() -> TrackedItem:
+def build_teams_item(*, renewal_method: str = "hosted_link") -> TrackedItem:
     return TrackedItem(
         item_id=UUID("00000000-0000-0000-0000-000000000011"),
         user_id=USER_ID,
@@ -137,6 +140,7 @@ def build_teams_item() -> TrackedItem:
         current_plan_amount="900",
         alternate_plan_amount="800",
         alternate_plan_label="annual",
+        renewal_method=renewal_method,
     )
 
 
@@ -191,6 +195,140 @@ def test_duplicate_trigger_is_suppressed_by_unique_active_item(repository) -> No
     service.begin(build_user(), build_home_item())
     with pytest.raises(ValueError, match="active workflow"):
         service.begin(build_user(), build_home_item())
+
+
+def test_manual_renewal_persists_notification_without_payment_boundaries(
+    repository,
+) -> None:
+    prava = FakePrava()
+    checkout = FakeCheckout()
+    item = build_teams_item(renewal_method="manual_required")
+    service = WorkflowService(
+        repository,
+        prava=prava,
+        teams_checkout=checkout,
+    )
+
+    run = service.begin(build_user(), item)
+
+    assert run["state"] == "notified"
+    assert run["proposed_amount"] is None
+    assert run["merchant"] is None
+    assert run["proposed_action"] == "flag_for_manual_renewal"
+    notifications = repository.pending_notifications(str(USER_ID))
+    assert len(notifications) == 1
+    assert notifications[0]["message"] == renewal_model.propose(item)["message"]
+    assert notifications[0]["actions"] == ["skip"]
+    assert prava.calls == 0
+    assert prava.await_calls == 0
+    assert checkout.calls == 0
+    assert repository.transaction_for_run(run["run_id"]) is None
+
+    audit = [
+        entry
+        for entry in repository.list_audit(str(USER_ID))
+        if entry["run_id"] == run["run_id"]
+    ]
+    flagged = next(
+        entry for entry in audit if entry["event_type"] == "manual_renewal_flagged"
+    )
+    assert flagged["payload"] == {
+        "notification_id": notifications[0]["notification_id"],
+        "actions": ["skip"],
+        "renewal_method": "manual_required",
+    }
+    assert flagged["modes"] == run["modes"]
+    assert all(entry["modes"] for entry in audit)
+
+    with pytest.raises(ValueError, match="manual-renewal workflow only supports skip"):
+        service.act(run["run_id"], user_id=str(USER_ID), action="approve")
+    assert prava.calls == 0
+    assert prava.await_calls == 0
+
+    with pytest.raises(ValueError, match="active workflow"):
+        service.begin(build_user(), item)
+
+    skipped = service.act(run["run_id"], user_id=str(USER_ID), action="skip")
+    assert skipped["state"] == "skipped"
+    assert skipped["active_item_key"] is None
+    assert repository.pending_notifications(str(USER_ID)) == []
+    assert prava.calls == 0
+    assert prava.await_calls == 0
+    assert checkout.calls == 0
+
+
+@pytest.mark.parametrize(
+    ("proposed_action", "proposed_amount", "merchant"),
+    [
+        ("flag_for_manual_renewal", Decimal("1"), None),
+        ("flag_for_manual_renewal", None, "mock_subscription_billing"),
+        ("flag_for_manual_renewal", Decimal("1"), "mock_subscription_billing"),
+        ("renew_as_is", None, "mock_subscription_billing"),
+        ("renew_as_is", Decimal("1"), None),
+        ("renew_as_is", None, None),
+        (None, None, None),
+    ],
+)
+def test_repository_rejects_inconsistent_workflow_payment_shape(
+    repository,
+    proposed_action,
+    proposed_amount,
+    merchant,
+) -> None:
+    user = build_user()
+    item = build_teams_item()
+    repository.upsert_user(user)
+    repository.upsert_item(item)
+
+    with pytest.raises(ValueError, match="workflow payment proposal shape"):
+        repository.create_workflow(
+            user_id=str(user.user_id),
+            item_id=str(item.item_id),
+            trigger_reason="known_renewal_date",
+            proposed_amount=proposed_amount,
+            currency="USD",
+            merchant=merchant,
+            proposed_action=proposed_action,
+            quote=None,
+            modes={"prava": "not_applicable"},
+            idempotency_key=f"invalid-{proposed_action}-{proposed_amount}-{merchant}",
+        )
+
+
+def test_repository_transition_rejects_inconsistent_workflow_payment_shape(
+    repository,
+) -> None:
+    user = build_user()
+    item = build_teams_item()
+    repository.upsert_user(user)
+    repository.upsert_item(item)
+    normal = repository.create_workflow(
+        user_id=str(user.user_id),
+        item_id=str(item.item_id),
+        trigger_reason="known_renewal_date",
+        proposed_amount=Decimal("900"),
+        currency="USD",
+        merchant="mock_subscription_billing",
+        proposed_action="renew_as_is",
+        quote=None,
+        modes={"prava": "sandbox"},
+        idempotency_key="normal-shape",
+    )
+
+    with pytest.raises(ValueError, match="workflow payment proposal shape"):
+        repository.transition(
+            normal["run_id"],
+            expected={"triggered"},
+            state="triggered",
+            proposed_amount=None,
+        )
+    with pytest.raises(ValueError, match="workflow payment proposal shape"):
+        repository.transition(
+            normal["run_id"],
+            expected={"triggered"},
+            state="triggered",
+            proposed_action="flag_for_manual_renewal",
+        )
 
 
 def test_duplicate_item_is_reserved_before_quote_mutation(repository) -> None:

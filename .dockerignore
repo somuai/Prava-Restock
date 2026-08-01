@@ -26,3 +26,8 @@ ui/web/dist
 ui/web/android
 ui/web/ios
 ui/web/*.tsbuildinfo
+ui/waitlist/node_modules
+ui/waitlist/dist
+ui/waitlist/*.tsbuildinfo
+ui/waitlist-video/node_modules
+ui/waitlist-video/out

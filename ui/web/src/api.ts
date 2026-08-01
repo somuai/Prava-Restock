@@ -1,4 +1,7 @@
 export type Capabilities = {
+  auth_mode?: string;
+  google_auth_configured?: boolean;
+  google_client_id?: string;
   prava_mode: string;
   home_merchant_mode: string;
   home_payment_mode: string;
@@ -41,6 +44,7 @@ export type UserProfile = {
   per_item_cap: string;
   per_transaction_cap: string;
   created_at: string;
+  auth_providers?: string[];
 };
 
 export type TenantSummary = {
@@ -126,22 +130,70 @@ async function requestHeaders(): Promise<Record<string, string>> {
 const endpoint = (path: string) => `${API_BASE}${path}`;
 
 async function read<T>(path: string): Promise<T> {
-  const response = await fetch(endpoint(path), { headers: await requestHeaders() });
+  const response = await fetch(endpoint(path), {
+    credentials: "include",
+    headers: await requestHeaders(),
+  });
   if (!response.ok) throw new ApiError(response.status, `${path} returned ${response.status}`);
   return response.json() as Promise<T>;
+}
+
+type AuthResponse = {
+  access_token?: string;
+  token_type?: "bearer";
+  expires_in?: number;
+};
+
+async function acceptAuthResponse(response: Response): Promise<AuthResponse> {
+  const body = await response.json();
+  if (!response.ok) throw new ApiError(response.status, body.detail || "Sign in failed");
+  if (body.access_token) await storeApiSessionToken(body.access_token);
+  return body as AuthResponse;
 }
 
 export const api = {
   login: async (password: string) => {
     const response = await fetch(endpoint("/api/v1/auth/login"), {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ password }),
     });
+    return acceptAuthResponse(response);
+  },
+  googleLogin: async (credential: string) => {
+    const response = await fetch(endpoint("/api/v1/auth/google"), {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ credential }),
+    });
+    return acceptAuthResponse(response);
+  },
+  googleLink: async (credential: string) => {
+    const response = await fetch(endpoint("/api/v1/auth/google/link"), {
+      method: "POST",
+      credentials: "include",
+      headers: await requestHeaders(),
+      body: JSON.stringify({ credential }),
+    });
     const body = await response.json();
-    if (!response.ok) throw new ApiError(response.status, body.detail || "Sign in failed");
-    await storeApiSessionToken(body.access_token);
-    return body as { access_token: string; token_type: "bearer"; expires_in: number };
+    if (!response.ok) throw new ApiError(response.status, body.detail || "Google account linking failed");
+    return body as { status: "linked"; provider: "google" };
+  },
+  logout: async () => {
+    try {
+      const response = await fetch(endpoint("/api/v1/auth/logout"), {
+        method: "POST",
+        credentials: "include",
+        headers: await requestHeaders(),
+      });
+      if (!response.ok && response.status !== 401) {
+        throw new ApiError(response.status, "Sign out failed");
+      }
+    } finally {
+      await clearApiSessionToken();
+    }
   },
   capabilities: () => read<Capabilities>("/capabilities"),
   me: () => read<UserProfile>("/api/v1/me"),
@@ -153,6 +205,7 @@ export const api = {
   action: async (runId: string, action: string, adjustedAmount?: string) => {
     const response = await fetch(endpoint(`/api/v1/workflows/${runId}/actions`), {
       method: "POST",
+      credentials: "include",
       headers: await requestHeaders(),
       body: JSON.stringify({ action, adjusted_amount: adjustedAmount }),
     });
@@ -161,7 +214,11 @@ export const api = {
   },
   approvalUrl: (runId: string) => read<{ approval_url: string }>(`/api/v1/workflows/${runId}/approval-url`),
   resume: async (runId: string) => {
-    const response = await fetch(endpoint(`/api/v1/workflows/${runId}/resume`), { method: "POST", headers: await requestHeaders() });
+    const response = await fetch(endpoint(`/api/v1/workflows/${runId}/resume`), {
+      method: "POST",
+      credentials: "include",
+      headers: await requestHeaders(),
+    });
     if (!response.ok) throw new ApiError(response.status, (await response.json()).detail || "Resume failed");
     return response.json();
   },

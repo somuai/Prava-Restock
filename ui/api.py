@@ -9,18 +9,37 @@ import json
 import os
 import logging
 from pathlib import Path
+import re
+import secrets
 import time
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
+from fastapi import (
+    Cookie,
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy.exc import SQLAlchemyError
 
 from common import audit_store, notification_store
 from common import password_auth
 from common import session_auth
+from common.google_identity import (
+    GoogleIdentityConfigurationError,
+    GoogleIdentityError,
+    verify_google_identity,
+)
 from channels import whatsapp
 from channels.slack_routes import router as slack_service_router
 from workflow.service_routes import router as worker_service_router
@@ -36,12 +55,17 @@ from scripts.validate_service_env import validate as validate_service_environmen
 
 
 ROOT = Path(__file__).resolve().parents[1]
+WAITLIST_DIST = ROOT / "ui" / "waitlist" / "dist"
 AUDIT_LOG_PATH = audit_store.AUDIT_STORE_PATH
 DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000001"
 LOCAL_DEMO_TOKEN = "restock-local-demo-token"
+SESSION_COOKIE_NAME = "restock_session"
+AUTH_MODES = {"solo", "hybrid", "google"}
 REPOSITORY: RestockRepository | None = None
 _REQUESTS: dict[str, deque[datetime]] = defaultdict(deque)
 _AUTH_REQUESTS: dict[str, deque[datetime]] = defaultdict(deque)
+_WAITLIST_REQUESTS: dict[str, deque[datetime]] = defaultdict(deque)
+_WAITLIST_RATE_SECRET = secrets.token_bytes(32)
 _METRICS: dict[str, float] = defaultdict(float)
 LOGGER = logging.getLogger("restock.api")
 
@@ -57,7 +81,7 @@ app.add_middleware(
         for origin in os.getenv("RESTOCK_ALLOWED_ORIGINS", "http://localhost:5173").split(",")
         if origin.strip()
     ],
-    allow_credentials=False,
+    allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Authorization", "Content-Type", "X-Restock-User"],
 )
@@ -96,9 +120,27 @@ async def security_headers(request: Request, call_next):
     response.headers["X-Correlation-ID"] = correlation_id
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Referrer-Policy"] = "no-referrer"
-    response.headers["Content-Security-Policy"] = "default-src 'self'"
+    response.headers["Cross-Origin-Opener-Policy"] = "same-origin-allow-popups"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "base-uri 'self'; "
+        "object-src 'none'; "
+        "script-src 'self' https://accounts.google.com/gsi/client; "
+        "frame-src https://accounts.google.com/gsi/; "
+        "connect-src 'self' https://accounts.google.com/gsi/; "
+        "style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style"
+    )
     return response
+
+
+def _auth_mode() -> str:
+    return os.getenv("RESTOCK_AUTH_MODE", "solo").strip().lower()
+
+
+def _auth_method_enabled(method: str) -> bool:
+    mode = _auth_mode()
+    return mode in AUTH_MODES and (mode == "hybrid" or mode == method)
 
 
 def get_repository() -> RestockRepository:
@@ -187,6 +229,15 @@ def runtime_modes() -> dict[str, str | bool]:
         and bool(os.getenv("ZEPTO_DEVICE_ID", "").strip())
     )
     return {
+        "auth_mode": _auth_mode(),
+        "google_auth_configured": bool(os.getenv("GOOGLE_CLIENT_ID", "").strip()),
+        # OAuth client IDs are public identifiers. Returning this at runtime
+        # avoids baking environment-specific IDs into the Vite bundle.
+        "google_client_id": (
+            os.getenv("GOOGLE_CLIENT_ID", "").strip()
+            if _auth_method_enabled("google")
+            else ""
+        ),
         "prava_mode": prava_mode,
         "home_merchant_mode": zepto_checkout.merchant_mode().value,
         "home_payment_mode": zepto_checkout.payment_mode().value,
@@ -251,11 +302,16 @@ def production_configuration_issues() -> list[str]:
 
 def require_user(
     authorization: str | None = Header(default=None),
+    session_cookie: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
     x_restock_user: str = Header(default=DEFAULT_USER_ID),
 ) -> str:
-    if not authorization or not authorization.startswith("Bearer "):
+    token: str | None = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.removeprefix("Bearer ")
+    elif session_cookie:
+        token = session_cookie
+    if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid API token")
-    token = authorization.removeprefix("Bearer ")
     environment = os.getenv("RESTOCK_ENV", "development")
     configured = os.getenv("RESTOCK_API_TOKEN")
     legacy_expected = configured or LOCAL_DEMO_TOKEN
@@ -288,6 +344,162 @@ class WorkflowActionRequest(BaseModel):
 
 class SoloLoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=1024)
+
+
+class GoogleLoginRequest(BaseModel):
+    credential: str = Field(min_length=1, max_length=16_384)
+
+
+class WaitlistRequest(BaseModel):
+    """Public pilot interest only; this never provisions an app account."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    email: str = Field(min_length=3, max_length=320)
+    client_started_at: datetime
+    company: str = Field(default="", max_length=200)
+    display_name: str | None = Field(default=None, max_length=200)
+    track_interest: Literal["home", "teams", "both", "exploring"] | None = None
+    first_use_category: str | None = Field(default=None, max_length=80)
+    preferred_channel: Literal["email", "slack", "in_app", "none"] | None = None
+    research_opt_in: bool = False
+    landing_variant: str | None = Field(default=None, max_length=80)
+    entry_demo_track: Literal["home", "teams"] | None = None
+    utm_source: str | None = Field(default=None, max_length=100)
+    utm_medium: str | None = Field(default=None, max_length=100)
+    utm_campaign: str | None = Field(default=None, max_length=100)
+    referrer_host: str | None = Field(default=None, max_length=255)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        normalized = value.strip().casefold()
+        if (
+            not re.fullmatch(r"[^@\s]{1,64}@[^@\s]{1,253}", normalized)
+            or normalized.startswith(".")
+            or ".." in normalized
+            or normalized.endswith(".")
+            or "." not in normalized.rsplit("@", 1)[1]
+        ):
+            raise ValueError("enter a valid email address")
+        return normalized
+
+    @field_validator("referrer_host")
+    @classmethod
+    def validate_referrer_host(cls, value: str | None) -> str | None:
+        if value is None or value == "":
+            return None
+        if not re.fullmatch(r"[A-Za-z0-9.-]+(?::\d{1,5})?", value):
+            raise ValueError("referrer_host must be a hostname")
+        return value.casefold()
+
+
+def _waitlist_success() -> dict[str, str]:
+    # Kept identical for a first join, duplicate, honeypot, or too-fast form.
+    return {"status": "joined", "message": "You're on the list."}
+
+
+def _enforce_waitlist_rate_limit(request: Request) -> None:
+    source = request.client.host if request.client else "unknown"
+    source_hash = hmac.new(
+        _WAITLIST_RATE_SECRET,
+        source.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    try:
+        limit = max(
+            1, int(os.getenv("RESTOCK_WAITLIST_RATE_LIMIT_PER_10_MINUTES", "12"))
+        )
+    except ValueError:
+        limit = 12
+    now = datetime.now(timezone.utc)
+    window = _WAITLIST_REQUESTS[source_hash]
+    cutoff = now - timedelta(minutes=10)
+    while window and window[0] < cutoff:
+        window.popleft()
+    if len(window) >= limit:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="please try again later",
+        )
+    window.append(now)
+
+
+def _waitlist_submission_is_human(
+    payload: WaitlistRequest,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    if payload.company:
+        return False
+    try:
+        minimum_seconds = max(
+            0.0,
+            float(os.getenv("RESTOCK_WAITLIST_MIN_SUBMIT_SECONDS", "1.2")),
+        )
+    except ValueError:
+        minimum_seconds = 1.2
+    started_at = payload.client_started_at
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
+    elapsed = ((now or datetime.now(timezone.utc)) - started_at).total_seconds()
+    return minimum_seconds <= elapsed <= 86_400
+
+
+def _default_google_caps() -> tuple[Decimal, Decimal, Decimal]:
+    names_and_defaults = (
+        ("RESTOCK_DEFAULT_MONTHLY_CAP", "5000"),
+        ("RESTOCK_DEFAULT_PER_ITEM_CAP", "1000"),
+        ("RESTOCK_DEFAULT_PER_TRANSACTION_CAP", "1000"),
+    )
+    try:
+        values = tuple(
+            Decimal(os.getenv(name, default).strip())
+            for name, default in names_and_defaults
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="authentication unavailable",
+        ) from exc
+    if any(not value.is_finite() or value <= 0 for value in values):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="authentication unavailable",
+        )
+    return values  # type: ignore[return-value]
+
+
+def _issue_session(response: Response, user_id: str) -> dict[str, str | int]:
+    session_secret = os.getenv("RESTOCK_SESSION_SECRET", "")
+    if len(session_secret) < 32:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="authentication unavailable",
+        )
+    try:
+        ttl_seconds = int(os.getenv("RESTOCK_SESSION_TTL_SECONDS", "3600"))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="authentication unavailable",
+        ) from exc
+    ttl_seconds = min(max(ttl_seconds, 300), 86400)
+    access_token = session_auth.mint(user_id, session_secret, ttl_seconds)
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=access_token,
+        max_age=ttl_seconds,
+        path="/",
+        secure=True,
+        httponly=True,
+        samesite="lax",
+    )
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "expires_in": ttl_seconds,
+    }
 
 
 def _enforce_login_rate_limit(
@@ -374,8 +586,17 @@ def _read_audit_log() -> list[dict[str, Any]]:
     return audit_store.get_all(AUDIT_LOG_PATH)
 
 
-@app.get("/")
-def root() -> dict[str, Any]:
+@app.get("/", response_model=None)
+def root() -> FileResponse | dict[str, Any]:
+    waitlist_index = WAITLIST_DIST / "index.html"
+    serve_waitlist_default = (
+        "1" if os.getenv("RESTOCK_ENV", "development") == "production" else "0"
+    )
+    if (
+        waitlist_index.exists()
+        and os.getenv("RESTOCK_SERVE_WAITLIST", serve_waitlist_default) == "1"
+    ):
+        return FileResponse(waitlist_index)
     return {"service": "Restock", "status": "ok", "mode": "mixed", "capabilities": runtime_modes()}
 
 
@@ -407,8 +628,59 @@ def capabilities() -> dict[str, str | bool]:
     return runtime_modes()
 
 
+@app.post("/api/v1/waitlist", status_code=status.HTTP_202_ACCEPTED)
+def join_waitlist(
+    payload: WaitlistRequest,
+    request: Request,
+) -> dict[str, str]:
+    """Record pilot interest without creating auth or payment state."""
+
+    _enforce_waitlist_rate_limit(request)
+    if not _waitlist_submission_is_human(payload):
+        return _waitlist_success()
+    consented_at = datetime.now(timezone.utc)
+    privacy_version = os.getenv(
+        "RESTOCK_WAITLIST_PRIVACY_NOTICE_VERSION", "2026-07-30"
+    ).strip()
+    if not privacy_version or len(privacy_version) > 40:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="waitlist unavailable",
+        )
+    try:
+        get_repository().join_waitlist(
+            email_normalized=payload.email,
+            display_name=payload.display_name or None,
+            track_interest=payload.track_interest,
+            first_use_category=payload.first_use_category or None,
+            preferred_channel=payload.preferred_channel,
+            research_opt_in=payload.research_opt_in,
+            privacy_notice_version=privacy_version,
+            pilot_email_consent_at=consented_at,
+            landing_variant=payload.landing_variant or None,
+            entry_demo_track=payload.entry_demo_track,
+            utm_source=payload.utm_source or None,
+            utm_medium=payload.utm_medium or None,
+            utm_campaign=payload.utm_campaign or None,
+            referrer_host=payload.referrer_host,
+        )
+    except (OSError, RuntimeError, SQLAlchemyError, ValueError) as exc:
+        LOGGER.error(json.dumps({"event": "waitlist_store_unavailable"}))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="waitlist unavailable",
+        ) from exc
+    return _waitlist_success()
+
+
 @app.post("/api/v1/auth/login")
-def solo_login(payload: SoloLoginRequest, request: Request) -> dict[str, str | int]:
+def solo_login(
+    payload: SoloLoginRequest,
+    request: Request,
+    response: Response,
+) -> dict[str, str | int]:
+    if not _auth_method_enabled("solo"):
+        raise HTTPException(status_code=404, detail="sign-in method unavailable")
     password_hash = os.getenv("RESTOCK_SOLO_PASSWORD_HASH", "").strip()
     user_id = os.getenv("RESTOCK_SOLO_USER_ID", "").strip()
     session_secret = os.getenv("RESTOCK_SESSION_SECRET", "")
@@ -455,13 +727,102 @@ def solo_login(payload: SoloLoginRequest, request: Request) -> dict[str, str | i
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="authentication unavailable",
         )
-    ttl_seconds = int(os.getenv("RESTOCK_SESSION_TTL_SECONDS", "3600"))
-    ttl_seconds = min(max(ttl_seconds, 300), 86400)
-    return {
-        "access_token": session_auth.mint(user_id, session_secret, ttl_seconds),
-        "token_type": "bearer",
-        "expires_in": ttl_seconds,
-    }
+    return _issue_session(response, user_id)
+
+
+@app.post("/api/v1/auth/google")
+def google_login(
+    payload: GoogleLoginRequest,
+    request: Request,
+    response: Response,
+    repository: RestockRepository = Depends(get_repository),
+) -> dict[str, str | int]:
+    if not _auth_method_enabled("google"):
+        raise HTTPException(status_code=404, detail="sign-in method unavailable")
+    session_secret = os.getenv("RESTOCK_SESSION_SECRET", "")
+    if len(session_secret) < 32:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="authentication unavailable",
+        )
+    _enforce_login_rate_limit(request, repository, session_secret)
+    try:
+        claims = verify_google_identity(payload.credential)
+    except GoogleIdentityConfigurationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="authentication unavailable",
+        ) from exc
+    except GoogleIdentityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid Google credential",
+        ) from exc
+    monthly_cap, per_item_cap, per_transaction_cap = _default_google_caps()
+    try:
+        user, _created = repository.provision_auth_identity(
+            provider="google",
+            subject=claims.subject,
+            email=claims.email,
+            display_name=claims.display_name,
+            monthly_cap=monthly_cap,
+            per_item_cap=per_item_cap,
+            per_transaction_cap=per_transaction_cap,
+        )
+    except Exception as exc:
+        LOGGER.error(json.dumps({"event": "google_auth_provisioning_failed"}))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="authentication unavailable",
+        ) from exc
+    return _issue_session(response, str(user["user_id"]))
+
+
+@app.post("/api/v1/auth/google/link")
+def google_link(
+    payload: GoogleLoginRequest,
+    user_id: str = Depends(require_user),
+    repository: RestockRepository = Depends(get_repository),
+) -> dict[str, str]:
+    if not _auth_method_enabled("google"):
+        raise HTTPException(status_code=404, detail="sign-in method unavailable")
+    try:
+        claims = verify_google_identity(payload.credential)
+    except GoogleIdentityConfigurationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="authentication unavailable",
+        ) from exc
+    except GoogleIdentityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid Google credential",
+        ) from exc
+    try:
+        repository.link_auth_identity(
+            user_id=user_id,
+            provider="google",
+            subject=claims.subject,
+            email=claims.email,
+            display_name=claims.display_name,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="user not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"status": "linked", "provider": "google"}
+
+
+@app.post("/api/v1/auth/logout")
+def logout(response: Response) -> dict[str, str]:
+    response.delete_cookie(
+        key=SESSION_COOKIE_NAME,
+        path="/",
+        secure=True,
+        httponly=True,
+        samesite="lax",
+    )
+    return {"status": "signed_out"}
 
 
 @app.get("/metrics")
@@ -500,6 +861,7 @@ def me(
     value = repository.get_user(user_id)
     if value is None:
         raise HTTPException(status_code=404, detail="user not found")
+    value["auth_providers"] = repository.list_auth_providers(user_id)
     return value
 
 
@@ -805,5 +1167,19 @@ async def whatsapp_webhook(
 
 
 WEB_DIST = ROOT / "ui" / "web" / "dist"
+WAITLIST_ASSETS = WAITLIST_DIST / "assets"
+WAITLIST_MEDIA = WAITLIST_DIST / "media"
+if WAITLIST_ASSETS.exists():
+    app.mount(
+        "/assets",
+        StaticFiles(directory=WAITLIST_ASSETS),
+        name="waitlist-assets",
+    )
+if WAITLIST_MEDIA.exists():
+    app.mount(
+        "/media",
+        StaticFiles(directory=WAITLIST_MEDIA),
+        name="waitlist-media",
+    )
 if WEB_DIST.exists():
     app.mount("/app", StaticFiles(directory=WEB_DIST, html=True), name="web")

@@ -15,4 +15,6 @@ ui/web/dist/
 logs/notifications.json
 logs/merchant_checkouts.json
 logs/restock.db*
+restock.db*
+.tmp-tests/
 .sites-package/

@@ -26,10 +26,19 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-          cache-dependency-path: ui/web/package-lock.json
+          cache-dependency-path: |
+            ui/web/package-lock.json
+            ui/waitlist/package-lock.json
+            ui/waitlist-video/package-lock.json
       - name: Test and build PWA
         working-directory: ui/web
         run: npm ci && npm test && npm run build
+      - name: Test and build public waitlist
+        working-directory: ui/waitlist
+        run: npm ci && npm test && npm run build
+      - name: Check Remotion feature film source
+        working-directory: ui/waitlist-video
+        run: npm ci && npm run check
       - name: Build production container
         run: docker build -t restock-ci .
       - name: Verify Zepto MCP runtime in production container

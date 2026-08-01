@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import base64
 from collections.abc import Mapping
+from decimal import Decimal, InvalidOperation
 import os
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -68,7 +69,18 @@ def _valid_scrypt_hash(value: str) -> bool:
 def validate(service: str, environment: Mapping[str, str]) -> list[str]:
     if service not in REQUIRED_VARIABLES:
         raise ValueError(f"unknown service: {service}")
-    issues = [name for name in REQUIRED_VARIABLES[service] if not environment.get(name)]
+    auth_mode = environment.get("RESTOCK_AUTH_MODE", "solo").strip().lower()
+    conditionally_optional: set[str] = set()
+    if service == "api" and auth_mode == "google":
+        conditionally_optional = {
+            "RESTOCK_SOLO_USER_ID",
+            "RESTOCK_SOLO_PASSWORD_HASH",
+        }
+    issues = [
+        name
+        for name in REQUIRED_VARIABLES[service]
+        if name not in conditionally_optional and not environment.get(name)
+    ]
 
     if service in {"api", "worker", "slack"}:
         database_url = environment.get("DATABASE_URL", "")
@@ -85,18 +97,47 @@ def validate(service: str, environment: Mapping[str, str]) -> list[str]:
             issues.append("RESTOCK_DEMO_MODE_MUST_BE_DISABLED")
 
     if service == "api":
+        if auth_mode not in {"solo", "hybrid", "google"}:
+            issues.append("RESTOCK_AUTH_MODE_INVALID")
+        elif auth_mode in {"hybrid", "google"}:
+            google_client_id = environment.get("GOOGLE_CLIENT_ID", "").strip()
+            if not google_client_id:
+                issues.append("GOOGLE_CLIENT_ID")
+            elif not google_client_id.endswith(".apps.googleusercontent.com"):
+                issues.append("GOOGLE_CLIENT_ID_INVALID")
         secret = environment.get("RESTOCK_SESSION_SECRET", "")
         if secret and len(secret) < 32:
             issues.append("RESTOCK_SESSION_SECRET_TOO_SHORT")
-        password_hash = environment.get("RESTOCK_SOLO_PASSWORD_HASH", "")
-        if password_hash and not _valid_scrypt_hash(password_hash):
-            issues.append("RESTOCK_SOLO_PASSWORD_HASH_INVALID_FORMAT")
-        user_id = environment.get("RESTOCK_SOLO_USER_ID", "")
-        if user_id:
-            try:
-                UUID(user_id)
-            except ValueError:
-                issues.append("RESTOCK_SOLO_USER_ID_INVALID")
+        if auth_mode in {"solo", "hybrid"}:
+            password_hash = environment.get("RESTOCK_SOLO_PASSWORD_HASH", "")
+            if password_hash and not _valid_scrypt_hash(password_hash):
+                issues.append("RESTOCK_SOLO_PASSWORD_HASH_INVALID_FORMAT")
+            user_id = environment.get("RESTOCK_SOLO_USER_ID", "")
+            if user_id:
+                try:
+                    UUID(user_id)
+                except ValueError:
+                    issues.append("RESTOCK_SOLO_USER_ID_INVALID")
+        for name in (
+            "RESTOCK_DEFAULT_MONTHLY_CAP",
+            "RESTOCK_DEFAULT_PER_ITEM_CAP",
+            "RESTOCK_DEFAULT_PER_TRANSACTION_CAP",
+        ):
+            raw = environment.get(name, "").strip()
+            if raw:
+                try:
+                    value = Decimal(raw)
+                    if not value.is_finite() or value <= 0:
+                        raise ValueError
+                except (InvalidOperation, ValueError):
+                    issues.append(f"{name}_INVALID")
+        allowed_origins = [
+            value.strip()
+            for value in environment.get("RESTOCK_ALLOWED_ORIGINS", "").split(",")
+            if value.strip()
+        ]
+        if "*" in allowed_origins:
+            issues.append("RESTOCK_ALLOWED_ORIGINS_WILDCARD_FORBIDDEN")
 
     if service == "api":
         api_key = environment.get("PRAVA_API_KEY", "")

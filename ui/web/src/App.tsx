@@ -33,6 +33,7 @@ import {
   Receipt,
   SealCheck,
   ShieldCheck,
+  SignOut,
   SlackLogo,
   SpeakerHigh,
   SpeakerSlash,
@@ -61,6 +62,7 @@ import {
 } from "./api";
 import { initializeNative } from "./native";
 import { ParcelReveal3D, ProviderAward3D } from "./ParcelExperience";
+import { GoogleSignIn } from "./GoogleSignIn";
 
 type Track = "home" | "teams";
 type View = Track | "activity";
@@ -754,6 +756,8 @@ function AppHeader({
   capabilities,
   watchedCount,
   onOpenNotification,
+  onGoogleLinked,
+  onLogout,
 }: {
   view: View;
   setView: (view: View) => void;
@@ -765,6 +769,8 @@ function AppHeader({
   capabilities: Capabilities | null;
   watchedCount: number;
   onOpenNotification: (notification: Notification) => void;
+  onGoogleLinked: (credential: string) => Promise<void>;
+  onLogout: () => Promise<void>;
 }) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -786,6 +792,7 @@ function AppHeader({
   const capLabel = (value: string | number | undefined | null) => (
     value === undefined || value === null ? "—" : `₹${value}`
   );
+  const googleLinked = profile?.auth_providers?.includes("google") ?? false;
 
   useEffect(() => {
     if (!profileOpen && !notificationsOpen) return;
@@ -1019,6 +1026,43 @@ function AppHeader({
               </div>
             </section>
 
+            {["google", "hybrid"].includes(capabilities?.auth_mode || "") && (
+              <section className="profile-ledger-section profile-security">
+                <header className="profile-section-heading">
+                  <span className="profile-section-icon"><LockKey size={20} weight="duotone" /></span>
+                  <span>
+                    <p>Sign-in security</p>
+                    <small>{googleLinked ? "Google is connected to this Restock account." : "Add Google as an everyday way to return to this pantry."}</small>
+                  </span>
+                </header>
+                <div className="profile-google-link">
+                  {googleLinked ? (
+                    <>
+                      <strong>Google sign-in connected</strong>
+                      <p>Your Google password is handled by Google and is never shared with Restock.</p>
+                      <span className="profile-google-linked" role="status">
+                        <ShieldCheck size={17} weight="fill" aria-hidden="true" />
+                        Connected
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <strong>Link Google sign-in</strong>
+                      <p>
+                        Confirm your Google account while you are already signed in. Restock never links
+                        accounts from a matching email address alone.
+                      </p>
+                      <GoogleSignIn
+                        clientId={capabilities?.google_client_id || ""}
+                        mode="link"
+                        onCredential={onGoogleLinked}
+                      />
+                    </>
+                  )}
+                </div>
+              </section>
+            )}
+
             <section className="profile-ledger-section profile-privacy-note">
               <ShieldCheck size={22} weight="duotone" />
               <span>
@@ -1029,6 +1073,15 @@ function AppHeader({
                 <DownloadSimple size={17} /> Export my data
               </button>
             </section>
+
+            <button
+              className="profile-signout"
+              type="button"
+              onClick={() => void onLogout()}
+            >
+              <SignOut size={18} aria-hidden="true" />
+              Sign out
+            </button>
           </aside>
         </div>
       )}
@@ -2122,21 +2175,39 @@ function ActivityView({
   );
 }
 
-export function LoginScreen({ onLogin }: { onLogin: (password: string) => Promise<void> }) {
+type RestockAuthMode = "solo" | "google" | "hybrid";
+
+function configuredAuthMode(): RestockAuthMode {
+  const configured = String(import.meta.env.VITE_RESTOCK_AUTH_MODE || "google");
+  return configured === "solo" || configured === "hybrid" ? configured : "google";
+}
+
+export function LoginScreen({
+  onGoogleLogin,
+  onPasswordLogin,
+  authMode = configuredAuthMode(),
+  googleClientId = String(import.meta.env.VITE_GOOGLE_CLIENT_ID || ""),
+}: {
+  onGoogleLogin: (credential: string) => Promise<void>;
+  onPasswordLogin?: (password: string) => Promise<void>;
+  authMode?: RestockAuthMode;
+  googleClientId?: string;
+}) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!onPasswordLogin) return;
     setBusy(true);
     setError("");
     try {
-      await onLogin(password);
+      await onPasswordLogin(password);
       setPassword("");
     } catch {
       setPassword("");
-      setError("That password was not accepted. Try again.");
+      setError("Recovery access was not accepted. Check the password and try again.");
     } finally {
       setBusy(false);
     }
@@ -2144,30 +2215,95 @@ export function LoginScreen({ onLogin }: { onLogin: (password: string) => Promis
 
   return (
     <main className="login-shell">
-      <section className="login-card" aria-labelledby="login-title">
-        <Brand />
-        <p className="eyebrow">Private pantry</p>
-        <h1 id="login-title">Welcome back.</h1>
-        <p className="login-copy">Sign in to see what needs attention.</p>
-        <form onSubmit={(event) => void submit(event)}>
-          <label htmlFor="solo-password">Password</label>
-          <input
-            id="solo-password"
-            name="password"
-            type="password"
-            autoComplete="current-password"
-            required
-            maxLength={1024}
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
+      <div className="login-scene">
+        <aside className="login-parcel-stage" aria-hidden="true">
+          <span className="login-stage-kicker">Packed quietly for you</span>
+          <img
+            className="login-parcel"
+            src="/app/assets/3d/restock-parcel-closed-branded.png"
+            alt=""
           />
-          {error && <p className="login-error" role="alert">{error}</p>}
-          <button className="login-submit" type="submit" disabled={busy || !password}>
-            {busy ? "Signing in…" : "Enter pantry"}
-          </button>
-        </form>
-        <p className="login-security"><LockKey size={15} /> Short-lived session · Password never stored</p>
-      </section>
+          <div className="login-parcel-label">
+            <img src="/app/assets/restock-mark.png" alt="" />
+            <span>
+              <small>Restock care parcel</small>
+              <strong>Pantry & renewals</strong>
+            </span>
+          </div>
+          <p>One calm place for what is running low and what is coming due.</p>
+        </aside>
+
+        <section className="login-card" aria-labelledby="login-title">
+          <Brand />
+          <div className="login-paper-copy">
+            <p className="eyebrow">Your private Restock</p>
+            <h1 id="login-title">Your pantry is waiting.</h1>
+            <p className="login-copy">
+              Continue to your tracked essentials, upcoming restocks, and renewal decisions.
+            </p>
+          </div>
+
+          {authMode !== "solo" && (
+            <>
+              <GoogleSignIn clientId={googleClientId} onCredential={onGoogleLogin} />
+              <p className="login-security">
+                <ShieldCheck size={18} weight="duotone" aria-hidden="true" />
+                <span>Restock never sees or stores your Google password.</span>
+              </p>
+            </>
+          )}
+
+          {authMode === "solo" && onPasswordLogin && (
+            <form className="login-password-primary" onSubmit={(event) => void submit(event)}>
+              <label htmlFor="solo-password">Password</label>
+              <input
+                id="solo-password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                required
+                maxLength={1024}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+              <p className="login-error" role="alert" aria-live="assertive">{error}</p>
+              <button className="login-submit" type="submit" disabled={busy || !password}>
+                {busy ? "Signing in…" : "Sign in"}
+              </button>
+            </form>
+          )}
+
+          {authMode === "hybrid" && onPasswordLogin && (
+            <details className="login-recovery">
+              <summary>Owner recovery access</summary>
+              <form onSubmit={(event) => void submit(event)}>
+                <label htmlFor="solo-password">Recovery password</label>
+                <input
+                  id="solo-password"
+                  name="password"
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  maxLength={1024}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                />
+                <p className="login-error" role="alert" aria-live="assertive">{error}</p>
+                <button className="login-submit" type="submit" disabled={busy || !password}>
+                  {busy ? "Checking access…" : "Use recovery access"}
+                </button>
+              </form>
+            </details>
+          )}
+
+          <footer className="login-legal">
+            <span>By continuing, you agree to Restock’s</span>
+            <a href="/app/terms.html">Terms</a>
+            <span aria-hidden="true">·</span>
+            <a href="/app/privacy.html">Privacy</a>
+          </footer>
+        </section>
+      </div>
     </main>
   );
 }
@@ -2311,11 +2447,28 @@ export default function App() {
   if (authState === "checking") return <AuthCheckingScreen />;
 
   if (authState === "required") {
-    return <LoginScreen onLogin={async (password) => {
-      await api.login(password);
+    const finishSignIn = async () => {
       setAuthState("checking");
       await refresh();
-    }} />;
+    };
+    return (
+      <LoginScreen
+        authMode={
+          capabilities?.auth_mode === "solo" || capabilities?.auth_mode === "hybrid"
+            ? capabilities.auth_mode
+            : "google"
+        }
+        googleClientId={capabilities?.google_client_id || ""}
+        onGoogleLogin={async (credential) => {
+          await api.googleLogin(credential);
+          await finishSignIn();
+        }}
+        onPasswordLogin={["solo", "hybrid"].includes(capabilities?.auth_mode || "") ? async (password) => {
+          await api.login(password);
+          await finishSignIn();
+        } : undefined}
+      />
+    );
   }
 
   const sound = (kind: SoundKind) => {
@@ -2454,6 +2607,24 @@ export default function App() {
         capabilities={capabilities}
         watchedCount={visibleProducts.filter((product) => product.lifecycle !== "restocked").length + visibleSubscriptions.length}
         onOpenNotification={openNotification}
+        onGoogleLinked={async (credential) => {
+          await api.googleLink(credential);
+          const currentUser = await api.me();
+          setProfile(currentUser);
+        }}
+        onLogout={async () => {
+          try {
+            await api.logout();
+          } finally {
+            setProfile(null);
+            setTenants([]);
+            setTrackedItems([]);
+            setNotifications([]);
+            setBackendConnected(false);
+            setAuthState("required");
+            setStatus("Signed out");
+          }
+        }}
       />
       <p className="sr-only" role="status" aria-live="polite">{status}</p>
       {foregroundNotification && !selectedProduct && !selectedSubscription && (

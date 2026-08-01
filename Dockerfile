@@ -6,6 +6,14 @@ RUN npm ci
 COPY ui/web/ ./
 RUN npm run build
 
+FROM node:24-alpine AS waitlist
+
+WORKDIR /waitlist
+COPY ui/waitlist/package.json ui/waitlist/package-lock.json ./
+RUN npm ci
+COPY ui/waitlist/ ./
+RUN npm run build
+
 FROM node:24-slim AS node-runtime
 
 WORKDIR /opt/zepto-mcp
@@ -29,6 +37,7 @@ WORKDIR /app
 
 COPY . .
 COPY --from=web /web/dist /app/ui/web/dist
+COPY --from=waitlist /waitlist/dist /app/ui/waitlist/dist
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-runtime /opt/zepto-mcp /opt/zepto-mcp
 RUN python -m pip install --no-cache-dir .

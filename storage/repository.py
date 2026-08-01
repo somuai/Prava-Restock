@@ -14,6 +14,7 @@ from payments.models import TrackedItem, User
 from storage.database import Database
 from storage.schema import (
     AuditRow,
+    AuthIdentityRow,
     AuthLoginThrottleRow,
     ApprovalDecisionRow,
     ApprovalPolicyRow,
@@ -32,6 +33,7 @@ from storage.schema import (
     SchedulerLeaseRow,
     SlackDeliveryRow,
     TenantRow,
+    WaitlistLeadRow,
 )
 
 
@@ -73,6 +75,19 @@ class RestockRepository:
     def create_schema(self) -> None:
         self.database.create_schema()
 
+    @staticmethod
+    def _validate_workflow_payment_proposal_shape(
+        *,
+        proposed_action: str | None,
+        proposed_amount: Decimal | None,
+        merchant: str | None,
+    ) -> None:
+        manual = proposed_action == "flag_for_manual_renewal"
+        both_null = proposed_amount is None and merchant is None
+        both_present = proposed_amount is not None and merchant is not None
+        if (manual and not both_null) or (not manual and not both_present):
+            raise ValueError("invalid workflow payment proposal shape")
+
     def upsert_user(self, user: User) -> None:
         with self.database.session() as session:
             row = session.get(UserRow, str(user.user_id)) or UserRow(
@@ -90,6 +105,329 @@ class RestockRepository:
             row.per_transaction_cap = user.per_transaction_cap
             session.add(row)
         self.ensure_personal_tenant(str(user.user_id))
+
+    def get_auth_identity(
+        self,
+        *,
+        provider: str,
+        subject: str,
+    ) -> dict[str, Any] | None:
+        """Look up an external identity by its provider-stable subject."""
+
+        with self.database.session() as session:
+            row = session.scalar(
+                select(AuthIdentityRow).where(
+                    AuthIdentityRow.provider == provider,
+                    AuthIdentityRow.subject == subject,
+                )
+            )
+            return _row_dict(row) if row else None
+
+    def list_auth_providers(self, user_id: str) -> list[str]:
+        """Return the external sign-in methods explicitly linked to a user."""
+
+        with self.database.session() as session:
+            return list(
+                session.scalars(
+                    select(AuthIdentityRow.provider)
+                    .where(AuthIdentityRow.user_id == user_id)
+                    .order_by(AuthIdentityRow.provider)
+                ).all()
+            )
+
+    def join_waitlist(
+        self,
+        *,
+        email_normalized: str,
+        privacy_notice_version: str,
+        pilot_email_consent_at: datetime,
+        display_name: str | None = None,
+        track_interest: str | None = None,
+        first_use_category: str | None = None,
+        preferred_channel: str | None = None,
+        research_opt_in: bool = False,
+        landing_variant: str | None = None,
+        entry_demo_track: str | None = None,
+        utm_source: str | None = None,
+        utm_medium: str | None = None,
+        utm_campaign: str | None = None,
+        referrer_host: str | None = None,
+    ) -> bool:
+        """Insert one public pilot lead without creating an application user.
+
+        The unique email constraint provides the concurrency boundary. A
+        duplicate is deliberately treated as an idempotent success and does
+        not mutate the original lead's consent or profile fields.
+        """
+
+        normalized_email = email_normalized.strip().casefold()
+        if (
+            not normalized_email
+            or len(normalized_email) > 320
+            or not privacy_notice_version.strip()
+            or len(privacy_notice_version) > 40
+        ):
+            raise ValueError("invalid waitlist lead")
+        row = WaitlistLeadRow(
+            email_normalized=normalized_email,
+            display_name=display_name,
+            track_interest=track_interest,
+            first_use_category=first_use_category,
+            preferred_channel=preferred_channel,
+            status="joined",
+            pilot_email_consent_at=pilot_email_consent_at,
+            research_opt_in=research_opt_in,
+            privacy_notice_version=privacy_notice_version.strip(),
+            landing_variant=landing_variant,
+            entry_demo_track=entry_demo_track,
+            utm_source=utm_source,
+            utm_medium=utm_medium,
+            utm_campaign=utm_campaign,
+            referrer_host=referrer_host,
+        )
+        try:
+            with self.database.session() as session:
+                session.add(row)
+                session.flush()
+            return True
+        except IntegrityError:
+            with self.database.session() as session:
+                existing = session.scalar(
+                    select(WaitlistLeadRow.lead_id).where(
+                        WaitlistLeadRow.email_normalized == normalized_email
+                    )
+                )
+                if existing is None:
+                    raise
+            return False
+
+    @staticmethod
+    def _validate_identity_fields(
+        *,
+        provider: str,
+        subject: str,
+        email: str,
+        display_name: str,
+    ) -> tuple[str, str, str, str]:
+        normalized_provider = provider.strip().lower()
+        normalized_subject = subject.strip()
+        normalized_email = email.strip().lower()
+        normalized_name = display_name.strip()
+        if (
+            not normalized_provider
+            or len(normalized_provider) > 30
+            or not normalized_subject
+            or len(normalized_subject) > 255
+            or not normalized_email
+            or len(normalized_email) > 320
+            or not normalized_name
+            or len(normalized_name) > 200
+        ):
+            raise ValueError("invalid external identity")
+        return (
+            normalized_provider,
+            normalized_subject,
+            normalized_email,
+            normalized_name,
+        )
+
+    def _ensure_personal_tenant_in_session(
+        self,
+        session: Any,
+        *,
+        user_id: str,
+        display_name: str,
+    ) -> str:
+        tenant_id = self.personal_tenant_id(user_id)
+        tenant = session.get(TenantRow, tenant_id)
+        if tenant is None:
+            session.add(
+                TenantRow(
+                    tenant_id=tenant_id,
+                    name=f"{display_name}'s household",
+                    kind="household",
+                    created_by_user_id=user_id,
+                )
+            )
+            session.flush()
+        membership = session.scalar(
+            select(MembershipRow).where(
+                MembershipRow.tenant_id == tenant_id,
+                MembershipRow.user_id == user_id,
+            )
+        )
+        if membership is None:
+            session.add(
+                MembershipRow(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    role="owner",
+                    status="active",
+                )
+            )
+        return tenant_id
+
+    def provision_auth_identity(
+        self,
+        *,
+        provider: str,
+        subject: str,
+        email: str,
+        display_name: str,
+        monthly_cap: Decimal,
+        per_item_cap: Decimal,
+        per_transaction_cap: Decimal,
+    ) -> tuple[dict[str, Any], bool]:
+        """Find or atomically provision one user from a verified identity.
+
+        Email is deliberately not used for account matching.  A provider's
+        stable subject is the only automatic login key; joining identities is
+        an explicit, authenticated operation.
+        """
+
+        provider, subject, email, display_name = self._validate_identity_fields(
+            provider=provider,
+            subject=subject,
+            email=email,
+            display_name=display_name,
+        )
+        caps = tuple(
+            Decimal(str(value))
+            for value in (monthly_cap, per_item_cap, per_transaction_cap)
+        )
+        if any(not value.is_finite() or value <= 0 for value in caps):
+            raise ValueError("default spending caps must be positive")
+        now = datetime.now(timezone.utc)
+        try:
+            with self.database.session() as session:
+                identity = session.scalar(
+                    select(AuthIdentityRow).where(
+                        AuthIdentityRow.provider == provider,
+                        AuthIdentityRow.subject == subject,
+                    )
+                )
+                if identity is not None:
+                    identity.email = email
+                    identity.display_name = display_name
+                    identity.updated_at = now
+                    user = session.get(UserRow, identity.user_id)
+                    if user is None:
+                        raise RuntimeError("external identity has no user")
+                    user.display_name = display_name
+                    session.flush()
+                    return _row_dict(user), False
+
+                user_id = str(uuid4())
+                user = UserRow(
+                    user_id=user_id,
+                    display_name=display_name,
+                    prava_account_ref="unlinked",
+                    monthly_cap=monthly_cap,
+                    per_item_cap=per_item_cap,
+                    per_transaction_cap=per_transaction_cap,
+                    created_at=now,
+                )
+                session.add(user)
+                session.flush()
+                session.add(
+                    AuthIdentityRow(
+                        user_id=user_id,
+                        provider=provider,
+                        subject=subject,
+                        email=email,
+                        display_name=display_name,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+                self._ensure_personal_tenant_in_session(
+                    session,
+                    user_id=user_id,
+                    display_name=display_name,
+                )
+                session.flush()
+                return _row_dict(user), True
+        except IntegrityError:
+            # A concurrent request for the same verified subject won.  Its
+            # transaction is authoritative and the losing transaction rolled
+            # back its temporary user, tenant, and membership together.
+            with self.database.session() as session:
+                identity = session.scalar(
+                    select(AuthIdentityRow).where(
+                        AuthIdentityRow.provider == provider,
+                        AuthIdentityRow.subject == subject,
+                    )
+                )
+                if identity is None:
+                    raise
+                user = session.get(UserRow, identity.user_id)
+                if user is None:
+                    raise RuntimeError("external identity has no user")
+                return _row_dict(user), False
+
+    def link_auth_identity(
+        self,
+        *,
+        user_id: str,
+        provider: str,
+        subject: str,
+        email: str,
+        display_name: str,
+    ) -> dict[str, Any]:
+        """Explicitly link a verified external subject to the signed-in user."""
+
+        provider, subject, email, display_name = self._validate_identity_fields(
+            provider=provider,
+            subject=subject,
+            email=email,
+            display_name=display_name,
+        )
+        now = datetime.now(timezone.utc)
+        try:
+            with self.database.session() as session:
+                user = session.scalar(
+                    select(UserRow)
+                    .where(UserRow.user_id == user_id)
+                    .with_for_update()
+                )
+                if user is None:
+                    raise KeyError(f"unknown user_id: {user_id}")
+                by_subject = session.scalar(
+                    select(AuthIdentityRow).where(
+                        AuthIdentityRow.provider == provider,
+                        AuthIdentityRow.subject == subject,
+                    )
+                )
+                if by_subject is not None and by_subject.user_id != user_id:
+                    raise ValueError("external identity is linked to another user")
+                by_user = session.scalar(
+                    select(AuthIdentityRow).where(
+                        AuthIdentityRow.user_id == user_id,
+                        AuthIdentityRow.provider == provider,
+                    )
+                )
+                if by_user is not None and by_user.subject != subject:
+                    raise ValueError("user already has a different provider identity")
+                identity = by_subject or by_user
+                if identity is None:
+                    identity = AuthIdentityRow(
+                        user_id=user_id,
+                        provider=provider,
+                        subject=subject,
+                        email=email,
+                        display_name=display_name,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                    session.add(identity)
+                else:
+                    identity.email = email
+                    identity.display_name = display_name
+                    identity.updated_at = now
+                session.flush()
+                return _row_dict(identity)
+        except IntegrityError as exc:
+            raise ValueError("external identity link conflicts with an existing link") from exc
 
     @staticmethod
     def personal_tenant_id(user_id: str) -> str:
@@ -470,14 +808,19 @@ class RestockRepository:
         user_id: str,
         item_id: str,
         trigger_reason: str,
-        proposed_amount: Decimal,
+        proposed_amount: Decimal | None,
         currency: str,
-        merchant: str,
+        merchant: str | None,
         proposed_action: str | None,
         quote: dict | None,
         modes: dict,
         idempotency_key: str,
     ) -> dict[str, Any]:
+        self._validate_workflow_payment_proposal_shape(
+            proposed_action=proposed_action,
+            proposed_amount=proposed_amount,
+            merchant=merchant,
+        )
         try:
             with self.database.session() as session:
                 item_row = session.get(TrackedItemRow, item_id)
@@ -573,6 +916,11 @@ class RestockRepository:
                 raise ValueError(
                     f"workflow {run_id} is {row.state}; expected one of {sorted(expected)}"
                 )
+            self._validate_workflow_payment_proposal_shape(
+                proposed_action=changes.get("proposed_action", row.proposed_action),
+                proposed_amount=changes.get("proposed_amount", row.proposed_amount),
+                merchant=changes.get("merchant", row.merchant),
+            )
             row.state = state
             row.active_item_key = None if state in TERMINAL_STATES else row.item_id
             for key, value in changes.items():

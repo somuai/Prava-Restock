@@ -480,6 +480,63 @@ class WorkflowService:
         renew_budget_fence: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
         proposal = self._proposal(item)
+        if proposal.get("autonomous_action") is False:
+            if quote is not None:
+                raise ValueError("manual renewal cannot accept a merchant quote")
+            modes = {
+                "prava": "not_applicable",
+                "home_merchant": "not_applicable",
+                "home_catalog": "not_applicable",
+                "home_payment": "not_applicable",
+                "teams_billing": "manual_required",
+            }
+            self.repository.upsert_user(user)
+            self.repository.upsert_item(item)
+            run = self.repository.create_workflow(
+                user_id=str(user.user_id),
+                item_id=str(item.item_id),
+                trigger_reason=self._trigger_reason(item),
+                proposed_amount=None,
+                currency=item.currency,
+                merchant=None,
+                proposed_action=proposal.get("proposed_action"),
+                quote=None,
+                modes=modes,
+                idempotency_key=f"restock-{uuid4().hex}",
+            )
+            self.repository.audit(
+                user_id=str(user.user_id),
+                run_id=run["run_id"],
+                item_id=str(item.item_id),
+                event_type="triggered",
+                payload={"trigger_reason": run["trigger_reason"]},
+                modes=modes,
+            )
+            actions = ["skip"]
+            notification = self.repository.create_notification(
+                run_id=run["run_id"],
+                user_id=str(user.user_id),
+                message=str(proposal["message"]),
+                actions=actions,
+            )
+            run = self.repository.transition(
+                run["run_id"],
+                expected={WorkflowState.TRIGGERED.value},
+                state=WorkflowState.NOTIFIED.value,
+            )
+            self.repository.audit(
+                user_id=str(user.user_id),
+                run_id=run["run_id"],
+                item_id=str(item.item_id),
+                event_type="manual_renewal_flagged",
+                payload={
+                    "notification_id": notification["notification_id"],
+                    "actions": actions,
+                    "renewal_method": "manual_required",
+                },
+                modes=modes,
+            )
+            return run
         if quote is not None:
             self._validate_quote_binding(item, quote)
             self._validate_quote_usable(quote)
@@ -724,6 +781,11 @@ class WorkflowService:
         allowed = {"approve", "adjust", "skip", "renew_as_is", "switch_plan"}
         if action not in allowed:
             raise ValueError("unsupported notification action")
+        if (
+            run.get("proposed_action") == "flag_for_manual_renewal"
+            and action != "skip"
+        ):
+            raise ValueError("manual-renewal workflow only supports skip")
         if run.get("proposed_action") == "switch_to_alternate" and action == "approve":
             raise ValueError("plan switches require the explicit switch_plan action")
         if action == "adjust":
