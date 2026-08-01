@@ -3,7 +3,7 @@
 from datetime import date
 
 from nanda_trigger_service.trigger_math_core import evaluate_renewal
-from payments.models import TrackedItem, TriggerType
+from payments.models import RenewalMethod, TrackedItem, TriggerType
 
 
 TRIGGER_WINDOW_DAYS = 2
@@ -30,6 +30,8 @@ def trigger_condition(
 
 def proposed_action(item: TrackedItem) -> str:
     _require_known_date(item)
+    if item.renewal_method is RenewalMethod.MANUAL_REQUIRED:
+        return "flag_for_manual_renewal"
     assert item.current_plan_amount is not None
     assert item.alternate_plan_amount is not None
     action, _ = evaluate_renewal(
@@ -45,6 +47,18 @@ def should_fire(item: TrackedItem) -> bool:
 
 def propose(item: TrackedItem) -> dict:
     action = proposed_action(item)
+    if action == "flag_for_manual_renewal":
+        return {
+            "proposed_amount": None,
+            "merchant": None,
+            "proposed_action": action,
+            "autonomous_action": False,
+            "message": (
+                f"{item.name} renews in {days_until_renewal(item)} day(s), but this "
+                "provider requires an account-dashboard login. Flagged for manual "
+                "renewal; Restock will not sign in or attempt a purchase."
+            ),
+        }
     assert item.current_plan_amount is not None
     assert item.alternate_plan_amount is not None
     assert item.alternate_plan_label is not None
@@ -59,6 +73,7 @@ def propose(item: TrackedItem) -> dict:
         "proposed_amount": amount,
         "merchant": merchant,
         "proposed_action": action,
+        "autonomous_action": True,
         "message": (
             f"{item.name} renews in {days_until_renewal(item)} day(s). "
             f"Proposed action: {detail}. Approve, adjust, or skip?"

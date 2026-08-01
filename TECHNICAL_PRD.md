@@ -104,6 +104,7 @@ TrackedItem                     # base entity — both tracks share this shape
   current_plan_amount   decimal
   alternate_plan_amount decimal       # e.g. annual-plan price, for the switch-and-save proposal
   alternate_plan_label  string
+  renewal_method        enum(hosted_link, manual_required)
 
 Intent
   intent_id           UUID (pk)
@@ -153,7 +154,14 @@ together.
 
 ## 6. Trigger sources (v1 — deliberately simple, both implement the same interface)
 
-Both trigger sources answer one question — `should_fire(item) -> bool` — and hand the orchestrator the same shape of output (item, proposed amount, proposed merchant). Everything downstream of that call is identical for both tracks. This is the one abstraction worth getting right early, because it's what lets Restock Teams exist as a data variant instead of a second codebase.
+Both trigger sources answer one question — `should_fire(item) -> bool`. A
+Teams item with `renewal_method=hosted_link` hands the orchestrator the normal
+purchase-proposal shape (item, proposed amount, proposed merchant). A Teams item
+with `renewal_method=manual_required` still fires on schedule, but `propose()`
+returns a notification-only `flag_for_manual_renewal` action with no amount or
+merchant, so it cannot enter the autonomous purchase path. This keeps the
+trigger abstraction shared without pretending every provider exposes a safe
+payment surface.
 
 ### 6.1 Predicted trigger (Restock Home — consumption forecast)
 
@@ -189,9 +197,17 @@ trigger_condition  = days_until_renewal <= TRIGGER_WINDOW_DAYS   # default 2
 # the only "intelligence" here is the proposal itself:
 proposed_action = "renew_as_is" if alternate_plan_amount >= current_plan_amount
                   else "switch_to_alternate"   # e.g. annual plan, cheaper tier
+
+# providers that require a full account-dashboard login are notification-only
+proposed_action = "flag_for_manual_renewal" if renewal_method == "manual_required"
 ```
 
 This is deliberately the simpler of the two trigger sources — there's no forecasting error to manage, which is exactly why it's the right second track to add inside a 48-hour window: it reuses the entire downstream pipeline (§7, §8) for close to zero additional orchestrator complexity, while directly answering the brief's "manage a subscription" and "procure software" examples.
+
+The autonomous path is deliberately limited to subscriptions exposing a hosted,
+tokenized payment link. Restock does not store credentials for, or automate
+login to, a provider's full account dashboard; those renewals become manual
+flags even though their known-date trigger still fires.
 
 ## 7. Orchestrator agent
 
@@ -392,6 +408,7 @@ Every durable state transition writes a sanitized domain-audit entry with run, u
 - Capacitor Android/iOS wrappers are implemented and simulator-built; store enrollment, physical-device push validation, and publication remain external launch gates.
 - The guaranteed submission surface remains the disclosed PWA. The real Slack adapter and Meta test-number adapter must still disclose whether external credentials/setup are active.
 - Home adapters cover real Zepto and Swiggy catalog/cart quoting. Zepto's unattended final payment remains disclosed-mock by default; Swiggy card payment remains an explicit browser boundary and is never silently replaced by COD.
+- Long-term, the correct solution for authenticated billing platforms is OAuth-based delegated access to the platform's own billing API (e.g., Stripe Billing API, Chargebee API) — scoped and revocable access to the subscription object specifically, never the user's login credentials. This mirrors Prava's own trust model at the SaaS-account layer rather than the payment layer, and is explicitly preferred over any browser-automation approach to login.
 
 ## 17. Open questions — verify before/during build
 

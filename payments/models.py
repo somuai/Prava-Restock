@@ -26,6 +26,11 @@ class TriggerType(str, Enum):
     KNOWN_DATE = "known_date"
 
 
+class RenewalMethod(str, Enum):
+    HOSTED_LINK = "hosted_link"
+    MANUAL_REQUIRED = "manual_required"
+
+
 class Category(str, Enum):
     GROCERY = "grocery"
     STATIONERY = "stationery"
@@ -138,6 +143,7 @@ class TrackedItem(RestockModel):
     current_plan_amount: Decimal | None = Field(default=None, gt=Decimal("0"))
     alternate_plan_amount: Decimal | None = Field(default=None, gt=Decimal("0"))
     alternate_plan_label: str | None = None
+    renewal_method: RenewalMethod | None = None
 
     @model_validator(mode="after")
     def validate_trigger_fields(self) -> "TrackedItem":
@@ -173,11 +179,16 @@ class TrackedItem(RestockModel):
                     )
             elif self.typical_cadence_days is None:
                 raise ValueError("predicted items require typical_cadence_days")
-            if any(value is not None for value in known_date_fields):
+            if any(value is not None for value in known_date_fields) or self.renewal_method is not None:
                 raise ValueError("predicted items cannot set known-date fields")
         else:
             if self.track is not Track.TEAMS:
                 raise ValueError("known-date items must use the Teams track")
+            # Existing persisted Teams items predate this field and used the
+            # hosted-invoice path. Preserve that meaning while making every
+            # validated Teams item explicit from this point onward.
+            if self.renewal_method is None:
+                self.renewal_method = RenewalMethod.HOSTED_LINK
             if any(value is None for value in known_date_fields):
                 raise ValueError("known-date items require all known-date fields")
             if any(

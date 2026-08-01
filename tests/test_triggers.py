@@ -39,7 +39,13 @@ def home_item(
     )
 
 
-def teams_item(*, days_until_renewal: int, current: str, alternate: str) -> TrackedItem:
+def teams_item(
+    *,
+    days_until_renewal: int,
+    current: str,
+    alternate: str,
+    renewal_method: str = "hosted_link",
+) -> TrackedItem:
     return TrackedItem(
         item_id=UUID("00000000-0000-0000-0000-000000000011"),
         user_id=USER_ID,
@@ -56,6 +62,7 @@ def teams_item(*, days_until_renewal: int, current: str, alternate: str) -> Trac
         current_plan_amount=current,
         alternate_plan_amount=alternate,
         alternate_plan_label="Annual plan",
+        renewal_method=renewal_method,
     )
 
 
@@ -163,3 +170,21 @@ def test_teams_renews_as_is_when_alternate_is_not_cheaper() -> None:
     )
     assert proposal["proposed_action"] == "renew_as_is"
     assert proposal["proposed_amount"] == Decimal("2400")
+
+
+def test_teams_manual_required_only_flags_the_user() -> None:
+    item = teams_item(
+        days_until_renewal=2,
+        current="2400",
+        alternate="2200",
+        renewal_method="manual_required",
+    )
+
+    assert renewal_model.should_fire(item) is True
+    proposal = renewal_model.propose(item)
+
+    assert proposal["proposed_action"] == "flag_for_manual_renewal"
+    assert proposal["proposed_amount"] is None
+    assert proposal["merchant"] is None
+    assert proposal["autonomous_action"] is False
+    assert "manual renewal" in proposal["message"].lower()

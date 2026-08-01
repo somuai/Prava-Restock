@@ -88,6 +88,7 @@
     "renewal_date": "2026-07-16",
     "current_plan_amount": "2400.00",
     "alternate_plan_amount": "2200.00",
-    "alternate_plan_label": "annual plan"
+    "alternate_plan_label": "annual plan",
+    "renewal_method": "hosted_link"
   }
 ]

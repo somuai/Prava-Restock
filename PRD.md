@@ -161,6 +161,19 @@ for the environment shown to judges.
 4. Prava mandate issued; billing checkout completes (disclosed mock).
 5. Confirmation and savings report shown (e.g., “caught 1 price increase, saved $58/year”).
 
+#### Restock Teams renewal boundary
+
+Restock Teams targets subscriptions with a hosted, tokenized payment link
+(Stripe Billing, Chargebee, Paddle, and similar platforms all support this
+pattern — a payable invoice link that doesn't require a full account login).
+Where a SaaS platform's only renewal path requires authenticating into a full
+account dashboard, Restock explicitly does not attempt automated login — it
+flags the item to the user as requiring manual renewal instead. This is a
+deliberate boundary: storing or automating a user's real login credentials for
+a third-party account is a fundamentally larger trust surface than Prava's
+scoped, one-time, revocable credential model, and would contradict the trust
+architecture the rest of the product is built on.
+
 ## Part II — Technical Architecture
 
 ### 8. System context
@@ -325,9 +338,11 @@ authoritative production schema.
 
 ### 13. Trigger sources
 
-Both trigger sources answer one question — should_fire(item) -> bool — and hand the
-orchestrator the same shape of output. Everything downstream is identical for both tracks;
-this abstraction is what lets Teams exist as a data variant instead of a second codebase.
+Both trigger sources answer one question — should_fire(item) -> bool. Hosted-link
+renewals hand the orchestrator the normal purchase proposal; manual-required renewals
+hand it a notification-only flag with no amount or merchant and never enter the
+autonomous purchase path. This shared trigger abstraction lets Teams remain a data
+variant instead of a second codebase without automating a provider login.
 
 #### 13.1 Predicted trigger (Restock Home)
 
