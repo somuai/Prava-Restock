@@ -91,13 +91,28 @@ are held in platform secret storage, not committed or baked into the image.
 
 - **Real:** deterministic trigger logic, code-owned spend caps, the OpenAI Agents SDK tool surface, and Prava sandbox Session API integration. The currently assigned sandbox test card reaches Prava's hosted security step but is blocked by Prava's **Security Check Failed / No Passkey** state; this is a provider-side sandbox provisioning issue, not a completed mandate claim.
 - **Real merchant boundary:** Zepto OAuth/MCP client, address selection, live exact-SKU price lookup, cart preview, exact-price quote normalization, stock handling, and payment-status reconciliation interface. Similar search results are rejected rather than substituted.
-- **Disclosed simulation:** final Zepto live-money charge and Restock Teams billing-portal fulfillment. Zepto publishes no merchant payment sandbox, so the final charge stays disabled unless an operator explicitly enables a compatible-card checkout.
+- **Disclosed simulation in the deployed environment:** final Zepto live-money charge and Restock Teams billing-portal fulfillment. Zepto publishes no merchant payment sandbox, so the final charge stays disabled unless an operator explicitly enables a compatible-card checkout. Teams now has a production-ready hosted-invoice boundary, but the deployed mode remains `disclosed_mock` until Prava production access, a reviewed executor, and an explicitly approved real payment are present.
 - **Hosted runtime:** the current application is published with durable
   Postgres state, password authentication, and sandbox Prava configuration.
   Real-money execution remains disabled and every unavailable boundary remains
   mode-tagged. `/capabilities` is authoritative for the running environment.
 
 Runtime modes are returned by `/capabilities`. `HOME_MERCHANT_MODE` controls catalog/cart quoting independently from `HOME_PAYMENT_MODE`, which controls the final charge. Both default to `disclosed_mock`, so production can truthfully expose a real Zepto quote with a disclosed simulated payment. A real charge additionally requires `ZEPTO_REAL_PAYMENT_ENABLED=1`, production Prava configuration, and an allowlisted payment-browser executor; it is never enabled in CI.
+
+Teams targets hosted invoice links because they expose a payable, tokenized
+surface without asking Restock to store or automate a vendor-account password.
+Authenticated billing dashboards remain `manual_required` until the vendor
+offers scoped OAuth/API access. `POST /api/v1/items/teams` creates a hosted-link
+tracked item using only an opaque invoice reference; the URL itself lives in
+deployment secret management and never enters the database. Final execution
+is controlled independently through `TEAMS_BILLING_MODE`. Real mode additionally
+requires `TEAMS_REAL_PAYMENT_ENABLED=1`, an exact
+`TEAMS_PAYMENT_ALLOWED_HOSTS` allowlist, an absolute reviewed
+`TEAMS_PAYMENT_EXECUTOR_PATH`, Prava production configuration, production mode,
+`TEAMS_HOSTED_INVOICE_LINKS_JSON`, and demo mode disabled. It persists
+idempotency before exposing the consume-once
+credential, blocks changed price/currency, and never falls back silently to a
+mock. Recurring/standing charges remain disabled.
 
 ## Workflow and persistence
 
@@ -167,7 +182,7 @@ EWMA remains the production baseline. Phase 13 implemented consent-gated forecas
 
 ## Additional merchant adapters
 
-Phase 14 implemented the official Swiggy MCP endpoints for catalog/cart work through the same quote/checkout/reconciliation contract. Swiggy's MCP can expose COD, but Restock never treats COD as a substitute for an approved Prava card payment; card checkout stays an explicit browser boundary and defaults to a disclosed simulation. Restock Teams also supports HTTPS hosted-invoice quotes and idempotent one-time disclosed checkout. Prava now documents an authenticated [Charge a Mandate](https://docs.prava.space/api-reference/mandate-charge) REST endpoint with idempotency and merchant/cap enforcement. Restock has not yet integrated or sandbox-proved that endpoint, so recurring Teams charging remains disabled until that separate boundary is implemented and tested.
+Phase 14 implemented the official Swiggy MCP endpoints for catalog/cart work through the same quote/checkout/reconciliation contract. Swiggy's MCP can expose COD, but Restock never treats COD as a substitute for an approved Prava card payment; card checkout stays an explicit browser boundary and defaults to a disclosed simulation. Restock Teams supports HTTPS hosted-invoice quotes, durable idempotency, an allowlisted consume-once payment executor, and terminal Prava status reporting. The deployed environment still truthfully reports `disclosed_mock`; the real boundary fails closed until its production gates are satisfied. Prava now documents an authenticated [Charge a Mandate](https://docs.prava.space/api-reference/mandate-charge) REST endpoint with idempotency and merchant/cap enforcement. Restock has not yet integrated or sandbox-proved that recurring-charge endpoint, so recurring Teams charging remains disabled until that separate boundary is implemented and tested.
 
 ## Operations and recovery
 

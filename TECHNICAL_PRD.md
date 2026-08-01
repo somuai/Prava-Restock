@@ -336,12 +336,18 @@ fresh provider authorization and explicit operator enablement.
 
 Real Home proposals must be based on a fresh exact-cart quote for the tracked `merchant_sku_id`, positive `quantity`, and opaque `merchant_address_ref`. Initial quoting prepares and verifies the exact cart before preview; pre-checkout revalidation previews the already-prepared cart again. The Zepto device ID is supplied only through deployment configuration (`ZEPTO_DEVICE_ID`) and must never be persisted in `TrackedItem`, logs, or API payloads. Merchant clients remain injected so credential-free tests cannot make live calls by accident.
 
-**Restock Teams:** one-time hosted-invoice quoting is implemented. Unattended
-final invoice payment remains disclosed simulation. Prava now documents
-`POST /v1/mandates/{id}/charge` for active mandates, including idempotent charge
-references and merchant/cap enforcement. Restock has not implemented or
-sandbox-proved that separate charge/report flow, so recurring Teams charging
-remains disabled rather than being approximated.
+**Restock Teams:** one-time hosted-invoice quoting and a production-ready,
+fail-closed final-payment boundary are implemented: exact HTTPS-host
+allowlisting, a reviewed subprocess executor, consume-once Prava credential use,
+durable idempotency before exposure, final amount/currency comparison, and
+terminal Prava status reporting. Tracked items and workflow quotes persist only
+an opaque invoice reference; the payment URL is resolved from deployment secret
+management at execution time and never enters durable application state. The
+deployed environment remains a disclosed
+mock until `TEAMS_BILLING_MODE=real`, the independent real-payment gate, Prava
+production access, and the executor/allowlist are all configured. It never
+falls back silently. Prava's active-mandate charging is not yet integrated or
+sandbox-proved, so recurring Teams charging remains disabled.
 
 ### 9.3 OpenAI Agents SDK
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import json
 import os
 from collections.abc import Mapping
 from datetime import datetime
@@ -218,6 +219,50 @@ def validate(service: str, environment: Mapping[str, str]) -> list[str]:
                 issues.append("ZEPTO_PAYMENT_EXECUTOR_PATH_MUST_BE_ABSOLUTE")
             elif not Path(executable).is_file() or not os.access(executable, os.X_OK):
                 issues.append("ZEPTO_PAYMENT_EXECUTOR_PATH_INVALID")
+        teams_mode = environment.get("TEAMS_BILLING_MODE", "disclosed_mock")
+        if teams_mode not in {"real", "disclosed_mock"}:
+            issues.append("TEAMS_BILLING_MODE_INVALID")
+        if teams_mode == "real":
+            if environment.get("TEAMS_REAL_PAYMENT_ENABLED") != "1":
+                issues.append("TEAMS_REAL_PAYMENT_GATE_REQUIRED")
+            if environment.get("TEAMS_RECURRING_ENABLED") == "1":
+                issues.append("TEAMS_RECURRING_MANDATE_UNCONFIRMED")
+            teams_hosts = [
+                host.strip()
+                for host in environment.get("TEAMS_PAYMENT_ALLOWED_HOSTS", "").split(",")
+                if host.strip()
+            ]
+            if not teams_hosts:
+                issues.append("TEAMS_PAYMENT_ALLOWED_HOSTS_REQUIRED")
+            teams_executable = environment.get(
+                "TEAMS_PAYMENT_EXECUTOR_PATH", ""
+            ).strip()
+            if not teams_executable:
+                issues.append("TEAMS_PAYMENT_EXECUTOR_PATH_REQUIRED")
+            elif not Path(teams_executable).is_absolute():
+                issues.append("TEAMS_PAYMENT_EXECUTOR_PATH_MUST_BE_ABSOLUTE")
+            elif not Path(teams_executable).is_file() or not os.access(
+                teams_executable, os.X_OK
+            ):
+                issues.append("TEAMS_PAYMENT_EXECUTOR_PATH_INVALID")
+            raw_links = environment.get("TEAMS_HOSTED_INVOICE_LINKS_JSON", "").strip()
+            try:
+                links = json.loads(raw_links) if raw_links else None
+            except json.JSONDecodeError:
+                links = None
+            if not isinstance(links, dict) or not links:
+                issues.append("TEAMS_HOSTED_INVOICE_LINKS_JSON_REQUIRED")
+            elif any(
+                not isinstance(reference, str)
+                or not isinstance(url, str)
+                or urlsplit(url).scheme != "https"
+                or not urlsplit(url).hostname
+                or urlsplit(url).hostname not in teams_hosts
+                or urlsplit(url).username is not None
+                or urlsplit(url).password is not None
+                for reference, url in links.items()
+            ):
+                issues.append("TEAMS_HOSTED_INVOICE_LINKS_JSON_INVALID")
         mcp_override = environment.get("MCP_REMOTE_BINARY", "").strip()
         if environment.get("RESTOCK_ENV") == "production" and mcp_override:
             if Path(mcp_override) != Path("/opt/zepto-mcp/node_modules/.bin/mcp-remote"):

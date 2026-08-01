@@ -1170,6 +1170,52 @@ button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visibl
   line-height: .96;
   letter-spacing: -.045em;
 }
+.teams-add-subscription {
+  position: absolute;
+  z-index: 12;
+  top: 24px;
+  right: 26px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 18px;
+  border: 1px solid rgba(23, 98, 77, .28);
+  border-radius: 999px;
+  background: rgba(255, 253, 247, .86);
+  color: var(--green-dark);
+  font: 650 14px/1 "Inter Variable", sans-serif;
+  box-shadow: 0 10px 24px rgba(49, 56, 46, .09);
+  backdrop-filter: blur(10px);
+  cursor: pointer;
+  transition: transform 180ms ease, box-shadow 180ms ease, background 180ms ease;
+}
+.teams-add-subscription:hover { transform: translateY(-2px); background: #fffdf7; box-shadow: 0 14px 30px rgba(49, 56, 46, .13); }
+.teams-setup { max-width: 1120px; margin: 0 auto; padding: 40px clamp(18px, 4vw, 56px) 80px; }
+.teams-setup-receipt {
+  max-width: 820px;
+  margin: 28px auto 0;
+  padding: clamp(28px, 5vw, 58px);
+  border: 1px solid rgba(79, 69, 53, .18);
+  background: #fffdf7;
+  box-shadow: 0 34px 80px rgba(65, 56, 42, .12);
+}
+.teams-setup-receipt > header { max-width: 620px; }
+.teams-setup-receipt h1 { margin: 10px 0 12px; font: 600 clamp(38px, 6vw, 62px)/.95 "Radio Canada Big Variable", sans-serif; letter-spacing: -.05em; }
+.teams-setup-receipt > header > p:last-child { color: var(--muted); font-size: 17px; line-height: 1.55; }
+.teams-setup-receipt form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; margin-top: 36px; }
+.teams-setup-receipt label { display: grid; gap: 8px; color: var(--muted); font: 650 12px/1 "Inter Variable", sans-serif; letter-spacing: .05em; text-transform: uppercase; }
+.teams-setup-receipt input { width: 100%; min-height: 48px; padding: 0 14px; border: 1px solid rgba(79, 69, 53, .24); border-radius: 6px; background: #fff; color: var(--ink); font: 500 16px/1 "Inter Variable", sans-serif; text-transform: none; letter-spacing: 0; }
+.teams-setup-receipt input:focus { outline: 3px solid rgba(23, 98, 77, .15); border-color: var(--green-dark); }
+.teams-setup-wide { grid-column: 1 / -1; }
+.teams-setup-receipt footer { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-top: 22px; border-top: 1px dashed rgba(79, 69, 53, .25); }
+.teams-setup-receipt footer p { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--muted); font-size: 13px; }
+@media (max-width: 680px) {
+  .teams-add-subscription { top: 76px; left: 24px; right: auto; }
+  .teams-setup-receipt form { grid-template-columns: 1fr; }
+  .teams-setup-wide { grid-column: auto; }
+  .teams-setup-receipt footer { align-items: stretch; flex-direction: column; }
+}
 .subscription-cabinet::before {
   content: "";
   position: absolute;

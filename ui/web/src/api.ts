@@ -7,6 +7,9 @@ export type Capabilities = {
   home_merchant_mode: string;
   home_payment_mode: string;
   teams_billing_mode: string;
+  teams_checkout_runtime_configured?: boolean;
+  teams_checkout_runtime_status?: string;
+  teams_real_money_enabled?: boolean;
   real_money_enabled: boolean;
   slack_configured: boolean;
   whatsapp_configured: boolean;
@@ -76,6 +79,9 @@ export type TrackedItem = {
   current_plan_amount?: string | null;
   alternate_plan_amount?: string | null;
   alternate_plan_label?: string | null;
+  renewal_method?: "hosted_link" | "manual_required" | null;
+  hosted_payment_reference?: string | null;
+  alternate_hosted_payment_reference?: string | null;
 };
 
 export type StarterTemplateId = "coffee" | "milk" | "toothpaste" | "detergent";
@@ -214,6 +220,27 @@ export const api = {
     const body = await response.json();
     if (!response.ok) throw new ApiError(response.status, body.detail || "Starter pantry setup failed");
     return body as { created: number; existing: number; items: TrackedItem[] };
+  },
+  createTeamsSubscription: async (input: {
+    vendor_name: string;
+    invoice_id: string;
+    hosted_payment_reference: string;
+    alternate_hosted_payment_reference?: string;
+    currency: string;
+    renewal_date: string;
+    current_plan_amount: string;
+    alternate_plan_amount?: string;
+    alternate_plan_label?: string;
+  }) => {
+    const response = await fetch(endpoint("/api/v1/items/teams"), {
+      method: "POST",
+      credentials: "include",
+      headers: await requestHeaders(),
+      body: JSON.stringify(input),
+    });
+    const body = await response.json();
+    if (!response.ok) throw new ApiError(response.status, body.detail || "Subscription setup failed");
+    return body as TrackedItem;
   },
   notifications: () => read<Notification[]>("/api/v1/notifications/pending"),
   workflows: () => read<WorkflowRun[]>("/api/v1/workflows"),

@@ -42,6 +42,7 @@ class Category(str, Enum):
 class PreferredMerchant(str, Enum):
     ZEPTO = "zepto"
     SWIGGY = "swiggy"
+    HOSTED_INVOICE = "hosted_invoice"
     MOCK_SUBSCRIPTION_BILLING = "mock_subscription_billing"
     MOCK = "mock"
 
@@ -144,6 +145,12 @@ class TrackedItem(RestockModel):
     alternate_plan_amount: Decimal | None = Field(default=None, gt=Decimal("0"))
     alternate_plan_label: str | None = None
     renewal_method: RenewalMethod | None = None
+    hosted_payment_reference: str | None = Field(
+        default=None, min_length=1, max_length=255, pattern=r"^[A-Za-z0-9._:-]+$"
+    )
+    alternate_hosted_payment_reference: str | None = Field(
+        default=None, min_length=1, max_length=255, pattern=r"^[A-Za-z0-9._:-]+$"
+    )
 
     @model_validator(mode="after")
     def validate_trigger_fields(self) -> "TrackedItem":
@@ -181,6 +188,8 @@ class TrackedItem(RestockModel):
                 raise ValueError("predicted items require typical_cadence_days")
             if any(value is not None for value in known_date_fields) or self.renewal_method is not None:
                 raise ValueError("predicted items cannot set known-date fields")
+            if self.hosted_payment_reference is not None or self.alternate_hosted_payment_reference is not None:
+                raise ValueError("predicted items cannot set hosted payment references")
         else:
             if self.track is not Track.TEAMS:
                 raise ValueError("known-date items must use the Teams track")
@@ -201,6 +210,9 @@ class TrackedItem(RestockModel):
                 )
             ):
                 raise ValueError("known-date items cannot set predicted-trigger fields")
+            if self.renewal_method is RenewalMethod.MANUAL_REQUIRED:
+                if self.hosted_payment_reference is not None or self.alternate_hosted_payment_reference is not None:
+                    raise ValueError("manual-required items cannot set hosted payment references")
         return self
 
 

@@ -1594,10 +1594,12 @@ function TeamsGallery({
   subscriptions: trackedSubscriptions,
   onOpen,
   onPreview,
+  onAdd,
 }: {
   subscriptions: SubscriptionProduct[];
   onOpen: (subscription: SubscriptionProduct) => void;
   onPreview: () => void;
+  onAdd: () => void;
 }) {
   const stageRef = useRef<HTMLElement>(null);
   const animationFrame = useRef<number | null>(null);
@@ -1656,6 +1658,10 @@ function TeamsGallery({
           <span>Restock Teams</span>
           <h1>Subscription shelf</h1>
         </div>
+        <button className="teams-add-subscription" type="button" onClick={onAdd}>
+          <Receipt size={18} weight="duotone" />
+          Track an invoice
+        </button>
         <div className="award-shelf award-shelf--upper">
           <div className="award-items">
             {trackedSubscriptions.slice(0, 3).map((subscription) => (
@@ -1682,6 +1688,71 @@ function TeamsGallery({
           </div>
           <div className="wood-shelf" aria-hidden="true" />
         </div>
+      </section>
+    </main>
+  );
+}
+
+function TeamsSubscriptionSetup({
+  onBack,
+  onComplete,
+}: {
+  onBack: () => void;
+  onComplete: (input: {
+    vendor_name: string;
+    invoice_id: string;
+    hosted_payment_reference: string;
+    currency: string;
+    renewal_date: string;
+    current_plan_amount: string;
+  }) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [values, setValues] = useState({
+    vendor_name: "",
+    invoice_id: "",
+    hosted_payment_reference: "",
+    currency: "USD",
+    renewal_date: "",
+    current_plan_amount: "",
+  });
+  const update = (key: keyof typeof values, value: string) => {
+    setValues((current) => ({ ...current, [key]: value }));
+  };
+  return (
+    <main className="teams-setup">
+      <button className="back-button" type="button" onClick={onBack}>
+        <ArrowLeft size={18} />
+        <span>Back to renewals</span>
+      </button>
+      <section className="teams-setup-receipt" aria-labelledby="teams-setup-title">
+        <header>
+          <span className="receipt-provider-mark"><Receipt size={26} weight="duotone" /></span>
+          <p className="eyebrow">Hosted invoice only</p>
+          <h1 id="teams-setup-title">Track a subscription</h1>
+          <p>Paste the vendor’s payable invoice link. Restock never asks for, stores, or automates the vendor account password.</p>
+        </header>
+        <form onSubmit={(event) => {
+          event.preventDefault();
+          setBusy(true);
+          setError("");
+          void onComplete(values)
+            .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not track this subscription."))
+            .finally(() => setBusy(false));
+        }}>
+          <label><span>Vendor</span><input required maxLength={200} value={values.vendor_name} onChange={(event) => update("vendor_name", event.target.value)} placeholder="GitHub, Figma, Vercel…" /></label>
+          <label><span>Invoice reference</span><input required maxLength={255} value={values.invoice_id} onChange={(event) => update("invoice_id", event.target.value)} placeholder="INV-2026-08" /></label>
+          <label className="teams-setup-wide"><span>Hosted invoice reference</span><input required pattern="[A-Za-z0-9._:-]+" value={values.hosted_payment_reference} onChange={(event) => update("hosted_payment_reference", event.target.value)} placeholder="github-aug-2026" /></label>
+          <label><span>Renewal date</span><input required type="date" value={values.renewal_date} onChange={(event) => update("renewal_date", event.target.value)} /></label>
+          <label><span>Amount</span><input required type="number" min="0.01" step="0.01" value={values.current_plan_amount} onChange={(event) => update("current_plan_amount", event.target.value)} placeholder="29.00" /></label>
+          <label><span>Currency</span><input required minLength={3} maxLength={3} value={values.currency} onChange={(event) => update("currency", event.target.value.toUpperCase())} /></label>
+          {error && <p className="login-error teams-setup-wide" role="alert">{error}</p>}
+          <footer className="teams-setup-wide">
+            <p><LockKey size={16} /> The payment link stays in server secret management. A changed amount stops for a new approval.</p>
+            <button className="button button--teams" type="submit" disabled={busy}>{busy ? "Adding…" : "Track this invoice"}</button>
+          </footer>
+        </form>
       </section>
     </main>
   );
@@ -1985,7 +2056,7 @@ function SubscriptionDetail({
               <SealCheck size={18} weight="duotone" />
               <span>
                 <strong>Selection, approval, and payment stay separate.</strong>
-                <small>{capabilities?.real_money_enabled && capabilities.teams_billing_mode === "real" ? "Live vendor billing is enabled." : "This environment will not create a real vendor charge."}</small>
+                <small>{capabilities?.teams_real_money_enabled && capabilities.teams_billing_mode === "real" ? "Live hosted-invoice billing is enabled." : "This environment will not create a real vendor charge."}</small>
               </span>
             </div>
             <div className="receipt-footer-actions">
@@ -2460,6 +2531,7 @@ export default function App() {
     import.meta.env.DEV ? "ready" : "checking",
   );
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
+  const [teamsSetupOpen, setTeamsSetupOpen] = useState(false);
 
   useEffect(() => {
     const images = revealAssets.map((src) => {
@@ -2623,6 +2695,7 @@ export default function App() {
     sound("navigate");
     setSelectedProduct(null);
     setSelectedSubscription(null);
+    setTeamsSetupOpen(false);
     setActionFeedback("");
     setView(nextView);
     const url = new URL(window.location.href);
@@ -2811,8 +2884,18 @@ export default function App() {
           onBack={closeSubscription}
           onAction={(notification, action) => void act(notification, action)}
         />
+      ) : teamsSetupOpen && view === "teams" ? (
+        <TeamsSubscriptionSetup
+          onBack={() => setTeamsSetupOpen(false)}
+          onComplete={async (input) => {
+            await api.createTeamsSubscription(input);
+            await refresh();
+            setTeamsSetupOpen(false);
+            setStatus(`${input.vendor_name} is now tracked`);
+          }}
+        />
       ) : view === "teams" ? (
-        <TeamsGallery subscriptions={visibleSubscriptions} onOpen={openSubscription} onPreview={() => sound("hover")} />
+        <TeamsGallery subscriptions={visibleSubscriptions} onOpen={openSubscription} onPreview={() => sound("hover")} onAdd={() => setTeamsSetupOpen(true)} />
       ) : (
         <ActivityView products={visibleProducts} audit={audit} capabilities={capabilities} workflows={workflows} />
       )}

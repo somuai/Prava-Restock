@@ -205,6 +205,53 @@ def test_duplicate_trigger_is_suppressed_by_unique_active_item(repository) -> No
         service.begin(build_user(), build_home_item())
 
 
+def test_teams_switch_requires_a_separately_sourced_alternate_invoice_link(
+    repository,
+) -> None:
+    prava = FakePrava()
+    item = build_teams_item().model_copy(
+        update={
+            "hosted_payment_reference": "current-invoice-123",
+        }
+    )
+    service = WorkflowService(repository, prava=prava, teams_checkout=FakeCheckout())
+
+    with pytest.raises(ValueError, match="alternate plan requires its own sourced"):
+        service.begin(build_user(), item)
+
+    assert prava.calls == 0
+
+
+def test_real_teams_mode_requires_invoice_reference_before_prava(
+    repository, monkeypatch
+) -> None:
+    monkeypatch.setenv("TEAMS_BILLING_MODE", "real")
+    prava = FakePrava()
+    service = WorkflowService(repository, prava=prava, teams_checkout=FakeCheckout())
+
+    with pytest.raises(ValueError, match="requires a sourced hosted invoice reference"):
+        service.begin(build_user(), build_teams_item())
+
+    assert prava.calls == 0
+
+
+def test_teams_switch_binds_the_alternate_invoice_before_prava(repository) -> None:
+    prava = FakePrava()
+    item = build_teams_item().model_copy(
+        update={
+            "hosted_payment_reference": "current-invoice-123",
+            "alternate_hosted_payment_reference": "annual-invoice-456",
+        }
+    )
+    service = WorkflowService(repository, prava=prava, teams_checkout=FakeCheckout())
+
+    run = service.begin(build_user(), item)
+
+    assert prava.calls == 1
+    assert run["quote"]["quote_reference"] == item.alternate_hosted_payment_reference
+    assert Decimal(str(run["proposed_amount"])) == item.alternate_plan_amount
+
+
 def test_initial_over_cap_proposal_never_reaches_prava_or_durable_workflow(
     repository,
 ) -> None:

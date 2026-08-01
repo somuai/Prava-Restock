@@ -36,6 +36,8 @@ class SubprocessBrowserPaymentExecutor:
         expiry_month: str,
         expiry_year: str,
         redirect_policy: PaymentRedirectPolicy,
+        expected_amount: str | None = None,
+        currency: str | None = None,
     ) -> dict[str, Any]:
         redirect_policy.validate_url(payment_link)
         payload = json.dumps(
@@ -46,6 +48,8 @@ class SubprocessBrowserPaymentExecutor:
                 "expiry_month": expiry_month,
                 "expiry_year": expiry_year,
                 "allowed_hosts": list(redirect_policy.allowed_hosts),
+                "expected_amount": expected_amount,
+                "currency": currency,
             }
         )
         completed = subprocess.run(
@@ -69,7 +73,22 @@ class SubprocessBrowserPaymentExecutor:
             raise RuntimeError("payment browser executor returned an invalid result")
         for url in result["visited_urls"]:
             redirect_policy.validate_url(str(url))
-        return {
+        sanitized = {
             "visited_urls": [str(url) for url in result["visited_urls"]],
             "credential_used": result.get("credential_used") is True,
         }
+        # Provider-specific executors may return these non-secret reconciliation
+        # fields.  Only a closed vocabulary crosses back into Restock; arbitrary
+        # page text, HTML, stdout, and stderr are intentionally discarded.
+        if "payment_status" in result:
+            payment_status = str(result["payment_status"]).lower()
+            if payment_status not in {"completed", "failed", "pending"}:
+                raise RuntimeError("payment browser executor returned an invalid status")
+            sanitized["payment_status"] = payment_status
+        if result.get("merchant_order_id"):
+            sanitized["merchant_order_id"] = str(result["merchant_order_id"])[:255]
+        if result.get("observed_amount") is not None:
+            sanitized["observed_amount"] = str(result["observed_amount"])
+        if result.get("currency") is not None:
+            sanitized["currency"] = str(result["currency"]).upper()[:3]
+        return sanitized

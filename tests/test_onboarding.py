@@ -10,6 +10,7 @@ SESSION_SECRET = "onboarding-placeholder-session-secret-that-is-long-enough"
 
 
 def configured_client(tmp_path, monkeypatch) -> tuple[TestClient, RestockRepository, str]:
+    api._AUTH_REQUESTS.clear()
     repository = RestockRepository(Database(f"sqlite:///{tmp_path / 'onboarding.db'}"))
     repository.create_schema()
     monkeypatch.setattr(api, "REPOSITORY", repository)
@@ -86,3 +87,54 @@ def test_starter_onboarding_rejects_unknown_or_empty_selection(tmp_path, monkeyp
 
     assert unknown.status_code == 422
     assert empty.status_code == 422
+
+
+def test_google_user_can_track_https_hosted_invoice_without_vendor_login(
+    tmp_path, monkeypatch
+) -> None:
+    client, repository, token = configured_client(tmp_path, monkeypatch)
+    response = client.post(
+        "/api/v1/items/teams",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "vendor_name": "Example SaaS",
+            "invoice_id": "invoice-123",
+            "hosted_payment_reference": "example-invoice-123",
+            "currency": "usd",
+            "renewal_date": "2026-08-04",
+            "current_plan_amount": "29",
+            "alternate_plan_amount": "24",
+            "alternate_plan_label": "annual",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["preferred_merchant"] == "hosted_invoice"
+    assert response.json()["renewal_method"] == "hosted_link"
+    assert response.json()["currency"] == "USD"
+    persisted = repository.list_items(response.json()["user_id"])[0]
+    assert persisted["hosted_payment_reference"] == "example-invoice-123"
+    assert "payment_url" not in persisted
+
+
+def test_teams_subscription_rejects_a_url_instead_of_an_opaque_reference(
+    tmp_path, monkeypatch
+) -> None:
+    client, _, token = configured_client(tmp_path, monkeypatch)
+    base = {
+        "vendor_name": "Example SaaS",
+        "invoice_id": "invoice-123",
+        "currency": "USD",
+        "renewal_date": "2026-08-04",
+        "current_plan_amount": "29",
+    }
+    for reference in (
+        "https://billing.example.test/invoice/123",
+        "reference with spaces",
+    ):
+        response = client.post(
+            "/api/v1/items/teams",
+            headers={"Authorization": f"Bearer {token}"},
+            json={**base, "hosted_payment_reference": reference},
+        )
+        assert response.status_code == 422

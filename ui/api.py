@@ -1,7 +1,7 @@
 """Authenticated Restock API with explicit runtime capability disclosure."""
 
 from collections import defaultdict, deque
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import hashlib
 import hmac
@@ -49,14 +49,18 @@ from common.google_identity import (
 from channels import whatsapp
 from channels.slack_routes import router as slack_service_router
 from workflow.service_routes import router as worker_service_router
-from merchant import swiggy_checkout, zepto_checkout
+from merchant import saas_invoice_checkout, swiggy_checkout, zepto_checkout
 from merchant.zepto_mcp import (
     mcp_authorization_verified_recently,
     mcp_remote_runtime_ready,
 )
 from storage import Database, RestockRepository
 from workflow import WorkflowService
-from workflow.factory import build_workflow_service, configure_merchant_runtime
+from workflow.factory import (
+    build_workflow_service,
+    configure_merchant_runtime,
+    configure_teams_runtime,
+)
 from scripts.validate_service_env import validate as validate_service_environment
 
 
@@ -262,6 +266,22 @@ def _merchant_runtime_status() -> tuple[bool, str]:
     return ready, "configured" if ready else "unavailable"
 
 
+def _teams_runtime_status() -> tuple[bool, str]:
+    executable = os.getenv("TEAMS_PAYMENT_EXECUTOR_PATH", "").strip()
+    if executable:
+        path = Path(executable)
+        if not path.is_absolute() or not path.is_file() or not os.access(path, os.X_OK):
+            saas_invoice_checkout.configure_runtime(None)
+            return False, "invalid_configuration"
+    try:
+        configure_teams_runtime(get_repository())
+    except (OSError, RuntimeError, ValueError):
+        saas_invoice_checkout.configure_runtime(None)
+        return False, "invalid_configuration"
+    ready = saas_invoice_checkout.real_payment_runtime_ready()
+    return ready, "configured" if ready else "unavailable"
+
+
 def _zepto_oauth_status() -> str:
     """Report cache presence only; cached authorization is never claimed verified."""
 
@@ -313,6 +333,7 @@ def runtime_modes() -> dict[str, str | bool]:
     )
     oauth_status = _zepto_oauth_status()
     mcp_runtime_ready = mcp_remote_runtime_ready()
+    teams_runtime_ready, teams_runtime_status = _teams_runtime_status()
     production = os.getenv("RESTOCK_ENV", "development") == "production"
     demo_disabled = os.getenv("RESTOCK_DEMO_MODE", "1") == "0"
     cart_ready = (
@@ -341,7 +362,19 @@ def runtime_modes() -> dict[str, str | bool]:
         "home_merchant_mode": zepto_checkout.merchant_mode().value,
         "home_payment_mode": zepto_checkout.payment_mode().value,
         "swiggy_payment_mode": swiggy_checkout.payment_mode().value,
-        "teams_billing_mode": "disclosed_mock",
+        "teams_billing_mode": saas_invoice_checkout.billing_mode().value,
+        "teams_checkout_runtime_configured": (
+            teams_runtime_ready
+        ),
+        "teams_checkout_runtime_status": teams_runtime_status,
+        "teams_real_money_enabled": (
+            saas_invoice_checkout.billing_mode().value == "real"
+            and os.getenv("TEAMS_REAL_PAYMENT_ENABLED") == "1"
+            and prava_mode == "production_configured"
+            and teams_runtime_ready
+            and production
+            and demo_disabled
+        ),
         "real_money_enabled": (
             zepto_checkout.merchant_mode().value == "real"
             and zepto_checkout.payment_mode().value == "real"
@@ -396,6 +429,15 @@ def production_configuration_issues() -> list[str]:
         # call and upgrades the capability to ``verified_recently``. Treating
         # that runtime verification as a startup error would deadlock the first
         # quote behind Railway's readiness gate.
+    teams_runtime_ready, teams_runtime_status = _teams_runtime_status()
+    if (
+        saas_invoice_checkout.billing_mode().value == "real"
+        and os.getenv("TEAMS_REAL_PAYMENT_ENABLED") == "1"
+    ):
+        if not teams_runtime_ready:
+            issues.append("TEAMS_REAL_CHECKOUT_RUNTIME_UNAVAILABLE")
+        if teams_runtime_status == "invalid_configuration":
+            issues.append("TEAMS_PAYMENT_EXECUTOR_INVALID")
     return sorted(set(issues))
 
 
@@ -446,6 +488,31 @@ class StarterOnboardingRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     template_ids: list[StarterTemplateId] = Field(min_length=1, max_length=4)
+
+
+class TeamsSubscriptionRequest(BaseModel):
+    """A hosted invoice is a payment surface, never a vendor login."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    vendor_name: str = Field(min_length=1, max_length=200)
+    invoice_id: str = Field(min_length=1, max_length=255)
+    hosted_payment_reference: str = Field(
+        min_length=1, max_length=255, pattern=r"^[A-Za-z0-9._:-]+$"
+    )
+    alternate_hosted_payment_reference: str | None = Field(
+        default=None, min_length=1, max_length=255, pattern=r"^[A-Za-z0-9._:-]+$"
+    )
+    currency: str = Field(min_length=3, max_length=3)
+    renewal_date: date
+    current_plan_amount: Decimal = Field(gt=Decimal("0"))
+    alternate_plan_amount: Decimal | None = Field(default=None, gt=Decimal("0"))
+    alternate_plan_label: str | None = Field(default=None, max_length=120)
+
+    @field_validator("currency")
+    @classmethod
+    def normalize_currency(cls, value: str) -> str:
+        return value.upper()
 
 
 class WaitlistRequest(BaseModel):
@@ -1053,6 +1120,45 @@ def create_starter_items(
         "existing": len(selected) - created,
         "items": repository.list_items(user_id),
     }
+
+
+@app.post("/api/v1/items/teams", status_code=201)
+def create_teams_subscription(
+    body: TeamsSubscriptionRequest,
+    user_id: str = Depends(require_user),
+    repository: RestockRepository = Depends(get_repository),
+) -> dict[str, Any]:
+    """Track one hosted invoice without accepting dashboard credentials."""
+
+    from payments.models import TrackedItem
+
+    alternate_amount = body.alternate_plan_amount or body.current_plan_amount
+    alternate_label = body.alternate_plan_label or "renew current plan"
+    try:
+        item = TrackedItem(
+            item_id=uuid4(),
+            user_id=UUID(user_id),
+            name=body.vendor_name,
+            track="teams",
+            trigger_type="known_date",
+            category="saas_subscription",
+            sensitive_flag=False,
+            preferred_merchant="hosted_invoice",
+            merchant_sku_id=body.invoice_id,
+            currency=body.currency,
+            status="active",
+            renewal_date=body.renewal_date,
+            current_plan_amount=body.current_plan_amount,
+            alternate_plan_amount=alternate_amount,
+            alternate_plan_label=alternate_label,
+            renewal_method="hosted_link",
+            hosted_payment_reference=body.hosted_payment_reference,
+            alternate_hosted_payment_reference=body.alternate_hosted_payment_reference,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    repository.upsert_item(item)
+    return item.model_dump(mode="json")
 
 
 @app.get("/api/v1/tenants")

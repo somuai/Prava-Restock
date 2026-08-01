@@ -348,9 +348,14 @@ class WorkflowService:
         execution_mode = str(response.get("execution_mode") or "disclosed_mock")
         disclosure_reason = response.get("disclosure_reason")
         audit_modes = dict(run["modes"])
-        audit_modes["home_payment"] = execution_mode
+        mode_key = (
+            "teams_billing"
+            if item.trigger_type is TriggerType.KNOWN_DATE
+            else "home_payment"
+        )
+        audit_modes[mode_key] = execution_mode
         if disclosure_reason:
-            audit_modes["home_payment_reason"] = str(disclosure_reason)
+            audit_modes[f"{mode_key}_reason"] = str(disclosure_reason)
         credential_provably_unexposed = (
             response.get("credential_exposed") is False
             or (
@@ -537,6 +542,35 @@ class WorkflowService:
                 modes=modes,
             )
             return run
+        if (
+            item.trigger_type is TriggerType.KNOWN_DATE
+            and saas_invoice_checkout.billing_mode().value == "real"
+            and not item.hosted_payment_reference
+        ):
+            raise ValueError(
+                "real Teams billing requires a sourced hosted invoice reference"
+            )
+        if (
+            quote is None
+            and item.trigger_type is TriggerType.KNOWN_DATE
+            and item.hosted_payment_reference
+        ):
+            assert item.current_plan_amount is not None
+            proposed_amount = Decimal(str(proposal["proposed_amount"]))
+            invoice_reference = item.hosted_payment_reference
+            if proposal.get("proposed_action") == "switch_to_alternate":
+                if not item.alternate_hosted_payment_reference:
+                    raise ValueError(
+                        "alternate plan requires its own sourced hosted payment link"
+                    )
+                invoice_reference = item.alternate_hosted_payment_reference
+            quote = saas_invoice_checkout.quote_invoice(
+                invoice_reference=invoice_reference,
+                vendor=item.preferred_merchant.value,
+                invoice_id=item.merchant_sku_id,
+                amount=proposed_amount,
+                currency=item.currency,
+            )
         if quote is not None:
             self._validate_quote_binding(item, quote)
             self._validate_quote_usable(quote)
@@ -564,7 +598,11 @@ class WorkflowService:
             "home_merchant": home_catalog_mode,
             "home_catalog": home_catalog_mode,
             "home_payment": home_payment_mode,
-            "teams_billing": "disclosed_mock",
+            "teams_billing": (
+                saas_invoice_checkout.billing_mode().value
+                if item.trigger_type is TriggerType.KNOWN_DATE
+                else "not_applicable"
+            ),
         }
         self.repository.upsert_user(user)
         self.repository.upsert_item(item)
