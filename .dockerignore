@@ -18,6 +18,8 @@ runtime-cache
 **/runtime-cache
 tests
 docs
+assets
+restock-landing
 logs
 node_modules
 **/node_modules
