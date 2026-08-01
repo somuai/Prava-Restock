@@ -322,6 +322,14 @@ def runtime_modes() -> dict[str, str | bool]:
     return {
         "auth_mode": _auth_mode(),
         "google_auth_configured": bool(os.getenv("GOOGLE_CLIENT_ID", "").strip()),
+        "reviewer_access_configured": all(
+            os.getenv(name, "").strip()
+            for name in (
+                "RESTOCK_REVIEWER_PASSWORD_HASH",
+                "RESTOCK_REVIEWER_USER_ID",
+                "RESTOCK_REVIEWER_EXPIRES_AT",
+            )
+        ),
         # OAuth client IDs are public identifiers. Returning this at runtime
         # avoids baking environment-specific IDs into the Vite bundle.
         "google_client_id": (
@@ -560,7 +568,12 @@ def _default_google_caps() -> tuple[Decimal, Decimal, Decimal]:
     return values  # type: ignore[return-value]
 
 
-def _issue_session(response: Response, user_id: str) -> dict[str, str | int]:
+def _issue_session(
+    response: Response,
+    user_id: str,
+    *,
+    max_ttl_seconds: int | None = None,
+) -> dict[str, str | int]:
     session_secret = os.getenv("RESTOCK_SESSION_SECRET", "")
     if len(session_secret) < 32:
         raise HTTPException(
@@ -575,6 +588,13 @@ def _issue_session(response: Response, user_id: str) -> dict[str, str | int]:
             detail="authentication unavailable",
         ) from exc
     ttl_seconds = min(max(ttl_seconds, 300), 86400)
+    if max_ttl_seconds is not None:
+        if max_ttl_seconds < 60:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="invalid credentials",
+            )
+        ttl_seconds = min(ttl_seconds, max_ttl_seconds)
     access_token = session_auth.mint(user_id, session_secret, ttl_seconds)
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
@@ -772,19 +792,29 @@ def solo_login(
     if not _auth_method_enabled("solo"):
         raise HTTPException(status_code=404, detail="sign-in method unavailable")
     password_hash = os.getenv("RESTOCK_SOLO_PASSWORD_HASH", "").strip()
-    user_id = os.getenv("RESTOCK_SOLO_USER_ID", "").strip()
+    owner_user_id = os.getenv("RESTOCK_SOLO_USER_ID", "").strip()
+    reviewer_hash = os.getenv("RESTOCK_REVIEWER_PASSWORD_HASH", "").strip()
+    reviewer_user_id = os.getenv("RESTOCK_REVIEWER_USER_ID", "").strip()
+    reviewer_expires_raw = os.getenv("RESTOCK_REVIEWER_EXPIRES_AT", "").strip()
     session_secret = os.getenv("RESTOCK_SESSION_SECRET", "")
-    if (
-        not password_auth.is_supported_hash(password_hash)
-        or not user_id
-        or len(session_secret) < 32
-    ):
+    owner_configured = password_auth.is_supported_hash(password_hash) and bool(
+        owner_user_id
+    )
+    reviewer_configured = (
+        password_auth.is_supported_hash(reviewer_hash)
+        and bool(reviewer_user_id)
+        and bool(reviewer_expires_raw)
+    )
+    if not (owner_configured or reviewer_configured) or len(session_secret) < 32:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="authentication unavailable",
         )
     try:
-        UUID(user_id)
+        if owner_configured:
+            UUID(owner_user_id)
+        if reviewer_configured:
+            UUID(reviewer_user_id)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -799,13 +829,33 @@ def solo_login(
             detail="authentication unavailable",
         ) from exc
     _enforce_login_rate_limit(request, repository, session_secret)
-    if not password_auth.verify_password(payload.password, password_hash):
+    authenticated_user_id: str | None = None
+    reviewer_max_ttl: int | None = None
+    if owner_configured and password_auth.verify_password(payload.password, password_hash):
+        authenticated_user_id = owner_user_id
+    elif reviewer_configured and password_auth.verify_password(
+        payload.password, reviewer_hash
+    ):
+        try:
+            reviewer_expires_at = datetime.fromisoformat(
+                reviewer_expires_raw.replace("Z", "+00:00")
+            )
+            if reviewer_expires_at.tzinfo is None:
+                raise ValueError("timezone required")
+            reviewer_max_ttl = int(
+                (reviewer_expires_at - datetime.now(timezone.utc)).total_seconds()
+            )
+        except ValueError:
+            reviewer_max_ttl = 0
+        if reviewer_max_ttl >= 60:
+            authenticated_user_id = reviewer_user_id
+    if authenticated_user_id is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid credentials",
         )
     try:
-        owner = repository.get_user(user_id)
+        owner = repository.get_user(authenticated_user_id)
     except Exception as exc:
         LOGGER.error(json.dumps({"event": "authentication_store_unavailable"}))
         raise HTTPException(
@@ -817,7 +867,11 @@ def solo_login(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="authentication unavailable",
         )
-    return _issue_session(response, user_id)
+    return _issue_session(
+        response,
+        authenticated_user_id,
+        max_ttl_seconds=reviewer_max_ttl,
+    )
 
 
 @app.post("/api/v1/auth/google")

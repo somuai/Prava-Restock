@@ -204,3 +204,34 @@ def test_api_contract_rejects_malformed_solo_auth_configuration() -> None:
         "RESTOCK_SOLO_PASSWORD_HASH_INVALID_FORMAT",
         "RESTOCK_SOLO_USER_ID_INVALID",
     ]
+
+
+def test_api_contract_validates_optional_reviewer_access_as_one_unit() -> None:
+    base = {
+        "DATABASE_URL": "postgresql://restock:secret@postgres/restock",
+        "PRAVA_API_KEY": "sk_test_placeholder",
+        "PRAVA_API_URL": "https://sandbox.api.prava.space",
+        "RESTOCK_ENV": "production",
+        "RESTOCK_DEMO_MODE": "0",
+        "RESTOCK_SESSION_SECRET": "session-secret-placeholder-over-32-characters",
+        "RESTOCK_SOLO_USER_ID": "00000000-0000-0000-0000-000000000001",
+        "RESTOCK_SOLO_PASSWORD_HASH": "scrypt$16384$8$1$MDEyMzQ1Njc4OWFiY2RlZg$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "RESTOCK_SLACK_SERVICE_TOKEN": "slack-service-placeholder-over-32-characters",
+        "RESTOCK_WORKER_SERVICE_TOKEN": "worker-service-placeholder-over-32-characters",
+    }
+    valid = {
+        **base,
+        "RESTOCK_REVIEWER_PASSWORD_HASH": "scrypt$16384$8$1$MDEyMzQ1Njc4OWFiY2RlZg$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "RESTOCK_REVIEWER_USER_ID": "00000000-0000-0000-0000-000000000099",
+        "RESTOCK_REVIEWER_EXPIRES_AT": "2026-08-04T00:00:00+05:30",
+    }
+
+    assert validate("api", valid) == []
+    partial = validate(
+        "api", {**base, "RESTOCK_REVIEWER_USER_ID": "not-a-uuid"}
+    )
+    assert partial == [
+        "RESTOCK_REVIEWER_EXPIRES_AT",
+        "RESTOCK_REVIEWER_PASSWORD_HASH",
+        "RESTOCK_REVIEWER_USER_ID_INVALID",
+    ]

@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import argparse
 import base64
-from collections.abc import Mapping
-from decimal import Decimal, InvalidOperation
 import os
+from collections.abc import Mapping
+from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -118,6 +119,37 @@ def validate(service: str, environment: Mapping[str, str]) -> list[str]:
                     UUID(user_id)
                 except ValueError:
                     issues.append("RESTOCK_SOLO_USER_ID_INVALID")
+        reviewer_names = (
+            "RESTOCK_REVIEWER_PASSWORD_HASH",
+            "RESTOCK_REVIEWER_USER_ID",
+            "RESTOCK_REVIEWER_EXPIRES_AT",
+        )
+        reviewer_values = {
+            name: environment.get(name, "").strip() for name in reviewer_names
+        }
+        if any(reviewer_values.values()):
+            for name, value in reviewer_values.items():
+                if not value:
+                    issues.append(name)
+            reviewer_hash = reviewer_values["RESTOCK_REVIEWER_PASSWORD_HASH"]
+            if reviewer_hash and not _valid_scrypt_hash(reviewer_hash):
+                issues.append("RESTOCK_REVIEWER_PASSWORD_HASH_INVALID_FORMAT")
+            reviewer_id = reviewer_values["RESTOCK_REVIEWER_USER_ID"]
+            if reviewer_id:
+                try:
+                    UUID(reviewer_id)
+                except ValueError:
+                    issues.append("RESTOCK_REVIEWER_USER_ID_INVALID")
+            expires_at = reviewer_values["RESTOCK_REVIEWER_EXPIRES_AT"]
+            if expires_at:
+                try:
+                    parsed_expiry = datetime.fromisoformat(
+                        expires_at.replace("Z", "+00:00")
+                    )
+                    if parsed_expiry.tzinfo is None:
+                        raise ValueError("timezone required")
+                except ValueError:
+                    issues.append("RESTOCK_REVIEWER_EXPIRES_AT_INVALID")
         for name in (
             "RESTOCK_DEFAULT_MONTHLY_CAP",
             "RESTOCK_DEFAULT_PER_ITEM_CAP",

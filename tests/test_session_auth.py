@@ -62,6 +62,68 @@ def test_solo_login_mints_existing_signed_session(monkeypatch) -> None:
     assert session_auth.verify(body["access_token"], SECRET) == user_id
 
 
+def test_temporary_reviewer_login_uses_isolated_user_and_expiring_session(
+    monkeypatch,
+) -> None:
+    reviewer_id = "00000000-0000-0000-0000-000000000099"
+    encoded = password_auth.hash_password(
+        "reviewer-password", salt=b"reviewer-salt-123"
+    )
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=20)
+    monkeypatch.setenv("RESTOCK_REVIEWER_PASSWORD_HASH", encoded)
+    monkeypatch.setenv("RESTOCK_REVIEWER_USER_ID", reviewer_id)
+    monkeypatch.setenv("RESTOCK_REVIEWER_EXPIRES_AT", expires_at.isoformat())
+    monkeypatch.setenv("RESTOCK_SESSION_SECRET", SECRET)
+    monkeypatch.setenv("RESTOCK_SESSION_TTL_SECONDS", "3600")
+    monkeypatch.delenv("RESTOCK_SOLO_PASSWORD_HASH", raising=False)
+    monkeypatch.delenv("RESTOCK_SOLO_USER_ID", raising=False)
+    monkeypatch.setattr(
+        api,
+        "get_repository",
+        lambda: SimpleNamespace(get_user=lambda configured: {"user_id": configured}),
+    )
+    api._AUTH_REQUESTS.clear()
+
+    response = TestClient(api.app).post(
+        "/api/v1/auth/login", json={"password": "reviewer-password"}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert 60 <= body["expires_in"] <= 20 * 60
+    assert session_auth.verify(body["access_token"], SECRET) == reviewer_id
+
+
+def test_expired_reviewer_password_is_rejected_generically(monkeypatch) -> None:
+    encoded = password_auth.hash_password(
+        "reviewer-password", salt=b"reviewer-salt-456"
+    )
+    monkeypatch.setenv("RESTOCK_REVIEWER_PASSWORD_HASH", encoded)
+    monkeypatch.setenv(
+        "RESTOCK_REVIEWER_USER_ID", "00000000-0000-0000-0000-000000000099"
+    )
+    monkeypatch.setenv(
+        "RESTOCK_REVIEWER_EXPIRES_AT",
+        (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+    )
+    monkeypatch.setenv("RESTOCK_SESSION_SECRET", SECRET)
+    monkeypatch.delenv("RESTOCK_SOLO_PASSWORD_HASH", raising=False)
+    monkeypatch.delenv("RESTOCK_SOLO_USER_ID", raising=False)
+    monkeypatch.setattr(
+        api,
+        "get_repository",
+        lambda: SimpleNamespace(get_user=lambda configured: {"user_id": configured}),
+    )
+    api._AUTH_REQUESTS.clear()
+
+    response = TestClient(api.app).post(
+        "/api/v1/auth/login", json={"password": "reviewer-password"}
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "invalid credentials"}
+
+
 def test_cookie_authenticated_unsafe_requests_require_trusted_origin(monkeypatch) -> None:
     monkeypatch.setenv(
         "RESTOCK_ALLOWED_ORIGINS",

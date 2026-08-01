@@ -54,6 +54,12 @@ passwords are never stored. Generate a hash interactively with
 `.venv/bin/python scripts/generate_solo_password_hash.py` and put the output
 directly into platform secret storage.
 
+For a time-boxed provider review, configure all three `RESTOCK_REVIEWER_*`
+variables and run `.venv/bin/python scripts/provision_reviewer.py`. This creates
+a separate low-cap demo user with the five safe fixtures; it never shares the
+owner account. Reviewer sessions cannot outlive the configured expiration.
+Remove the three variables when the review is complete.
+
 Successful login returns a short-lived signed session, sets the same value in a
 `Secure`, `HttpOnly`, `SameSite=Lax` cookie for the same-origin PWA. The browser
 uses that cookie only and does not retain the bearer in JavaScript-accessible

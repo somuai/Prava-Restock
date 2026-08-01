@@ -2204,11 +2204,13 @@ export function LoginScreen({
   onPasswordLogin,
   authMode = configuredAuthMode(),
   googleClientId = String(import.meta.env.VITE_GOOGLE_CLIENT_ID || ""),
+  reviewerAccess = false,
 }: {
   onGoogleLogin: (credential: string) => Promise<void>;
   onPasswordLogin?: (password: string) => Promise<void>;
   authMode?: RestockAuthMode;
   googleClientId?: string;
+  reviewerAccess?: boolean;
 }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -2224,7 +2226,7 @@ export function LoginScreen({
       setPassword("");
     } catch {
       setPassword("");
-      setError("Recovery access was not accepted. Check the password and try again.");
+      setError("Access was not accepted. Check the password and try again.");
     } finally {
       setBusy(false);
     }
@@ -2292,9 +2294,9 @@ export function LoginScreen({
 
           {authMode === "hybrid" && onPasswordLogin && (
             <details className="login-recovery">
-              <summary>Owner recovery access</summary>
+              <summary>{reviewerAccess ? "Temporary reviewer access" : "Owner recovery access"}</summary>
               <form onSubmit={(event) => void submit(event)}>
-                <label htmlFor="solo-password">Recovery password</label>
+                <label htmlFor="solo-password">{reviewerAccess ? "Reviewer password" : "Recovery password"}</label>
                 <input
                   id="solo-password"
                   name="password"
@@ -2564,6 +2566,7 @@ export default function App() {
             : "google"
         }
         googleClientId={capabilities?.google_client_id || ""}
+        reviewerAccess={Boolean(capabilities?.reviewer_access_configured)}
         onGoogleLogin={async (credential) => {
           await api.googleLogin(credential);
           await finishSignIn();

@@ -2,6 +2,7 @@ export type Capabilities = {
   auth_mode?: string;
   google_auth_configured?: boolean;
   google_client_id?: string;
+  reviewer_access_configured?: boolean;
   prava_mode: string;
   home_merchant_mode: string;
   home_payment_mode: string;

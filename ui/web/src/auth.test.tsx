@@ -45,6 +45,22 @@ describe("production login surface", () => {
     expect(markup).toContain('autoComplete="current-password"');
   });
 
+  it("labels isolated temporary access without exposing owner wording", () => {
+    const markup = renderToStaticMarkup(
+      <LoginScreen
+        authMode="hybrid"
+        reviewerAccess
+        googleClientId="google-client-id"
+        onGoogleLogin={async () => undefined}
+        onPasswordLogin={async () => undefined}
+      />,
+    );
+
+    expect(markup).toContain("Temporary reviewer access");
+    expect(markup).toContain("Reviewer password");
+    expect(markup).not.toContain("Owner recovery access");
+  });
+
   it("keeps the configured password fallback usable in solo mode", () => {
     const markup = renderToStaticMarkup(
       <LoginScreen
