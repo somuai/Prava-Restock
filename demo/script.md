@@ -12,8 +12,11 @@ Show the Home/Teams tabs and point out the current sandbox and disclosed-mock ba
 
 1. Reset the demo and show the coffee trigger: depletion in two days and price below threshold, combined into one proactive message.
 2. Open the real Zepto evidence: OAuth, product search, reversible cart, exact `confirmOrder=false` quote. State clearly that no Zepto merchant payment sandbox exists.
-3. Tap Approve. Open the real Prava sandbox page and complete the documented test-card/passkey flow.
-4. Return to the PWA. Show `completed`, with the final Zepto live-money step labeled `disclosed_mock`.
+3. Tap Approve. Open the real Prava sandbox page to show the created session.
+   State plainly that the currently assigned card is provider-blocked at
+   **Security Check Failed / No Passkey**, so do not claim mandate completion.
+4. Return to the PWA. Show the pending/error boundary and the audit trail,
+   with final Zepto live-money execution labeled `disclosed_mock`.
 5. Briefly show that any price increase, or a decrease greater than 15%, requires reapproval; then show the out-of-stock path creating no transaction.
 
 ## 2:15–3:25 — Restock Teams

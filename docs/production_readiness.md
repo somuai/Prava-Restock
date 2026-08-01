@@ -81,7 +81,7 @@ verified snapshot.
 | Boundary | Implemented | Public runtime |
 | --- | --- | --- |
 | Trigger/orchestrator/workflow | Real deterministic code and CI | Active; `demo_mode=false` |
-| Prava | Real sandbox Session/passkey/polling/report-status client | Sandbox configured; no production money |
+| Prava | Real sandbox Session/polling/report-status client | Sandbox configured; assigned test card currently blocked at Prava's passkey/security step; no production money |
 | Home catalog/cart/quote | Real-capable Zepto/Swiggy adapters | `disclosed_mock` |
 | Home final payment | Operator-gated browser executor | `disclosed_mock`; real money disabled |
 | Teams billing | One-time hosted-invoice adapter | Fulfillment `disclosed_mock`; recurring disabled |
@@ -95,6 +95,10 @@ verified snapshot.
 - Prava production credentials and the production enablement decision are due
   from Prava on 2 August 2026. Until then, the official sandbox host and test
   credential remain the only enabled Prava boundary.
+- The currently assigned Prava sandbox test card is also awaiting provider-side
+  passkey/security provisioning: its hosted flow reaches **Security Check
+  Failed** and then shows **No Passkey** on retry. This blocks an interactive
+  mandate proof independently of production-access approval.
 - The hackathon-provided Linq access and its authoritative integration contract
   are also due on 2 August 2026. No endpoint, credential name, SDK shape, or
   security property is assumed before those materials arrive.

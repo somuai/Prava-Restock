@@ -24,4 +24,7 @@ Phase 9 replaces the synchronous all-in-one demo path with a resumable, database
 - Audit serialization contains mode tags and no credential, card, approval-URL, or dynamic-CVV fields.
 - The initial migration upgrades a fresh SQLite database to revision `20260719_01`.
 
-The one live interactive Prava approval and live Zepto quote proofs remain recorded separately in the Phase 7 and Phase 8 evidence files; CI does not repeat human passkey/OTP steps.
+The live Zepto quote proof remains recorded separately in the Phase 8 evidence
+file. The interactive Prava mandate proof is currently provider-blocked by the
+assigned sandbox card's **Security Check Failed / No Passkey** state and is not
+claimed as complete; CI does not repeat human passkey/OTP steps.

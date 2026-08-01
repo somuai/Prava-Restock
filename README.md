@@ -89,7 +89,7 @@ are held in platform secret storage, not committed or baked into the image.
 
 ## What is real and what is simulated
 
-- **Real:** deterministic trigger logic, code-owned spend caps, OpenAI Agents SDK tool surface, and Prava sandbox intent/passkey/mandate integration.
+- **Real:** deterministic trigger logic, code-owned spend caps, the OpenAI Agents SDK tool surface, and Prava sandbox Session API integration. The currently assigned sandbox test card reaches Prava's hosted security step but is blocked by Prava's **Security Check Failed / No Passkey** state; this is a provider-side sandbox provisioning issue, not a completed mandate claim.
 - **Real merchant boundary:** Zepto OAuth/MCP client, address selection, live exact-SKU price lookup, cart preview, exact-price quote normalization, stock handling, and payment-status reconciliation interface. Similar search results are rejected rather than substituted.
 - **Disclosed simulation:** final Zepto live-money charge and Restock Teams billing-portal fulfillment. Zepto publishes no merchant payment sandbox, so the final charge stays disabled unless an operator explicitly enables a compatible-card checkout.
 - **Hosted runtime:** the current application is published with durable

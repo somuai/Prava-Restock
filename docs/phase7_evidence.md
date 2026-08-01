@@ -5,12 +5,25 @@ Phase 7 replaced the offline Prava client bodies with the documented Prava Sessi
 ## Verified locally
 
 - Prava environment: official `https://sandbox.api.prava.space` host with an `sk_test_*` credential loaded only from `.env`.
-- Interactive path: a real sandbox session was created, Prava's hosted test-card UI completed successfully, passkey approval succeeded, and `await_mandate(...)` returned an opaque credential reference.
-- Recorded test result: `1 passed, 64 deselected` for the explicitly enabled interactive case.
+- Interactive session creation is verified: Restock creates a real hosted Prava sandbox session using the assigned test credential, without recording the short-lived approval URL or any payment credential.
 - Credential-free suite: `59 passed, 6 deselected` on 19 July 2026.
 - GitHub Actions: run `29656703976` passed on commit `b2ba971`.
 
-The short-lived approval URL and generated one-time token/CVV were not recorded in this document or committed anywhere.
+The short-lived approval URL and any generated one-time token/CVV are not
+recorded in this document or committed anywhere.
+
+## Current interactive sandbox status — 2 August 2026
+
+With the team-assigned Axiom test card, the hosted page accepted the card and
+then showed **Security Check Failed**. Retrying displayed the saved card as
+**No Passkey**, leaving card selection disabled. The session therefore did
+**not** reach mandate approval and `await_mandate(...)` did not return a
+credential reference. No merchant checkout or real-money operation occurred.
+
+This is an active Prava sandbox/passkey-provisioning blocker and must not be
+presented as a completed end-to-end sandbox proof. The provider has been asked
+to check or reset passkey eligibility for the assigned card and to clarify any
+required enrollment or OTP step.
 
 ## Documented sandbox limitations
 
