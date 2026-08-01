@@ -522,15 +522,17 @@ function moneyLabel(value: string | null | undefined, currency: string): string 
 }
 
 function trackedHomeProduct(base: PantryProduct, item: TrackedItem): PantryProduct {
+  const providerResolved = Boolean(item.merchant_address_ref);
   const cadence = item.typical_cadence_days || 0;
   const lastPurchase = item.last_purchased_at ? new Date(`${item.last_purchased_at}T00:00:00Z`) : null;
   const predictedDate = lastPurchase && cadence
     ? new Date(lastPurchase.getTime() + cadence * DAY_MS).toISOString().slice(0, 10)
     : null;
   const remaining = daysFromToday(predictedDate);
-  const price = item.last_observed_price || item.last_purchase_amount;
+  const price = providerResolved ? item.last_observed_price : null;
   const priceTriggered = Boolean(
-    item.price_threshold
+    providerResolved
+    && item.price_threshold
     && item.last_observed_price
     && Number(item.last_observed_price) <= Number(item.price_threshold),
   );
@@ -540,12 +542,14 @@ function trackedHomeProduct(base: PantryProduct, item: TrackedItem): PantryProdu
     : priceTriggered
       ? "Price threshold"
       : "Predicted depletion";
-  const status = remaining === null
+  const status = !providerResolved
+    ? "Connect exact Zepto product"
+    : remaining === null
     ? "Learning cadence"
     : remaining <= 0
       ? "Due now"
       : `${remaining} day${remaining === 1 ? "" : "s"} left`;
-  const lifecycle: ProductLifecycle = priceTriggered || due ? "attention" : "tracking";
+  const lifecycle: ProductLifecycle = providerResolved && (priceTriggered || due) ? "attention" : "tracking";
   return {
     ...base,
     itemId: item.item_id,
@@ -555,51 +559,39 @@ function trackedHomeProduct(base: PantryProduct, item: TrackedItem): PantryProdu
     price: moneyLabel(price, item.currency),
     lastBought: dateLabel(item.last_purchased_at),
     cadence: cadence ? `every ${Number(cadence.toFixed(1))} days` : "Still learning",
-    daysRemaining: remaining === null ? "not enough history yet" : remaining <= 0 ? "due now" : `about ${remaining} days`,
+    daysRemaining: !providerResolved ? "provider match required" : remaining === null ? "not enough history yet" : remaining <= 0 ? "due now" : `about ${remaining} days`,
     status,
-    trigger,
+    trigger: providerResolved ? trigger : "Live product match required",
     lifecycle,
-    nextDue: remaining === null ? "after more purchase history" : status.toLowerCase(),
+    nextDue: !providerResolved ? "after live catalog matching" : remaining === null ? "after more purchase history" : status.toLowerCase(),
   };
 }
 
-function presentationProductForItem(item: TrackedItem, index: number): PantryProduct {
-  if (item.merchant_address_ref) {
-    return {
-      id: `live-${index}`,
-      itemId: item.item_id,
-      name: item.name,
-      image: "/app/assets/restock-mark.png",
-      imageAlt: "Restock exact-product marker",
-      brand: "Zepto catalog",
-      category: item.category.replaceAll("_", " "),
-      size: item.quantity ? `Quantity ${item.quantity}` : "Exact SKU",
-      tone: "watching",
-      status: "Watching",
-      price: moneyLabel(item.last_observed_price, item.currency),
-      merchant: "Zepto",
-      lastBought: dateLabel(item.last_purchased_at),
-      daysRemaining: "learning from real purchases",
-      cadence: item.typical_cadence_days ? `every ${Number(item.typical_cadence_days.toFixed(1))} days` : "Still learning",
-      trigger: "Predicted depletion",
-      ingredients: "Product details remain at Zepto",
-      nutrition: "Restock stores the exact SKU, current observed price, quantity and saved-address reference—not invented catalog copy.",
-      lifecycle: "tracking",
-      nextDue: "after purchase history establishes a clock",
-    };
-  }
-  const sku = item.merchant_sku_id.toLowerCase();
-  const name = item.name.toLowerCase();
-  const matched = products.find((product) => {
-    if (product.id === "coffee") return sku.includes("coffee") || name.includes("coffee");
-    if (product.id === "milk") return sku.includes("milk") || name.includes("milk");
-    if (product.id === "toothpaste") return sku.includes("toothpaste") || name.includes("toothpaste") || name.includes("colgate");
-    if (product.id === "detergent") return sku.includes("detergent") || name.includes("detergent") || name.includes("surf excel");
-    if (product.id === "paper") return sku.includes("paper") || name.includes("paper");
-    if (product.id === "filter") return sku.includes("filter") || name.includes("filter");
-    return false;
-  });
-  return matched || products[index % products.length];
+function presentationProductForItem(item: TrackedItem): PantryProduct {
+  return {
+    id: `tracked-${item.item_id}`,
+    itemId: item.item_id,
+    name: item.name,
+    image: "/app/assets/restock-mark.png",
+    imageAlt: "Restock tracked-product marker",
+    brand: item.merchant_address_ref ? "Zepto catalog" : "Provider match needed",
+    category: item.category.replaceAll("_", " "),
+    size: item.quantity ? `Quantity ${item.quantity}` : "Exact SKU pending",
+    tone: "watching",
+    status: item.merchant_address_ref ? "Watching" : "Connect exact product",
+    price: item.merchant_address_ref ? moneyLabel(item.last_observed_price, item.currency) : "Quote pending",
+    merchant: "Zepto",
+    lastBought: dateLabel(item.last_purchased_at),
+    daysRemaining: item.merchant_address_ref ? "learning from real purchases" : "provider match required",
+    cadence: item.typical_cadence_days ? `every ${Number(item.typical_cadence_days.toFixed(1))} days` : "Still learning",
+    trigger: item.merchant_address_ref ? "Predicted depletion" : "Live product match required",
+    ingredients: "Product details remain at Zepto",
+    nutrition: item.merchant_address_ref
+      ? "Restock stores the exact SKU, current observed price, quantity and saved-address reference—not invented catalog copy."
+      : "This older item is retained for history but cannot trigger a purchase until it is matched to a live Zepto SKU and saved address.",
+    lifecycle: "tracking",
+    nextDue: item.merchant_address_ref ? "after purchase history establishes a clock" : "after live catalog matching",
+  };
 }
 
 function trackedTeamSubscription(item: TrackedItem): SubscriptionProduct {
@@ -2687,7 +2679,7 @@ export default function App() {
     if (!backendConnected) return import.meta.env.DEV ? products : [];
     return trackedItems
       .filter((item) => item.track === "home")
-      .map((item, index) => trackedHomeProduct(presentationProductForItem(item, index), item));
+      .map((item) => trackedHomeProduct(presentationProductForItem(item), item));
   }, [backendConnected, trackedItems]);
   const visibleSubscriptions = useMemo(() => {
     if (!backendConnected) return import.meta.env.DEV ? subscriptions : [];
