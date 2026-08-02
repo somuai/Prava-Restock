@@ -10,7 +10,24 @@ from payments.models import TrackedItem, TriggerType, User
 from storage import Database, RestockRepository
 
 
-ROOT = Path(__file__).resolve().parents[1]
+def _project_root() -> Path:
+    """Locate checked-in fixtures in source and installed-container runs.
+
+    Editable local installs resolve this module inside the repository. The
+    production image installs the package and also keeps the checked-in source
+    under the current working directory, so package-relative fixture paths are
+    not available there.
+    """
+    package_root = Path(__file__).resolve().parents[1]
+    if (package_root / "triggers" / "seed_data.json").is_file():
+        return package_root
+    working_root = Path.cwd()
+    if (working_root / "triggers" / "seed_data.json").is_file():
+        return working_root
+    return package_root
+
+
+ROOT = _project_root()
 SEED_PATH = ROOT / "triggers" / "seed_data.json"
 AUDIT_LOG_PATH = audit_store.AUDIT_STORE_PATH
 
