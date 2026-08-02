@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  paymentOutcomeCopy,
   notificationsForReviewerSession,
+  sandboxApprovalRequest,
   shouldOpenSandboxApproval,
   providerBrandForName,
   reviewerHomeProductPresentation,
@@ -49,6 +51,53 @@ describe("reviewer product presentation", () => {
       whatsapp_configured: false,
       demo_mode: false,
     })).toBe(true);
+  });
+
+  it("routes both explicit Teams decisions into the configured Prava sandbox", () => {
+    const teamsNotification = reviewerShowcaseNotifications([])[1];
+    const capabilities = {
+      prava_mode: "sandbox_configured",
+      home_merchant_mode: "real",
+      home_payment_mode: "disclosed_mock",
+      teams_billing_mode: "disclosed_mock",
+      real_money_enabled: false,
+      slack_configured: true,
+      whatsapp_configured: false,
+      demo_mode: false,
+    };
+
+    expect(shouldOpenSandboxApproval(teamsNotification, "renew_as_is", capabilities)).toBe(true);
+    expect(shouldOpenSandboxApproval(teamsNotification, "switch_plan", capabilities)).toBe(true);
+    expect(shouldOpenSandboxApproval(teamsNotification, "skip", capabilities)).toBe(false);
+    expect(sandboxApprovalRequest(teamsNotification, "switch_plan")).toEqual({
+      track: "teams",
+      action: "switch_plan",
+    });
+  });
+
+  it("labels a disclosed sandbox completion truthfully instead of claiming a real charge", () => {
+    expect(paymentOutcomeCopy({
+      run_id: "sandbox-run",
+      item_id: reviewerCoffee.item_id,
+      state: "completed",
+      merchant: "zepto",
+      currency: "INR",
+      proposed_amount: "380.00",
+      modes: { prava: "sandbox", home_payment: "disclosed_mock" },
+    }, {
+      prava_mode: "sandbox_configured",
+      home_merchant_mode: "real",
+      home_payment_mode: "disclosed_mock",
+      teams_billing_mode: "disclosed_mock",
+      real_money_enabled: false,
+      slack_configured: false,
+      whatsapp_configured: false,
+      demo_mode: false,
+    })).toMatchObject({
+      title: "Sandbox flow complete",
+      charged: false,
+      reference: "sandbox-run",
+    });
   });
 
   it("restores approval previews for a signed-in reviewer without requiring a query string", () => {

@@ -35,6 +35,24 @@ export type WorkflowRun = {
   item_id: string;
   state: string;
   updated_at?: string;
+  merchant?: string | null;
+  currency?: string;
+  proposed_amount?: string | null;
+  modes?: Record<string, string>;
+};
+
+export type SandboxApprovalRequest = {
+  track: "home" | "teams";
+  action: "approve" | "renew_as_is" | "switch_plan";
+};
+
+export type SandboxApprovalHandoff = {
+  run_id: string;
+  state: "passkey_pending";
+  approval_url: string;
+  sandbox_otp: string;
+  track: "home" | "teams";
+  action: "approve" | "renew_as_is" | "switch_plan";
 };
 
 export type AuditEntry = {
@@ -302,16 +320,23 @@ export const api = {
     if (!response.ok) throw new ApiError(response.status, (await response.json()).detail || "Action failed");
     return response.json();
   },
-  sandboxApproval: async () => {
+  sandboxApproval: async (input: SandboxApprovalRequest) => {
     const response = await fetch(endpoint("/api/v1/reviewer/sandbox-approval"), {
       method: "POST",
       credentials: "include",
       headers: await requestHeaders(),
+      body: JSON.stringify(input),
     });
     const body = await response.json();
     if (!response.ok) throw new ApiError(response.status, body.detail || "Sandbox approval failed");
-    return body as { run_id: string; state: "passkey_pending"; approval_url: string };
+    return body as SandboxApprovalHandoff;
   },
+  paymentStatus: (runId: string) => read<{
+    run_id: string;
+    workflow_state: string;
+    provider_status: string;
+    resumable: boolean;
+  }>(`/api/v1/workflows/${runId}/payment-status`),
   approvalUrl: (runId: string) => read<{ approval_url: string }>(`/api/v1/workflows/${runId}/approval-url`),
   resume: async (runId: string) => {
     const response = await fetch(endpoint(`/api/v1/workflows/${runId}/resume`), {
@@ -320,6 +345,6 @@ export const api = {
       headers: await requestHeaders(),
     });
     if (!response.ok) throw new ApiError(response.status, (await response.json()).detail || "Resume failed");
-    return response.json();
+    return response.json() as Promise<WorkflowRun>;
   },
 };

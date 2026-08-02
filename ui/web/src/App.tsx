@@ -57,6 +57,8 @@ import {
   type MerchantAddress,
   type MerchantCatalogProduct,
   type Notification,
+  type SandboxApprovalRequest,
+  type SandboxApprovalHandoff,
   type TenantSummary,
   type TrackedItem,
   type UserProfile,
@@ -71,6 +73,11 @@ type View = Track | "activity";
 type ProductTone = "attention" | "soon" | "watching";
 export type ProductLifecycle = "attention" | "tracking" | "restocked";
 type SoundKind = "hover" | "open" | "close" | "navigate" | "submit" | "confirm";
+
+type ApprovalProgress = Pick<
+  SandboxApprovalHandoff,
+  "run_id" | "sandbox_otp" | "track" | "action"
+> & { provider: string };
 
 type PantryProduct = {
   id: string;
@@ -611,9 +618,60 @@ export function shouldOpenSandboxApproval(
   capabilities: Capabilities | null,
 ): boolean {
   return notification.status === "preview"
-    && action === "approve"
+    && (
+      (notification.track === "home" && action === "approve")
+      || (notification.track === "teams" && ["renew_as_is", "switch_plan"].includes(action))
+    )
     && capabilities?.prava_mode === "sandbox_configured"
     && capabilities.real_money_enabled === false;
+}
+
+export function sandboxApprovalRequest(
+  notification: Notification,
+  action: string,
+): SandboxApprovalRequest {
+  const track = notification.track === "teams" || notification.actions.includes("switch_plan")
+    ? "teams"
+    : "home";
+  if (track === "home" && action === "approve") return { track, action };
+  if (track === "teams" && (action === "renew_as_is" || action === "switch_plan")) {
+    return { track, action };
+  }
+  throw new Error("This decision cannot open a sandbox approval");
+}
+
+export type PaymentOutcomeCopy = {
+  title: string;
+  message: string;
+  charged: boolean;
+  reference: string;
+};
+
+export function paymentOutcomeCopy(
+  run: WorkflowRun,
+  capabilities: Capabilities | null,
+): PaymentOutcomeCopy {
+  const modeValues = Object.values(run.modes || {});
+  const charged = Boolean(
+    capabilities?.real_money_enabled
+    && !modeValues.includes("sandbox")
+    && !modeValues.includes("disclosed_mock")
+    && !modeValues.includes("mock"),
+  );
+  if (charged) {
+    return {
+      title: "Payment complete",
+      message: "Your approval was verified and the provider confirmed the completed payment.",
+      charged: true,
+      reference: run.run_id,
+    };
+  }
+  return {
+    title: "Sandbox flow complete",
+    message: "Prava approval was verified. The final provider payment remained a disclosed simulation, so no real charge was made.",
+    charged: false,
+    reference: run.run_id,
+  };
 }
 
 const DAY_MS = 86_400_000;
@@ -1309,6 +1367,90 @@ function ForegroundNotificationSlip({
         </button>
       </footer>
     </aside>
+  );
+}
+
+function ApprovalProgressCard({
+  approval,
+  checking,
+  onCheck,
+}: {
+  approval: ApprovalProgress;
+  checking: boolean;
+  onCheck: () => void;
+}) {
+  return (
+    <aside className="approval-progress-card" role="status" aria-live="polite">
+      <span className="approval-progress-icon"><ShieldCheck size={23} weight="duotone" /></span>
+      <span className="approval-progress-copy">
+        <small>Prava sandbox · {approval.provider}</small>
+        <strong>Enter OTP <code>{approval.sandbox_otp}</code></strong>
+        <span>No SMS is sent in sandbox. Approve there, then return to Restock.</span>
+      </span>
+      <button type="button" onClick={onCheck} disabled={checking}>
+        {checking ? "Checking…" : "Check approval"}
+      </button>
+    </aside>
+  );
+}
+
+function PaymentConfirmation({
+  run,
+  capabilities,
+  onClose,
+  onViewActivity,
+}: {
+  run: WorkflowRun;
+  capabilities: Capabilities | null;
+  onClose: () => void;
+  onViewActivity: () => void;
+}) {
+  const copy = paymentOutcomeCopy(run, capabilities);
+  const dialogRef = useRef<HTMLElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const amount = run.proposed_amount && run.currency
+    ? moneyLabel(run.proposed_amount, run.currency)
+    : null;
+  useEffect(() => {
+    dialogRef.current?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onCloseRef.current();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, []);
+  return (
+    <div className="payment-confirmation-scrim" role="presentation">
+      <section
+        ref={dialogRef}
+        className="payment-confirmation"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="payment-confirmation-title"
+        tabIndex={-1}
+      >
+        <div className="payment-confirmation-seal" aria-hidden="true">
+          <SealCheck size={38} weight="fill" />
+        </div>
+        <p className="eyebrow">Restock receipt</p>
+        <h2 id="payment-confirmation-title">{copy.title}</h2>
+        <p>{copy.message}</p>
+        <dl>
+          {amount && <div><dt>Approved amount</dt><dd>{amount}</dd></div>}
+          <div><dt>Provider</dt><dd>{humanize(run.merchant || "provider")}</dd></div>
+          <div><dt>Reference</dt><dd>{copy.reference.slice(0, 12)}</dd></div>
+          <div><dt>Next</dt><dd>{copy.charged ? "Tracking restarts from today" : "Review the audit trail"}</dd></div>
+        </dl>
+        <p className="payment-confirmation-disclosure">
+          {copy.charged ? "Provider-confirmed payment" : "Sandbox approval · no real charge"}
+        </p>
+        <footer>
+          <button type="button" className="secondary" onClick={onClose}>Back to shelf</button>
+          <button type="button" className="primary" onClick={onViewActivity}>View activity <ArrowRight size={16} /></button>
+        </footer>
+      </section>
+    </div>
   );
 }
 
@@ -2229,6 +2371,30 @@ function SubscriptionDetail({
                 <small>{capabilities?.teams_real_money_enabled && capabilities.teams_billing_mode === "real" ? "Live hosted-invoice billing is enabled." : "This environment will not create a real vendor charge."}</small>
               </span>
             </div>
+            {actionable && notification && (
+              <div className="receipt-primary-decisions" aria-label="Renewal decisions">
+                {notification.actions.includes("renew_as_is") && (
+                  <button
+                    type="button"
+                    className="button button--teams"
+                    disabled={busy}
+                    onClick={() => onAction(notification, "renew_as_is")}
+                  >
+                    {busy ? "Opening Prava…" : `Approve renewal · ${choices[0].amount}`}
+                  </button>
+                )}
+                {notification.actions.includes("switch_plan") && choices[1] && (
+                  <button
+                    type="button"
+                    className="button button--secondary"
+                    disabled={busy}
+                    onClick={() => onAction(notification, "switch_plan")}
+                  >
+                    {`Approve switch · ${choices[1].amount}`}
+                  </button>
+                )}
+              </div>
+            )}
             <div className="receipt-footer-actions">
               {activePanel !== "plans" && (
                 <button type="button" className="button button--teams" onClick={() => openPlans("current")}>
@@ -2750,6 +2916,17 @@ export default function App() {
   );
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const [teamsSetupOpen, setTeamsSetupOpen] = useState(false);
+  const [approvalProgress, setApprovalProgress] = useState<ApprovalProgress | null>(() => {
+    try {
+      const saved = window.sessionStorage.getItem("restock-active-sandbox-approval");
+      return saved ? JSON.parse(saved) as ApprovalProgress : null;
+    } catch {
+      return null;
+    }
+  });
+  const [approvalChecking, setApprovalChecking] = useState(false);
+  const approvalCheckingRef = useRef(false);
+  const [paymentOutcome, setPaymentOutcome] = useState<WorkflowRun | null>(null);
 
   useEffect(() => {
     const images = revealAssets.map((src) => {
@@ -2760,6 +2937,51 @@ export default function App() {
     });
     void Promise.allSettled(images.map((image) => image.decode()));
   }, []);
+
+  const checkApproval = async () => {
+    if (!approvalProgress || approvalCheckingRef.current) return;
+    approvalCheckingRef.current = true;
+    setApprovalChecking(true);
+    try {
+      const paymentStatus = await api.paymentStatus(approvalProgress.run_id);
+      if (!paymentStatus.resumable) return;
+      const finalRun = await api.resume(approvalProgress.run_id);
+      if (["completed", "failed", "rejected", "expired", "checkout_pending", "reapproval_required"].includes(finalRun.state)) {
+        setApprovalProgress(null);
+        window.sessionStorage.removeItem("restock-active-sandbox-approval");
+      }
+      if (finalRun.state === "completed") {
+        setPaymentOutcome(finalRun);
+        setStatus("Sandbox flow complete");
+        setActionFeedback("Prava approval verified. No real charge was made in this sandbox flow.");
+        if (soundOn) playInterfaceSound("confirm");
+      } else if (["failed", "rejected", "expired"].includes(finalRun.state)) {
+        setStatus(`Workflow · ${humanize(finalRun.state)}`);
+        setActionFeedback(`The approval ended as ${humanize(finalRun.state)}. No payment was completed.`);
+      }
+      await refresh();
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        await clearApiSessionToken();
+        setAuthState("required");
+      } else if (error instanceof ApiError && [409, 502].includes(error.status)) {
+        // Pending and transient provider states are expected while the user is
+        // still on Prava. The visible status card remains available to retry.
+      } else {
+        setActionFeedback(error instanceof Error ? error.message : "Could not check approval yet");
+      }
+    } finally {
+      approvalCheckingRef.current = false;
+      setApprovalChecking(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!approvalProgress) return;
+    void checkApproval();
+    const timer = window.setInterval(() => void checkApproval(), 3000);
+    return () => window.clearInterval(timer);
+  }, [approvalProgress?.run_id]);
 
   const refresh = async () => {
     try {
@@ -3038,7 +3260,7 @@ export default function App() {
     heading.textContent = "Opening secure approval";
     Object.assign(heading.style, { margin: "0", fontSize: "29px", letterSpacing: "-.04em" });
     const copy = document.createElement("p");
-    copy.textContent = "You’ll continue on Prava’s protected payment surface. Keep this window open.";
+    copy.textContent = "You’ll continue on Prava’s protected payment surface. In sandbox, enter OTP 456789 — no SMS will be sent.";
     Object.assign(copy.style, { margin: "16px auto 0", maxWidth: "330px", color: "#6a6c65", lineHeight: "1.55" });
     const progress = document.createElement("div");
     progress.setAttribute("role", "progressbar");
@@ -3076,7 +3298,16 @@ export default function App() {
           approvalWindow.opener = null;
           renderApprovalHandoff(approvalWindow, providerBrandForNotification(notification));
         }
-        const handoff = await api.sandboxApproval();
+        const handoff = await api.sandboxApproval(sandboxApprovalRequest(notification, action));
+        const activeApproval: ApprovalProgress = {
+          run_id: handoff.run_id,
+          sandbox_otp: handoff.sandbox_otp,
+          track: handoff.track,
+          action: handoff.action,
+          provider: providerBrandForNotification(notification).name,
+        };
+        setApprovalProgress(activeApproval);
+        window.sessionStorage.setItem("restock-active-sandbox-approval", JSON.stringify(activeApproval));
         setNotifications((items) => items.map((item) => (
           item.notification_id === notification.notification_id
             ? { ...item, run_id: handoff.run_id, status: handoff.state }
@@ -3085,7 +3316,7 @@ export default function App() {
         if (approvalWindow) approvalWindow.location.replace(handoff.approval_url);
         else window.location.assign(handoff.approval_url);
         setStatus("Prava sandbox approval opened");
-        setActionFeedback("Prava sandbox approval opened in a new tab. No real merchant charge can occur.");
+        setActionFeedback(`Prava sandbox opened. Enter OTP ${handoff.sandbox_otp}; no SMS is sent. No real merchant charge can occur.`);
         return;
       }
       if (notification.status === "preview") {
@@ -3167,6 +3398,24 @@ export default function App() {
         }}
       />
       <p className="sr-only" role="status" aria-live="polite">{status}</p>
+      {approvalProgress && (
+        <ApprovalProgressCard
+          approval={approvalProgress}
+          checking={approvalChecking}
+          onCheck={() => void checkApproval()}
+        />
+      )}
+      {paymentOutcome && (
+        <PaymentConfirmation
+          run={paymentOutcome}
+          capabilities={capabilities}
+          onClose={() => setPaymentOutcome(null)}
+          onViewActivity={() => {
+            setPaymentOutcome(null);
+            setViewWithSound("activity");
+          }}
+        />
+      )}
       {foregroundNotification && !selectedProduct && !selectedSubscription && (
         <ForegroundNotificationSlip
           notification={foregroundNotification}

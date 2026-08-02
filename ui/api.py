@@ -13,7 +13,7 @@ import re
 import secrets
 import time
 from typing import Any, Literal
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from fastapi import (
     Cookie,
@@ -511,6 +511,15 @@ def require_user(
 class WorkflowActionRequest(BaseModel):
     action: str
     adjusted_amount: Decimal | None = Field(default=None, gt=Decimal("0"))
+
+
+class ReviewerSandboxApprovalRequest(BaseModel):
+    """A safe reviewer decision that may open only the Prava sandbox."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    track: Literal["home", "teams"]
+    action: Literal["approve", "renew_as_is", "switch_plan"]
 
 
 class SoloLoginRequest(BaseModel):
@@ -1520,6 +1529,7 @@ def audit(
 
 @app.post("/api/v1/reviewer/sandbox-approval")
 def reviewer_sandbox_approval(
+    body: ReviewerSandboxApprovalRequest,
     user_id: str = Depends(require_user),
     repository: RestockRepository = Depends(get_repository),
 ) -> dict[str, str]:
@@ -1532,7 +1542,16 @@ def reviewer_sandbox_approval(
 
     from merchant.models import ExecutionMode, MerchantQuote, StockStatus
     from payments import prava_client
-    from payments.models import TrackedItem, User
+    from payments.models import (
+        Category,
+        ItemStatus,
+        PreferredMerchant,
+        RenewalMethod,
+        Track,
+        TrackedItem,
+        TriggerType,
+        User,
+    )
 
     if prava_client.configured_mode() != "sandbox" or runtime_modes()["real_money_enabled"]:
         raise HTTPException(
@@ -1543,16 +1562,61 @@ def reviewer_sandbox_approval(
     if user_data is None:
         raise HTTPException(status_code=404, detail="user not found")
     user = User.model_validate(user_data)
-    matching = next(
-        (
-            TrackedItem.model_validate(item)
-            for item in repository.list_items(user_id)
-            if item["merchant_sku_id"] == starter_template_sku("coffee")
-        ),
-        None,
-    )
-    item = matching or build_starter_item("coffee", user_id=user_id)
-    if matching is None:
+    if body.track == "home":
+        if body.action != "approve":
+            raise HTTPException(status_code=422, detail="Home sandbox review supports approve only")
+        sku = starter_template_sku("coffee")
+        item = next(
+            (
+                TrackedItem.model_validate(candidate)
+                for candidate in repository.list_items(user_id)
+                if candidate["merchant_sku_id"] == sku
+            ),
+            None,
+        ) or build_starter_item("coffee", user_id=user_id)
+    else:
+        if body.action not in {"renew_as_is", "switch_plan"}:
+            raise HTTPException(
+                status_code=422,
+                detail="Teams sandbox review requires an explicit renew or switch decision",
+            )
+        sku = f"reviewer-github-copilot-{body.action}"
+        item = next(
+            (
+                TrackedItem.model_validate(candidate)
+                for candidate in repository.list_items(user_id)
+                if candidate["merchant_sku_id"] == sku
+            ),
+            None,
+        )
+        if item is None:
+            switching = body.action == "switch_plan"
+            item = TrackedItem(
+                item_id=uuid5(NAMESPACE_URL, f"restock:{user_id}:{sku}"),
+                user_id=UUID(user_id),
+                name="GitHub Copilot Business",
+                track=Track.TEAMS,
+                trigger_type=TriggerType.KNOWN_DATE,
+                category=Category.SAAS_SUBSCRIPTION,
+                sensitive_flag=False,
+                preferred_merchant=PreferredMerchant.HOSTED_INVOICE,
+                merchant_sku_id=sku,
+                currency="USD",
+                status=ItemStatus.ACTIVE,
+                renewal_date=date.today() + timedelta(days=2),
+                current_plan_amount=Decimal("39.00"),
+                alternate_plan_amount=Decimal("32.00" if switching else "45.00"),
+                alternate_plan_label="Copilot Team alternative",
+                renewal_method=RenewalMethod.HOSTED_LINK,
+                hosted_payment_reference=f"reviewer-{body.action}-invoice",
+                alternate_hosted_payment_reference=(
+                    "reviewer-switch-alternate" if switching else None
+                ),
+            )
+    existing_item_ids = {
+        candidate["item_id"] for candidate in repository.list_items(user_id)
+    }
+    if str(item.item_id) not in existing_item_ids:
         repository.upsert_item(item)
 
     service = WorkflowService(repository)
@@ -1581,11 +1645,19 @@ def reviewer_sandbox_approval(
                 "run_id": str(active["run_id"]),
                 "state": str(active["state"]),
                 "approval_url": approval_url_value,
+                "sandbox_otp": "456789",
+                "track": body.track,
+                "action": body.action,
             }
 
-    amount = item.last_observed_price or item.last_purchase_amount or Decimal("380.00")
+    if body.track == "home":
+        amount = item.last_observed_price or item.last_purchase_amount or Decimal("380.00")
+    elif body.action == "switch_plan":
+        amount = item.alternate_plan_amount or Decimal("32.00")
+    else:
+        amount = item.current_plan_amount or Decimal("39.00")
     quote = MerchantQuote(
-        merchant="zepto",
+        merchant=item.preferred_merchant.value,
         merchant_sku_id=item.merchant_sku_id,
         product_name=item.name,
         amount=amount,
@@ -1597,7 +1669,7 @@ def reviewer_sandbox_approval(
     )
     try:
         run = service.begin(user, item, quote=quote)
-        run = service.act(run["run_id"], user_id=user_id, action="approve")
+        run = service.act(run["run_id"], user_id=user_id, action=body.action)
         approval_url_value = service.approval_url(run["run_id"])
     except (OSError, RuntimeError, ValueError) as exc:
         LOGGER.error(json.dumps({"event": "sandbox_approval_handoff_failed"}))
@@ -1609,6 +1681,52 @@ def reviewer_sandbox_approval(
         "run_id": str(run["run_id"]),
         "state": str(run["state"]),
         "approval_url": approval_url_value,
+        "sandbox_otp": "456789",
+        "track": body.track,
+        "action": body.action,
+    }
+
+
+@app.get("/api/v1/workflows/{run_id}/payment-status")
+def workflow_payment_status(
+    run_id: str,
+    user_id: str = Depends(require_user),
+    repository: RestockRepository = Depends(get_repository),
+) -> dict[str, Any]:
+    """Return only the provider state needed to resume; never payment secrets."""
+
+    from payments import prava_client
+
+    try:
+        run = repository.get_workflow(run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="workflow not found") from exc
+    if run["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="workflow belongs to a different user")
+    if run["state"] != "passkey_pending":
+        return {
+            "run_id": run_id,
+            "workflow_state": str(run["state"]),
+            "provider_status": "not_applicable",
+            "resumable": False,
+        }
+    intent_ref = run.get("prava_intent_ref")
+    if not intent_ref:
+        raise HTTPException(status_code=409, detail="workflow has no Prava session")
+    try:
+        provider_result = prava_client.get_payment_result(str(intent_ref))
+    except Exception as exc:
+        LOGGER.warning(json.dumps({"event": "prava_payment_status_unavailable", "run_id": run_id}))
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Prava payment status is temporarily unavailable",
+        ) from exc
+    provider_status = str(provider_result.get("status", "")).lower()
+    return {
+        "run_id": run_id,
+        "workflow_state": str(run["state"]),
+        "provider_status": provider_status,
+        "resumable": provider_status in {"awaiting_result", "failed"},
     }
 
 

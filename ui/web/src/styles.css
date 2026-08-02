@@ -2520,6 +2520,179 @@ button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visibl
   transition: transform 620ms var(--motion-settle), box-shadow 280ms var(--motion-gentle);
   animation: notification-slip-enter 480ms var(--motion-settle) both;
 }
+
+.approval-progress-card {
+  position: fixed;
+  z-index: 92;
+  right: clamp(18px, 3vw, 42px);
+  bottom: clamp(18px, 3vw, 34px);
+  width: min(510px, calc(100vw - 36px));
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 15px 16px;
+  border: 1px solid rgba(33, 87, 66, .2);
+  border-radius: 20px;
+  background: rgba(255, 254, 248, .96);
+  box-shadow: 0 18px 50px rgba(42, 45, 37, .18);
+  backdrop-filter: blur(16px);
+  animation: notification-slip-enter 420ms var(--motion-settle) both;
+}
+
+.approval-progress-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--green);
+  background: var(--green-soft);
+}
+
+.approval-progress-copy,
+.approval-progress-copy small,
+.approval-progress-copy strong,
+.approval-progress-copy span { display: block; }
+.approval-progress-copy small {
+  color: var(--green);
+  font: 700 10px/1.2 "Inter Variable", "Inter", sans-serif;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+.approval-progress-copy strong { margin-top: 3px; font-size: 16px; }
+.approval-progress-copy code {
+  padding: 2px 7px;
+  border-radius: 7px;
+  color: #fff;
+  background: var(--green);
+  font: 700 15px/1 "Inter Variable", "Inter", sans-serif;
+  letter-spacing: .08em;
+}
+.approval-progress-copy span { margin-top: 3px; color: var(--muted); font-size: 12px; }
+.approval-progress-card > button {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  color: #fff;
+  background: var(--ink);
+  font: 700 12px/1 "Inter Variable", "Inter", sans-serif;
+  cursor: pointer;
+}
+.approval-progress-card > button:disabled { opacity: .6; cursor: wait; }
+
+.payment-confirmation-scrim {
+  position: fixed;
+  z-index: 120;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(29, 31, 26, .42);
+  backdrop-filter: blur(12px);
+  animation: confirmation-scrim-in 240ms ease-out both;
+}
+@keyframes confirmation-scrim-in { from { opacity: 0; } }
+
+.payment-confirmation {
+  width: min(480px, 100%);
+  padding: 34px;
+  border: 1px solid rgba(32, 77, 58, .18);
+  border-radius: 30px;
+  background:
+    linear-gradient(rgba(255, 254, 248, .97), rgba(255, 254, 248, .97)),
+    url("/app/assets/paper-grain.svg");
+  box-shadow: 0 34px 100px rgba(25, 30, 23, .28);
+  animation: confirmation-receipt-in 520ms var(--motion-settle) both;
+}
+@keyframes confirmation-receipt-in {
+  from { opacity: 0; transform: translateY(18px) scale(.97); }
+}
+.payment-confirmation-seal {
+  display: grid;
+  width: 66px;
+  height: 66px;
+  margin-bottom: 24px;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--green);
+  box-shadow: 0 10px 24px rgba(33, 87, 66, .25);
+}
+.payment-confirmation h2 {
+  margin: 6px 0 10px;
+  font: 700 clamp(30px, 5vw, 42px)/.98 "Radio Canada Big Variable", "Inter Variable", sans-serif;
+  letter-spacing: -.045em;
+}
+.payment-confirmation > p:not(.eyebrow):not(.payment-confirmation-disclosure) {
+  margin: 0;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.55;
+}
+.payment-confirmation dl {
+  margin: 25px 0 0;
+  border-top: 1px dashed rgba(32, 36, 29, .22);
+  border-bottom: 1px dashed rgba(32, 36, 29, .22);
+}
+.payment-confirmation dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 11px 0;
+}
+.payment-confirmation dt { color: var(--muted); font-size: 12px; }
+.payment-confirmation dd { margin: 0; text-align: right; font-size: 12px; font-weight: 700; }
+.payment-confirmation-disclosure {
+  display: inline-flex;
+  margin: 18px 0 0;
+  padding: 7px 10px;
+  border-radius: 999px;
+  color: var(--green);
+  background: var(--green-soft);
+  font: 700 10px/1 "Inter Variable", "Inter", sans-serif;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.payment-confirmation footer { display: flex; gap: 10px; margin-top: 28px; }
+.payment-confirmation footer button {
+  flex: 1;
+  min-height: 48px;
+  border-radius: 999px;
+  font: 700 13px/1 "Inter Variable", "Inter", sans-serif;
+  cursor: pointer;
+}
+.payment-confirmation footer .secondary { border: 1px solid var(--line); background: transparent; }
+.payment-confirmation footer .primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  color: #fff;
+  background: var(--ink);
+}
+
+.receipt-primary-decisions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid rgba(37, 92, 73, .18);
+  border-radius: 18px;
+  background: rgba(223, 233, 227, .48);
+}
+.receipt-primary-decisions .button { min-height: 48px; font-size: 14px; }
+
+@media (max-width: 620px) {
+  .approval-progress-card { grid-template-columns: auto minmax(0, 1fr); }
+  .approval-progress-card > button { grid-column: 1 / -1; width: 100%; }
+  .payment-confirmation { padding: 27px 24px; border-radius: 24px; }
+  .payment-confirmation footer { flex-direction: column-reverse; }
+  .receipt-primary-decisions { grid-template-columns: 1fr; }
+}
 @keyframes notification-slip-enter {
   from { opacity: 0; transform: translate3d(0, -24px, 0) rotate(-1.8deg) scale(.985); }
 }
