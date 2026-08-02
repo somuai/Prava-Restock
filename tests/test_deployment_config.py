@@ -9,7 +9,9 @@ def test_container_runs_migrations_as_non_root_with_healthcheck() -> None:
 
     assert "USER 10001:10001" in dockerfile
     assert "HEALTHCHECK" in dockerfile
-    assert "alembic upgrade head && exec uvicorn" in dockerfile
+    assert "alembic upgrade head" in dockerfile
+    assert "python scripts/provision_reviewer.py" in dockerfile
+    assert "exec uvicorn ui.api:app" in dockerfile
 
 
 def test_runtime_state_and_native_projects_are_outside_build_context() -> None:

@@ -31,13 +31,28 @@ def provision_reviewer(repository: RestockRepository, *, user_id: UUID) -> tuple
             created_at=datetime.now(timezone.utc),
         )
     )
-    existing_skus = {
-        str(item.get("merchant_sku_id", ""))
+    existing_by_sku = {
+        str(item.get("merchant_sku_id", "")): item
         for item in repository.list_items(str(user_id))
     }
     created = 0
     for fixture in load_seed_items():
-        if fixture.merchant_sku_id in existing_skus:
+        existing = existing_by_sku.get(fixture.merchant_sku_id)
+        if existing is not None:
+            # Reviewer fixtures are curated demonstration data. Keep their
+            # original identity stable while refreshing the visible product
+            # metadata after a safe fixture update (for example, replacing a
+            # generic subscription name with the real provider being shown).
+            repository.upsert_item(
+                fixture.model_copy(
+                    update={
+                        "item_id": UUID(str(existing["item_id"])),
+                        "user_id": user_id,
+                        "tenant_id": None,
+                        "merchant_address_ref": None,
+                    }
+                )
+            )
             continue
         repository.upsert_item(
             fixture.model_copy(

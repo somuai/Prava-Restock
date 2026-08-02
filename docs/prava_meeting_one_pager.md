@@ -29,10 +29,10 @@ substitutes a product or switches a plan.
 | Triggering | Deterministic depletion/date/price triggers, category cold-start priors, EWMA recalibration, duplicate suppression |
 | Safety | Spend Guardrail before Prava; exact SKU; no silent substitution; price reapproval; mandate gate; idempotency; sanitized audit; restart recovery |
 | Prava | Real sandbox Session creation and hosted handoff work; assigned card is provider-blocked before passkey approval |
-| Zepto | Real OAuth, saved address, exact-SKU search, live price, reversible cart, payment-method discovery, and `confirmOrder=false` quote verified; no order placed |
+| Zepto | Real OAuth and two saved delivery addresses verified. Product search is currently blocked by Zepto provider HTTP 429, so Restock does not claim a live search, cart, quote, or order proof yet. |
 | Slack | Real private-workspace delivery and persisted Skip callback verified; persistent Railway listener active |
 | Persistence | Managed Postgres, migrations, separate API/worker/Slack services, backup/restore proof |
-| Quality | Latest CI green; 409 Python tests pass, one interactive case is skipped, seven integration cases are deselected by default |
+| Quality | Latest CI green; 426 Python tests pass, one interactive case is skipped, seven integration cases are deselected by default |
 | NANDA | Trigger utility is public; reusable Prava adapter PR is draft until interactive sandbox proof succeeds |
 
 ## Exact current blocker

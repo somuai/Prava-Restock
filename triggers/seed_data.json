@@ -2,7 +2,7 @@
   {
     "item_id": "00000000-0000-0000-0000-000000000101",
     "user_id": "00000000-0000-0000-0000-000000000001",
-    "name": "Arabica coffee beans, 500 g",
+    "name": "Blue Tokai Attikan Estate coffee, 500 g",
     "track": "home",
     "trigger_type": "predicted",
     "category": "grocery",
@@ -22,7 +22,7 @@
   {
     "item_id": "00000000-0000-0000-0000-000000000102",
     "user_id": "00000000-0000-0000-0000-000000000001",
-    "name": "RO water filter cartridge",
+    "name": "Aquaguard filter kit",
     "track": "home",
     "trigger_type": "predicted",
     "category": "other",
@@ -40,7 +40,7 @@
   {
     "item_id": "00000000-0000-0000-0000-000000000103",
     "user_id": "00000000-0000-0000-0000-000000000001",
-    "name": "A4 printer paper, 500 sheets",
+    "name": "JK A4 copier paper, 500 sheets",
     "track": "home",
     "trigger_type": "predicted",
     "category": "stationery",
@@ -58,7 +58,7 @@
   {
     "item_id": "00000000-0000-0000-0000-000000000104",
     "user_id": "00000000-0000-0000-0000-000000000001",
-    "name": "Fluoride toothpaste twin pack",
+    "name": "Colgate Strong Teeth twin pack",
     "track": "home",
     "trigger_type": "predicted",
     "category": "health",
@@ -76,7 +76,7 @@
   {
     "item_id": "00000000-0000-0000-0000-000000000105",
     "user_id": "00000000-0000-0000-0000-000000000001",
-    "name": "TeamTool Pro",
+    "name": "GitHub Copilot Business",
     "track": "teams",
     "trigger_type": "known_date",
     "category": "saas_subscription",

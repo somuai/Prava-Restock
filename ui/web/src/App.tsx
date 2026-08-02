@@ -489,6 +489,37 @@ const subscriptions: SubscriptionProduct[] = [
   },
 ];
 
+// These are the five stable reviewer fixtures from triggers/seed_data.json.
+// They deliberately use exact opaque SKU identifiers—not name matching—so a
+// real user's arbitrary persisted item can never inherit a made-up pack shot
+// or provider identity. Values returned by the API still own amount, cadence,
+// trigger state, merchant, and renewal details.
+const reviewerHomePresentationIds: Record<string, PantryProduct["id"]> = {
+  "zepto-arabica-coffee-500g": "coffee",
+  "zepto-ro-filter-cartridge": "filter",
+  "swiggy-a4-paper-500": "paper",
+  "zepto-toothpaste-twin-pack": "toothpaste",
+};
+
+const reviewerTeamPresentationIds: Record<string, SubscriptionProduct["id"]> = {
+  "teamtool-pro-monthly": "copilot",
+};
+
+const pantryProductById = new Map(products.map((product) => [product.id, product]));
+const subscriptionById = new Map(subscriptions.map((subscription) => [subscription.id, subscription]));
+
+export function reviewerHomeProductPresentation(merchantSkuId: string): PantryProduct | undefined {
+  const productId = reviewerHomePresentationIds[merchantSkuId];
+  return productId ? pantryProductById.get(productId) : undefined;
+}
+
+export function reviewerTeamSubscriptionPresentation(
+  merchantSkuId: string,
+): SubscriptionProduct | undefined {
+  const subscriptionId = reviewerTeamPresentationIds[merchantSkuId];
+  return subscriptionId ? subscriptionById.get(subscriptionId) : undefined;
+}
+
 const DAY_MS = 86_400_000;
 
 function dateLabel(value?: string | null): string {
@@ -568,6 +599,14 @@ function trackedHomeProduct(base: PantryProduct, item: TrackedItem): PantryProdu
 }
 
 function presentationProductForItem(item: TrackedItem): PantryProduct {
+  const reviewerProduct = reviewerHomeProductPresentation(item.merchant_sku_id);
+  if (reviewerProduct) {
+    return {
+      ...reviewerProduct,
+      id: `tracked-${item.item_id}`,
+      itemId: item.item_id,
+    };
+  }
   return {
     id: `tracked-${item.item_id}`,
     itemId: item.item_id,
@@ -604,14 +643,16 @@ function trackedTeamSubscription(item: TrackedItem): SubscriptionProduct {
     : "No cheaper match";
   const renewalDays = daysFromToday(item.renewal_date);
   const decisionDue = renewalDays !== null && renewalDays <= 3;
+  const reviewerSubscription = reviewerTeamSubscriptionPresentation(item.merchant_sku_id);
   return {
-    id: "teamtool",
+    ...(reviewerSubscription || {}),
+    id: reviewerSubscription ? `tracked-${item.item_id}` : "tracked-team-subscription",
     itemId: item.item_id,
     name: item.name,
     category: "SaaS subscription",
-    logo: "/app/assets/restock-mark.png",
-    color: "#17624d",
-    currentPlan: "Tracked invoice",
+    logo: reviewerSubscription?.logo || "/app/assets/restock-mark.png",
+    color: reviewerSubscription?.color || "#17624d",
+    currentPlan: reviewerSubscription?.currentPlan || "Tracked invoice",
     currentAmount: current,
     alternatePlan: item.alternate_plan_label || "Alternate plan",
     alternateAmount: alternate,
@@ -620,16 +661,16 @@ function trackedTeamSubscription(item: TrackedItem): SubscriptionProduct {
     owner: "Billing owner not supplied",
     savings,
     status: decisionDue ? "Decision due" : "Watching",
-    note: "The invoice date and amounts below are the values supplied to Restock. Vendor dashboard data is not inferred.",
-    description: "A persisted team subscription loaded from the Restock production database.",
+    note: reviewerSubscription?.note || "The invoice date and amounts below are the values supplied to Restock. Vendor dashboard data is not inferred.",
+    description: reviewerSubscription?.description || "A persisted team subscription loaded from the Restock production database.",
     currency: item.currency === "INR" ? "INR" : "USD",
-    priceBasis: "owner-supplied hosted invoice",
-    quantity: "Subscription object not connected by vendor OAuth",
-    usage: "Not supplied",
-    usageDetail: "Restock does not invent seats or usage when a vendor billing API is not connected.",
+    priceBasis: reviewerSubscription?.priceBasis || "owner-supplied hosted invoice",
+    quantity: reviewerSubscription?.quantity || "Subscription object not connected by vendor OAuth",
+    usage: reviewerSubscription?.usage || "Not supplied",
+    usageDetail: reviewerSubscription?.usageDetail || "Restock does not invent seats or usage when a vendor billing API is not connected.",
     paymentMethod: "Prava approval required",
     invoiceStatus: decisionDue ? "Approval due" : "Not due",
-    planFeatures: ["Hosted invoice reference", "Explicit renewal action", "Code-owned spend cap"],
+    planFeatures: reviewerSubscription?.planFeatures || ["Hosted invoice reference", "Explicit renewal action", "Code-owned spend cap"],
     alternateDescription: `Move to ${item.alternate_plan_label || "the alternate plan"} only after a distinct switch approval.`,
   };
 }

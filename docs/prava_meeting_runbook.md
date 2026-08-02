@@ -55,7 +55,7 @@ credibility first.
 
 ### Step A — Home trigger
 
-1. Show the living pantry and open Coffee.
+1. Show the living pantry and open the Blue Tokai coffee review fixture.
 2. Explain the two independent signals: predicted depletion and an optional
    price threshold. If both fire, Restock creates one notification containing
    both reasons.
@@ -85,15 +85,16 @@ Suggested line:
 
 ### Step C — merchant boundary
 
-Show the Phase 8 evidence rather than mutating a live cart during the meeting.
-Explain that the verified Zepto path includes OAuth, saved-address lookup,
-exact-SKU search, live price, cart preview, payment methods, and
-`confirmOrder=false` quoting. No order was confirmed and final payment remains
-operator-gated.
+Show the Zepto evidence rather than mutating a live cart during the meeting.
+Explain that OAuth and saved-address lookup are verified against Zepto. The
+next read-only catalog call is currently receiving Zepto provider HTTP 429, so
+Restock deliberately does not claim a live product search, cart preview, or
+`confirmOrder=false` quote yet. No order was confirmed and final payment
+remains operator-gated.
 
 ### Step D — Teams and Slack
 
-1. Open the Teams subscription shelf.
+1. Open the GitHub Copilot Business review fixture on the Teams shelf.
 2. Show renew-as-is versus switch-plan. A switch requires its own explicit
    action; a generic approval cannot select it.
 3. Show the real Slack message and the resolved callback state.
@@ -164,10 +165,12 @@ and a revocable, limited credential. That is Prava's structural role.
 ### “What is real right now?”
 
 The deployed PWA, authentication, triggers, workflow, Postgres, worker, Slack,
-safety rules, Prava Session creation, and verified Zepto catalog/cart/quote
-operations are real. The assigned card is blocked before Prava passkey approval.
-Final Zepto payment and Teams fulfillment remain disclosed simulations, with
-real money disabled.
+safety rules, Prava Session creation, and verified Zepto OAuth/saved-address
+operations are real. Zepto catalog search is currently rate-limited by the
+provider (HTTP 429), so catalog/cart/quote operations remain unproven in this
+environment. The assigned card is blocked before Prava passkey approval. Final
+Zepto payment and Teams fulfillment remain disclosed simulations, with real
+money disabled.
 
 ### “Why did we not see the sandbox flow?”
 
