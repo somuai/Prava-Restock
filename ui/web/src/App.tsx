@@ -595,6 +595,16 @@ export function reviewerShowcaseNotifications(pending: Notification[]): Notifica
   ];
 }
 
+export function notificationsForReviewerSession(
+  pending: Notification[],
+  showcaseRequested: boolean,
+  reviewerFixture: boolean,
+): Notification[] {
+  return showcaseRequested || reviewerFixture
+    ? reviewerShowcaseNotifications(pending)
+    : pending;
+}
+
 const DAY_MS = 86_400_000;
 
 function dateLabel(value?: string | null): string {
@@ -2752,9 +2762,11 @@ export default function App() {
         api.me().catch(() => null),
         api.tenants().catch(() => []),
       ]);
-      const visibleNotifications = reviewerShowcaseRequested
-        ? reviewerShowcaseNotifications(pending)
-        : pending;
+      const visibleNotifications = notificationsForReviewerSession(
+        pending,
+        reviewerShowcaseRequested,
+        Boolean(currentUser?.reviewer_fixture),
+      );
       setNotifications(visibleNotifications);
       setAudit(events);
       setWorkflows(workflowRuns);

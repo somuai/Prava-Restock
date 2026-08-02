@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  notificationsForReviewerSession,
   providerBrandForName,
   reviewerHomeProductPresentation,
   reviewerShowcaseNotifications,
@@ -35,6 +36,13 @@ const reviewerCopilot: TrackedItem = {
 };
 
 describe("reviewer product presentation", () => {
+  it("restores approval previews for a signed-in reviewer without requiring a query string", () => {
+    expect(notificationsForReviewerSession([], false, true).map((notification) => notification.actions)).toEqual([
+      ["approve", "adjust", "skip"],
+      ["renew_as_is", "switch_plan", "skip"],
+    ]);
+  });
+
   it("uses the official provider marks for approval surfaces", () => {
     expect(providerBrandForName("Zepto")).toMatchObject({
       name: "Zepto",
