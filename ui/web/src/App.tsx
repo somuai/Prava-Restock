@@ -3103,6 +3103,14 @@ export default function App() {
     setApprovalChecking(true);
     try {
       const paymentStatus = await api.paymentStatus(approvalProgress.run_id);
+      if (["failed", "rejected", "expired"].includes(paymentStatus.workflow_state)) {
+        setApprovalProgress(null);
+        window.sessionStorage.removeItem("restock-active-sandbox-approval");
+        setStatus(`Workflow · ${humanize(paymentStatus.workflow_state)}`);
+        setActionFeedback(`The approval ended as ${humanize(paymentStatus.workflow_state)}. No payment was completed.`);
+        await refresh();
+        return;
+      }
       if (!paymentStatus.resumable) return;
       const finalRun = await api.resume(approvalProgress.run_id);
       if (["completed", "failed", "rejected", "expired", "checkout_pending", "reapproval_required"].includes(finalRun.state)) {
