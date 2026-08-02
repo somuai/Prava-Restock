@@ -75,6 +75,8 @@ describe("reviewer product presentation", () => {
       image: "/app/assets/product-amul-taaza.png",
     });
     expect(shelf.find((product) => product.name === "Amul Taaza milk")).not.toHaveProperty("itemId");
+    expect(reviewerShowcaseProducts([]).find((product) => product.name === "Attikan Estate coffee"))
+      .not.toHaveProperty("itemId");
   });
 
   it("restores the complete provider-award shelf while binding only Copilot to the fixture", () => {
@@ -88,5 +90,7 @@ describe("reviewer product presentation", () => {
       logo: "/app/assets/providers/vercel.svg",
     });
     expect(awards.find((subscription) => subscription.name === "Vercel Pro")).not.toHaveProperty("itemId");
+    expect(reviewerShowcaseSubscriptions([]).find((subscription) => subscription.name === "GitHub Copilot Business"))
+      .not.toHaveProperty("itemId");
   });
 });

@@ -535,9 +535,12 @@ export function reviewerShowcaseProducts(items: TrackedItem[]): PantryProduct[] 
   }
   return products.map((product) => {
     const item = itemByPresentationId.get(product.id);
-    return item
-      ? { ...product, id: `reviewer-${item.item_id}`, itemId: item.item_id }
-      : product;
+    if (item) return { ...product, id: `reviewer-${item.item_id}`, itemId: item.item_id };
+    // Presentation-only cards must not retain the old local-demo UUIDs.
+    // That prevents a reviewer who signed in through Google from ever
+    // attempting an action against another account's fixture workflow.
+    const { itemId: _itemId, ...visual } = product;
+    return { ...visual, id: `showcase-${product.id}` };
   });
 }
 
@@ -549,9 +552,9 @@ export function reviewerShowcaseSubscriptions(items: TrackedItem[]): Subscriptio
   }
   return subscriptions.map((subscription) => {
     const item = itemByPresentationId.get(subscription.id);
-    return item
-      ? { ...subscription, id: `reviewer-${item.item_id}`, itemId: item.item_id }
-      : subscription;
+    if (item) return { ...subscription, id: `reviewer-${item.item_id}`, itemId: item.item_id };
+    const { itemId: _itemId, ...visual } = subscription;
+    return { ...visual, id: `showcase-${subscription.id}` };
   });
 }
 
@@ -2751,19 +2754,24 @@ export default function App() {
     () => notifications.find((notification) => (notification.track || (notification.actions.includes("switch_plan") ? "teams" : "home")) === "teams"),
     [notifications],
   );
+  // This is an explicit presentation route for provider review. It contains
+  // only local, non-actionable visual fixtures; the default authenticated
+  // view continues to show a user's own persisted products.
+  const reviewerShowcaseRequested = new URLSearchParams(window.location.search).get("review") === "showcase";
+  const showReviewerShowcase = Boolean(profile?.reviewer_fixture) || reviewerShowcaseRequested;
   const visibleProducts = useMemo(() => {
     if (!backendConnected) return import.meta.env.DEV ? products : [];
-    if (profile?.reviewer_fixture) return reviewerShowcaseProducts(trackedItems);
+    if (showReviewerShowcase) return reviewerShowcaseProducts(trackedItems);
     return trackedItems
       .filter((item) => item.track === "home")
       .map((item) => trackedHomeProduct(presentationProductForItem(item), item));
-  }, [backendConnected, profile?.reviewer_fixture, trackedItems]);
+  }, [backendConnected, showReviewerShowcase, trackedItems]);
   const visibleSubscriptions = useMemo(() => {
     if (!backendConnected) return import.meta.env.DEV ? subscriptions : [];
-    if (profile?.reviewer_fixture) return reviewerShowcaseSubscriptions(trackedItems);
+    if (showReviewerShowcase) return reviewerShowcaseSubscriptions(trackedItems);
     const tracked = trackedItems.filter((item) => item.track === "teams");
     return tracked.map((item) => trackedTeamSubscription(item));
-  }, [backendConnected, profile?.reviewer_fixture, trackedItems]);
+  }, [backendConnected, showReviewerShowcase, trackedItems]);
 
   useEffect(() => {
     if (selectedProduct || selectedSubscription || foregroundNotification) return;
