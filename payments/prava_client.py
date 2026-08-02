@@ -5,10 +5,12 @@ package owns card entry and passkey approval; this module implements the
 server-side session calls that Prava documents for Python applications.
 """
 
+import base64
 import json
+import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from math import isfinite
 from pathlib import Path
@@ -21,6 +23,7 @@ from dotenv import load_dotenv
 
 
 STUB_MODE = False
+LOGGER = logging.getLogger(__name__)
 
 
 def configured_mode() -> str:
