@@ -979,9 +979,7 @@ def solo_login(
     _enforce_login_rate_limit(request, repository, session_secret)
     authenticated_user_id: str | None = None
     reviewer_max_ttl: int | None = None
-    if owner_configured and password_auth.verify_password(payload.password, password_hash):
-        authenticated_user_id = owner_user_id
-    elif reviewer_configured and password_auth.verify_password(
+    if reviewer_configured and password_auth.verify_password(
         payload.password, reviewer_hash
     ):
         try:
@@ -997,6 +995,8 @@ def solo_login(
             reviewer_max_ttl = 0
         if reviewer_max_ttl >= 60:
             authenticated_user_id = reviewer_user_id
+    elif owner_configured and password_auth.verify_password(payload.password, password_hash):
+        authenticated_user_id = owner_user_id
     if authenticated_user_id is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

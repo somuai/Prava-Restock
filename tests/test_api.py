@@ -296,6 +296,7 @@ def test_production_configuration_accepts_postgres_secret_and_no_demo(monkeypatc
         "RESTOCK_WORKER_SERVICE_TOKEN",
         "worker-service-placeholder-over-32-characters",
     )
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "1234567890-test.apps.googleusercontent.com")
 
     assert api.production_configuration_issues() == []
 
