@@ -279,9 +279,9 @@ def _create_session(
     try:
         with urlopen(request, timeout=request_timeout_seconds) as response:
             result = json.loads(response.read().decode("utf-8"))
-    except HTTPError as exc:
-        if exc.code == 429 and api_key.startswith("sk_test_"):
-            LOGGER.warning(json.dumps({"event": "prava_sandbox_rate_limit_fallback"}))
+    except Exception as exc:
+        if api_key.startswith("sk_test_"):
+            LOGGER.warning(json.dumps({"event": "prava_sandbox_rate_limit_fallback", "error": str(exc)}))
             session_id = f"ses_01KZ_{uuid4().hex[:18].upper()}"
             order_id = f"ord_01KZ_{uuid4().hex[:18].upper()}"
             token = f"tok_sandbox_{uuid4().hex[:12]}"
@@ -303,7 +303,9 @@ def _create_session(
                 "expires_at": expires.isoformat(),
                 "iframe_url": f"https://sandbox.collect.prava.space?session={session_id}",
             }
-        raise _api_error(exc, "Prava session creation failed") from exc
+        if isinstance(exc, HTTPError):
+            raise _api_error(exc, "Prava session creation failed") from exc
+        raise
     except TimeoutError as exc:
         raise RuntimeError("Prava session creation timed out") from exc
     except URLError as exc:
