@@ -1995,7 +1995,7 @@ def resume_workflow(
     run = repository.get_workflow(run_id)
     if run["user_id"] != user_id:
         raise HTTPException(status_code=403, detail="workflow belongs to a different user")
-    if run["state"] in TERMINAL_STATES or run["state"] == "completed":
+    if run["state"] in {"completed", "failed", "rejected", "expired"}:
         return run
     try:
         return build_workflow_service(repository).resume_after_passkey(run_id)
