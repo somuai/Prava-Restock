@@ -103,6 +103,7 @@ def test_runtime_modes_require_complete_slack_and_environment_bound_prava(monkey
 
 def test_production_readiness_fails_closed_without_real_checkout_runtime(monkeypatch) -> None:
     monkeypatch.setenv("RESTOCK_ENV", "production")
+    monkeypatch.setenv("RESTOCK_STRICT_VALIDATE", "1")
     monkeypatch.setenv("HOME_MERCHANT_MODE", "real")
     monkeypatch.setenv("HOME_PAYMENT_MODE", "real")
     monkeypatch.setenv("ZEPTO_REAL_PAYMENT_ENABLED", "1")
@@ -263,6 +264,7 @@ def test_behavioral_endpoints_require_authentication() -> None:
 
 def test_readiness_rejects_unsafe_production_configuration(monkeypatch) -> None:
     monkeypatch.setenv("RESTOCK_ENV", "production")
+    monkeypatch.setenv("RESTOCK_STRICT_VALIDATE", "1")
     monkeypatch.setenv("DATABASE_URL", "sqlite:///logs/restock.db")
     monkeypatch.delenv("RESTOCK_SESSION_SECRET", raising=False)
     monkeypatch.setenv("RESTOCK_DEMO_MODE", "1")

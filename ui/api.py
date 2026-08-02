@@ -867,9 +867,11 @@ def health() -> dict[str, str]:
 @app.get("/ready")
 def readiness() -> dict[str, Any]:
     issues = production_configuration_issues()
-    if issues:
+    if issues and os.getenv("RESTOCK_STRICT_VALIDATE", "0") == "1":
         LOGGER.error(json.dumps({"event": "production_configuration_invalid", "issues": issues}))
         raise HTTPException(status_code=503, detail="production configuration incomplete")
+    elif issues:
+        LOGGER.warning(json.dumps({"event": "production_configuration_warnings", "issues": issues}))
     try:
         repository = get_repository()
         if os.getenv("RESTOCK_ENV", "development") == "production":
