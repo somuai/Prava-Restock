@@ -3123,9 +3123,9 @@ export default function App() {
       if (error instanceof ApiError && error.status === 401) {
         await clearApiSessionToken();
         setAuthState("required");
-      } else if (error instanceof ApiError && [409, 502].includes(error.status)) {
-        // Pending and transient provider states are expected while the user is
-        // still on Prava. The visible status card remains available to retry.
+      } else if (error instanceof ApiError && [400, 404].includes(error.status)) {
+        setApprovalProgress(null);
+        window.sessionStorage.removeItem("restock-active-sandbox-approval");
       } else {
         setActionFeedback(error instanceof Error ? error.message : "Could not check approval yet");
       }
