@@ -444,9 +444,19 @@ def await_mandate(intent_ref):
     while True:
         try:
             result = get_payment_result(intent_ref)
-        except RuntimeError as exc:
-            if isinstance(exc, PravaAPIError):
+        except PravaAPIError as exc:
+            # Polling is safe to retry after a transient upstream failure: this
+            # request is read-only and does not create another session or
+            # checkout. Client/auth errors remain fail-fast so bad credentials
+            # and invalid session references are never hidden behind a timeout.
+            if exc.status_code < 500:
                 raise
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise
+            time.sleep(min(poll_interval, remaining))
+            continue
+        except RuntimeError as exc:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError(

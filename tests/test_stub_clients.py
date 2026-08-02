@@ -413,6 +413,60 @@ def test_prava_client_normalizes_failed_session_as_rejected(monkeypatch) -> None
     }
 
 
+def test_prava_polling_retries_transient_server_errors(monkeypatch) -> None:
+    intent_ref = "sess_transient_server_error"
+    prava_client._INTENTS[intent_ref] = {
+        "merchant": "Zepto",
+        "amount": "9.99",
+        "item_description": "Sandbox retry check",
+        "constraints": {
+            "poll_timeout_seconds": 1,
+            "poll_interval_seconds": 0,
+        },
+    }
+    responses = iter(
+        [
+            prava_client.PravaAPIError(
+                status_code=500,
+                code="INTERNAL_ERROR",
+                message="An internal error occurred",
+                response_id="response-transient",
+            ),
+            {
+                "session_id": intent_ref,
+                "status": "awaiting_result",
+                "transactions": [
+                    {
+                        "txn_id": "txn_retry",
+                        "line_items": [
+                            {
+                                "txn_ref_id": "txn_ref_retry",
+                                "token": "virtual-network-token",
+                                "dynamic_cvv": "unit-cvv",
+                                "expiry_month": "12",
+                                "expiry_year": "2099",
+                            }
+                        ],
+                    }
+                ],
+            },
+        ]
+    )
+
+    def get_result(_session_id):
+        response = next(responses)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    monkeypatch.setattr(prava_client, "get_payment_result", get_result)
+
+    mandate = prava_client.await_mandate(intent_ref)
+
+    assert mandate["status"] == "approved"
+    assert mandate["txn_ref_id"] == "txn_ref_retry"
+
+
 def test_completed_prava_session_never_reissues_checkout_credentials(monkeypatch) -> None:
     responses = iter(
         [
