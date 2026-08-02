@@ -41,17 +41,20 @@ def test_preview_approve_creates_a_sandbox_passkey_handoff(tmp_path, monkeypatch
     repository.create_schema()
     repository.upsert_user(demo_user())
     workflow = SandboxWorkflow()
-    monkeypatch.setattr(api, "get_repository", lambda: repository)
+    api.app.dependency_overrides[api.get_repository] = lambda: repository
     monkeypatch.setattr(api, "WorkflowService", lambda _repository: workflow)
     monkeypatch.setattr(prava_client, "configured_mode", lambda: "sandbox")
     monkeypatch.setenv("PRAVA_API_KEY", "sandbox-key-placeholder")
     monkeypatch.setenv("PRAVA_API_URL", "https://sandbox.api.prava.space")
     monkeypatch.delenv("RESTOCK_ENV", raising=False)
 
-    response = TestClient(api.app).post(
-        "/api/v1/reviewer/sandbox-approval",
-        headers=AUTH_HEADERS,
-    )
+    try:
+        response = TestClient(api.app).post(
+            "/api/v1/reviewer/sandbox-approval",
+            headers=AUTH_HEADERS,
+        )
+    finally:
+        api.app.dependency_overrides.pop(api.get_repository, None)
 
     assert response.status_code == 200
     assert response.json() == {
@@ -71,17 +74,20 @@ def test_sandbox_passkey_handoff_is_unavailable_without_sandbox_credentials(
     repository = RestockRepository(Database(f"sqlite:///{tmp_path / 'no-sandbox.db'}"))
     repository.create_schema()
     repository.upsert_user(demo_user())
-    monkeypatch.setattr(api, "get_repository", lambda: repository)
+    api.app.dependency_overrides[api.get_repository] = lambda: repository
     monkeypatch.setattr(prava_client, "configured_mode", lambda: "unconfigured")
     monkeypatch.delenv("PRAVA_API_KEY", raising=False)
     monkeypatch.delenv("PRAVA_API_URL", raising=False)
     monkeypatch.delenv("PRAVA_SANDBOX_URL", raising=False)
     monkeypatch.delenv("RESTOCK_ENV", raising=False)
 
-    response = TestClient(api.app).post(
-        "/api/v1/reviewer/sandbox-approval",
-        headers=AUTH_HEADERS,
-    )
+    try:
+        response = TestClient(api.app).post(
+            "/api/v1/reviewer/sandbox-approval",
+            headers=AUTH_HEADERS,
+        )
+    finally:
+        api.app.dependency_overrides.pop(api.get_repository, None)
 
     assert response.status_code == 503
     assert response.json() == {"detail": "Prava sandbox approval is unavailable"}
