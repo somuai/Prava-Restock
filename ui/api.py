@@ -1518,6 +1518,100 @@ def audit(
     return repository.list_audit(user_id)
 
 
+@app.post("/api/v1/reviewer/sandbox-approval")
+def reviewer_sandbox_approval(
+    user_id: str = Depends(require_user),
+    repository: RestockRepository = Depends(get_repository),
+) -> dict[str, str]:
+    """Create one authenticated, non-charging Prava sandbox handoff.
+
+    The catalog quote is an explicitly disclosed fixture. The endpoint is
+    unavailable for production Prava credentials and never enables a merchant
+    payment boundary.
+    """
+
+    from merchant.models import ExecutionMode, MerchantQuote, StockStatus
+    from payments import prava_client
+    from payments.models import TrackedItem, User
+
+    if prava_client.configured_mode() != "sandbox" or runtime_modes()["real_money_enabled"]:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Prava sandbox approval is unavailable",
+        )
+    user_data = repository.get_user(user_id)
+    if user_data is None:
+        raise HTTPException(status_code=404, detail="user not found")
+    user = User.model_validate(user_data)
+    matching = next(
+        (
+            TrackedItem.model_validate(item)
+            for item in repository.list_items(user_id)
+            if item["merchant_sku_id"] == starter_template_sku("coffee")
+        ),
+        None,
+    )
+    item = matching or build_starter_item("coffee", user_id=user_id)
+    if matching is None:
+        repository.upsert_item(item)
+
+    service = WorkflowService(repository)
+    active = repository.latest_workflow_for_item(str(item.item_id))
+    if active is not None and active.get("active_item_key"):
+        try:
+            approval_url_value = service.approval_url(active["run_id"])
+        except RuntimeError:
+            repository.transition(
+                active["run_id"],
+                expected={active["state"]},
+                state="failed",
+                error_code="SANDBOX_APPROVAL_CONTEXT_EXPIRED",
+            )
+        else:
+            if active["state"] == "notified":
+                active = service.act(
+                    active["run_id"], user_id=user_id, action="approve"
+                )
+            elif active["state"] != "passkey_pending":
+                raise HTTPException(
+                    status_code=409,
+                    detail="The sandbox approval workflow is already in progress",
+                )
+            return {
+                "run_id": str(active["run_id"]),
+                "state": str(active["state"]),
+                "approval_url": approval_url_value,
+            }
+
+    amount = item.last_observed_price or item.last_purchase_amount or Decimal("380.00")
+    quote = MerchantQuote(
+        merchant="zepto",
+        merchant_sku_id=item.merchant_sku_id,
+        product_name=item.name,
+        amount=amount,
+        currency=item.currency,
+        stock_status=StockStatus.IN_STOCK,
+        quote_reference=f"sandbox-review:{uuid4().hex}",
+        observed_at=datetime.now(timezone.utc),
+        execution_mode=ExecutionMode.DISCLOSED_MOCK,
+    )
+    try:
+        run = service.begin(user, item, quote=quote)
+        run = service.act(run["run_id"], user_id=user_id, action="approve")
+        approval_url_value = service.approval_url(run["run_id"])
+    except (OSError, RuntimeError, ValueError) as exc:
+        LOGGER.error(json.dumps({"event": "sandbox_approval_handoff_failed"}))
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Prava sandbox session could not be created",
+        ) from exc
+    return {
+        "run_id": str(run["run_id"]),
+        "state": str(run["state"]),
+        "approval_url": approval_url_value,
+    }
+
+
 @app.post("/api/v1/workflows/{run_id}/actions")
 def workflow_action(
     run_id: str,

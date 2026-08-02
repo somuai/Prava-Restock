@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   notificationsForReviewerSession,
+  shouldOpenSandboxApproval,
   providerBrandForName,
   reviewerHomeProductPresentation,
   reviewerShowcaseNotifications,
@@ -36,6 +37,20 @@ const reviewerCopilot: TrackedItem = {
 };
 
 describe("reviewer product presentation", () => {
+  it("routes preview approval into the configured Prava sandbox", () => {
+    const notification = reviewerShowcaseNotifications([])[0];
+    expect(shouldOpenSandboxApproval(notification, "approve", {
+      prava_mode: "sandbox_configured",
+      home_merchant_mode: "real",
+      home_payment_mode: "disclosed_mock",
+      teams_billing_mode: "disclosed_mock",
+      real_money_enabled: false,
+      slack_configured: false,
+      whatsapp_configured: false,
+      demo_mode: false,
+    })).toBe(true);
+  });
+
   it("restores approval previews for a signed-in reviewer without requiring a query string", () => {
     expect(notificationsForReviewerSession([], false, true).map((notification) => notification.actions)).toEqual([
       ["approve", "adjust", "skip"],

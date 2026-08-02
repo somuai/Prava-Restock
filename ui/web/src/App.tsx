@@ -605,6 +605,17 @@ export function notificationsForReviewerSession(
     : pending;
 }
 
+export function shouldOpenSandboxApproval(
+  notification: Notification,
+  action: string,
+  capabilities: Capabilities | null,
+): boolean {
+  return notification.status === "preview"
+    && action === "approve"
+    && capabilities?.prava_mode === "sandbox_configured"
+    && capabilities.real_money_enabled === false;
+}
+
 const DAY_MS = 86_400_000;
 
 function dateLabel(value?: string | null): string {
@@ -3059,6 +3070,24 @@ export default function App() {
     sound("submit");
     let approvalWindow: Window | null = null;
     try {
+      if (shouldOpenSandboxApproval(notification, action, capabilities)) {
+        approvalWindow = window.open("about:blank", "_blank");
+        if (approvalWindow) {
+          approvalWindow.opener = null;
+          renderApprovalHandoff(approvalWindow, providerBrandForNotification(notification));
+        }
+        const handoff = await api.sandboxApproval();
+        setNotifications((items) => items.map((item) => (
+          item.notification_id === notification.notification_id
+            ? { ...item, run_id: handoff.run_id, status: handoff.state }
+            : item
+        )));
+        if (approvalWindow) approvalWindow.location.replace(handoff.approval_url);
+        else window.location.assign(handoff.approval_url);
+        setStatus("Prava sandbox approval opened");
+        setActionFeedback("Prava sandbox approval opened in a new tab. No real merchant charge can occur.");
+        return;
+      }
       if (notification.status === "preview") {
         setNotifications((items) => items.map((item) => item.notification_id === notification.notification_id ? { ...item, status: action } : item));
         setStatus(`${humanize(action)} recorded`);

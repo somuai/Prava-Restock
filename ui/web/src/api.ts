@@ -302,6 +302,16 @@ export const api = {
     if (!response.ok) throw new ApiError(response.status, (await response.json()).detail || "Action failed");
     return response.json();
   },
+  sandboxApproval: async () => {
+    const response = await fetch(endpoint("/api/v1/reviewer/sandbox-approval"), {
+      method: "POST",
+      credentials: "include",
+      headers: await requestHeaders(),
+    });
+    const body = await response.json();
+    if (!response.ok) throw new ApiError(response.status, body.detail || "Sandbox approval failed");
+    return body as { run_id: string; state: "passkey_pending"; approval_url: string };
+  },
   approvalUrl: (runId: string) => read<{ approval_url: string }>(`/api/v1/workflows/${runId}/approval-url`),
   resume: async (runId: string) => {
     const response = await fetch(endpoint(`/api/v1/workflows/${runId}/resume`), {
