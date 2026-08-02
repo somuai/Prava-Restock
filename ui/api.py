@@ -1855,6 +1855,18 @@ def reviewer_sandbox_approval(
     service = WorkflowService(repository)
     active = repository.latest_workflow_for_item(str(item.item_id))
     if active is not None and active.get("active_item_key"):
+        created_raw = active.get("created_at")
+        if created_raw is not None:
+            created_dt = created_raw if created_raw.tzinfo else created_raw.replace(tzinfo=timezone.utc)
+            if (datetime.now(timezone.utc) - created_dt).total_seconds() > 180:
+                repository.transition(
+                    active["run_id"],
+                    expected={active["state"]},
+                    state="expired",
+                    error_code="SANDBOX_SESSION_EXPIRED",
+                )
+                active = None
+    if active is not None and active.get("active_item_key"):
         try:
             approval_url_value = service.approval_url(active["run_id"])
         except RuntimeError:
