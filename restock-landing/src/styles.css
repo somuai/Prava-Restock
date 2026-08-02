@@ -1,0 +1,52 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+:root {
+  --background:        oklch(0.97 0.01 90);     /* cream #F7F3E9 */
+  --foreground:        oklch(0.24 0.01 30);     /* charcoal #2B2B2B */
+  --muted:              oklch(0.93 0.01 90);
+  --muted-foreground:   oklch(0.45 0.01 60);
+  --surface:            oklch(0.94 0.01 90);    /* benefits section background */
+  --accent:             oklch(0.62 0.15 35);    /* coral #FF7A5C */
+  --accent-foreground:  oklch(0.98 0 0);
+  --teal:               oklch(0.42 0.06 185);   /* deep teal #0E5C56 */
+  --border:             oklch(0.88 0.01 90);
+  --header-bg:          oklch(0.30 0.03 185 / 0.85);  /* translucent teal-tinted nav pill */
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-surface: var(--surface);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-teal: var(--teal);
+  --color-border: var(--border);
+  --color-header-bg: var(--header-bg);
+
+  --font-sans: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-display: "Inter Tight", "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  letter-spacing: -0.025em;
+}
+
+* {
+  border-color: var(--color-border);
+}

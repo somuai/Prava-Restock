@@ -82,7 +82,7 @@ def test_manual_workflow_migration_makes_payment_proposal_fields_nullable(
         assert preserved.merchant == "mock_subscription_billing"
         assert (
             connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            == "20260801_11"
+            == "20260802_12"
         )
 
     with pytest.raises(IntegrityError):

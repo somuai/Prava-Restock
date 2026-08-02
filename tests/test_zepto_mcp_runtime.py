@@ -110,6 +110,16 @@ def test_mcp_call_failure_clears_recent_authorization(monkeypatch) -> None:
     assert zepto_mcp.mcp_authorization_verified_recently() is False
 
 
+def test_temporary_zepto_529_is_not_reported_as_an_auth_failure() -> None:
+    assert zepto_mcp._is_transient_provider_failure("HTTP 529 overloaded") is True
+    assert zepto_mcp._is_rate_limited("HTTP 529 overloaded") is False
+
+
+def test_429_remains_a_rate_limit_not_a_temporary_auth_failure() -> None:
+    assert zepto_mcp._is_rate_limited("HTTP 429 Too Many Requests") is True
+    assert zepto_mcp._is_transient_provider_failure("HTTP 429 Too Many Requests") is False
+
+
 def test_container_includes_node_and_non_root_runtime_verification() -> None:
     dockerfile = (ROOT / "Dockerfile").read_text()
     workflow = (ROOT / ".github/workflows/tests.yml").read_text()

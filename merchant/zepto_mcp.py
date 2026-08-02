@@ -13,8 +13,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+import httpx
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
+from mcp.client.streamable_http import streamable_http_client
 
 
 ZEPTO_MCP_URL = "https://mcp.zepto.co.in/mcp"
@@ -35,6 +37,14 @@ class ZeptoMCPError(RuntimeError):
 
 class ZeptoRateLimitError(ZeptoMCPError):
     """Zepto refused a call because its provider-side request budget is exhausted."""
+
+    def __init__(self, message: str, *, retry_after_seconds: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+
+
+class ZeptoTransientError(ZeptoMCPError):
+    """A temporary provider failure such as HTTP 529 or 503."""
 
     def __init__(self, message: str, *, retry_after_seconds: float | None = None) -> None:
         super().__init__(message)
@@ -80,6 +90,23 @@ def _retry_after(payload: Any) -> float | None:
 def _is_rate_limited(value: Any) -> bool:
     text = str(value).lower()
     return "429" in text or "too many requests" in text or "rate limit" in text
+
+
+def _is_transient_provider_failure(value: Any) -> bool:
+    text = str(value).lower()
+    return any(
+        marker in text
+        for marker in (
+            "529",
+            "502",
+            "503",
+            "504",
+            "overloaded",
+            "temporarily unavailable",
+            "service unavailable",
+            "gateway timeout",
+        )
+    )
 
 
 def resolve_mcp_remote_binary() -> str:
@@ -171,12 +198,64 @@ def _content_to_payload(result: Any) -> dict[str, Any]:
 
 
 class ZeptoMCPClient:
-    """Call Zepto tools through the official ``mcp-remote`` OAuth bridge."""
+    """Call Zepto tools through a user bearer token or legacy MCP bridge.
 
-    def __init__(self, *, timeout_seconds: float = 45) -> None:
+    A bearer token is the production web path: the authenticated Restock user
+    owns it.  The mcp-remote path remains limited to local/reviewer fixtures
+    because its localhost OAuth callback stores one process-level cache.
+    """
+
+    def __init__(self, *, timeout_seconds: float = 45, access_token: str | None = None) -> None:
         self.timeout_seconds = timeout_seconds
+        self.access_token = access_token.strip() if access_token else None
+
+    async def _call_direct_async(
+        self, name: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        if not self.access_token:
+            raise AssertionError("direct Zepto call requires an access token")
+        try:
+            async with httpx.AsyncClient(
+                headers={"Authorization": f"Bearer {self.access_token}"},
+                timeout=httpx.Timeout(self.timeout_seconds),
+            ) as http_client:
+                async with streamable_http_client(
+                    ZEPTO_MCP_URL,
+                    http_client=http_client,
+                ) as (read_stream, write_stream, _):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
+                        result = await session.call_tool(name, arguments)
+        except Exception as exc:
+            if _is_rate_limited(exc):
+                raise ZeptoRateLimitError(
+                    f"Zepto rate-limited {name}; wait before trying again"
+                ) from exc
+            if _is_transient_provider_failure(exc):
+                raise ZeptoTransientError(
+                    f"Zepto is temporarily unavailable for {name}; retry later"
+                ) from exc
+            raise ZeptoMCPError(f"Zepto MCP call failed: {name}") from exc
+        if getattr(result, "isError", False):
+            payload = _content_to_payload(result)
+            if _is_rate_limited(payload):
+                raise ZeptoRateLimitError(
+                    f"Zepto rate-limited {name}; wait before trying again",
+                    retry_after_seconds=_retry_after(payload),
+                )
+            if _is_transient_provider_failure(payload):
+                raise ZeptoTransientError(
+                    f"Zepto is temporarily unavailable for {name}; retry later",
+                    retry_after_seconds=_retry_after(payload),
+                )
+            raise ZeptoMCPError(f"Zepto tool {name} returned an error: {payload}")
+        return _content_to_payload(result)
 
     async def _call_once_async(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        if self.access_token:
+            payload = await self._call_direct_async(name, arguments)
+            record_mcp_authorization_success()
+            return payload
         try:
             server = StdioServerParameters(
                 command=resolve_mcp_remote_binary(),
@@ -191,6 +270,10 @@ class ZeptoMCPClient:
                 raise ZeptoRateLimitError(
                     f"Zepto rate-limited {name}; wait before trying again"
                 ) from exc
+            if _is_transient_provider_failure(exc):
+                raise ZeptoTransientError(
+                    f"Zepto is temporarily unavailable for {name}; retry later"
+                ) from exc
             clear_mcp_authorization_verification()
             raise ZeptoMCPError(f"Zepto MCP call failed: {name}") from exc
         if getattr(result, "isError", False):
@@ -198,6 +281,11 @@ class ZeptoMCPClient:
             if _is_rate_limited(payload):
                 raise ZeptoRateLimitError(
                     f"Zepto rate-limited {name}; wait before trying again",
+                    retry_after_seconds=_retry_after(payload),
+                )
+            if _is_transient_provider_failure(payload):
+                raise ZeptoTransientError(
+                    f"Zepto is temporarily unavailable for {name}; retry later",
                     retry_after_seconds=_retry_after(payload),
                 )
             clear_mcp_authorization_verification()
@@ -221,19 +309,23 @@ class ZeptoMCPClient:
                 payload = await self._call_once_async(name, arguments)
                 _RATE_LIMITED_UNTIL = 0.0
                 return payload
-            except ZeptoRateLimitError as exc:
+            except (ZeptoRateLimitError, ZeptoTransientError) as exc:
                 delay = exc.retry_after_seconds
                 if delay is None:
                     try:
-                        delay = float(os.getenv("ZEPTO_RATE_LIMIT_RETRY_SECONDS", "30"))
+                        fallback = (
+                            "ZEPTO_RATE_LIMIT_RETRY_SECONDS"
+                            if isinstance(exc, ZeptoRateLimitError)
+                            else "ZEPTO_TRANSIENT_RETRY_SECONDS"
+                        )
+                        default = "30" if isinstance(exc, ZeptoRateLimitError) else "10"
+                        delay = float(os.getenv(fallback, default))
                     except ValueError:
-                        delay = 30.0
+                        delay = 30.0 if isinstance(exc, ZeptoRateLimitError) else 10.0
                 delay = max(0.0, min(delay, 60.0))
                 _RATE_LIMITED_UNTIL = time.monotonic() + delay
                 if attempt + 1 >= attempts:
-                    raise ZeptoRateLimitError(
-                        str(exc), retry_after_seconds=delay
-                    ) from exc
+                    raise type(exc)(str(exc), retry_after_seconds=delay) from exc
                 await asyncio.sleep(delay)
         raise AssertionError("unreachable")
 

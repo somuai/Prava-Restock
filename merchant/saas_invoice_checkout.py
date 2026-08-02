@@ -207,10 +207,8 @@ def _mock_checkout(amount: Decimal, idempotency_key: str) -> dict[str, Any]:
 
 
 def complete_checkout(credential_reference, merchant_sku_id, amount, idempotency_key):
-    """Execute one hosted invoice while preserving the Phase-3 signature."""
+    """Execute one hosted invoice or recurring subscription charge while preserving the Phase-3 signature."""
 
-    if os.getenv(TEAMS_RECURRING_ENABLED_ENV) == "1":
-        raise RuntimeError("recurring Teams charging is disabled pending Prava confirmation")
     if not credential_reference or not merchant_sku_id or not idempotency_key:
         raise ValueError("credential reference, invoice ID, and idempotency key are required")
     try:
@@ -221,6 +219,65 @@ def complete_checkout(credential_reference, merchant_sku_id, amount, idempotency
         raise ValueError("amount must be positive")
 
     mode = billing_mode()
+
+    if os.getenv(TEAMS_RECURRING_ENABLED_ENV) == "1":
+        if mode is not ExecutionMode.REAL:
+            if idempotency_key not in _MOCK_RESULTS:
+                _MOCK_RESULTS[idempotency_key] = MerchantCheckoutResult(
+                    status=CheckoutStatus.COMPLETED,
+                    merchant_order_id=f"recurring_invoice_mock_{uuid4().hex}",
+                    charged_amount=parsed_amount,
+                    currency=os.getenv("TEAMS_BILLING_CURRENCY", "USD"),
+                    retryable=False,
+                    execution_mode=ExecutionMode.DISCLOSED_MOCK,
+                    disclosure_reason="Subscription checkout is a disclosed simulation with active mandate recurring billing.",
+                    credential_exposed=False,
+                    credential_used=False,
+                )
+            return _MOCK_RESULTS[idempotency_key].model_dump(mode="json")
+
+        if os.getenv(TEAMS_REAL_PAYMENT_ENABLED_ENV) != "1":
+            raise RuntimeError(
+                "real Teams payment is disabled; operator approval is required"
+            )
+
+        try:
+            charge_result = prava_client.charge_mandate(
+                mandate_id=str(credential_reference),
+                amount=parsed_amount,
+                currency=os.getenv("TEAMS_BILLING_CURRENCY", "USD"),
+                merchant_name=str(merchant_sku_id),
+                idempotency_key=str(idempotency_key),
+                description=f"Teams recurring subscription renewal for {merchant_sku_id}",
+            )
+            charged_amt = Decimal(str(charge_result.get("charged_amount") or parsed_amount))
+            return MerchantCheckoutResult(
+                status=CheckoutStatus.COMPLETED,
+                merchant_order_id=str(
+                    charge_result.get("charge_id")
+                    or charge_result.get("txn_ref_id")
+                    or f"recurring_{uuid4().hex}"
+                ),
+                charged_amount=charged_amt,
+                currency=str(charge_result.get("currency") or os.getenv("TEAMS_BILLING_CURRENCY", "USD")),
+                retryable=False,
+                execution_mode=ExecutionMode.REAL,
+                credential_exposed=False,
+                credential_used=True,
+            ).model_dump(mode="json")
+        except prava_client.PravaAPIError as exc:
+            return MerchantCheckoutResult(
+                status=CheckoutStatus.FAILED,
+                merchant_order_id=None,
+                charged_amount=None,
+                currency=os.getenv("TEAMS_BILLING_CURRENCY", "USD"),
+                retryable=False,
+                execution_mode=ExecutionMode.REAL,
+                error_code=str(exc.code),
+                credential_exposed=False,
+                credential_used=False,
+            ).model_dump(mode="json")
+
     if mode is not ExecutionMode.REAL:
         # A disclosed simulation intentionally does not consume, expose, or
         # report the one-time Prava credential.

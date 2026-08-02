@@ -22,6 +22,8 @@ dependencies = [
     "slack-bolt==1.30.0",
     "playwright==1.52.0",
     "google-auth==2.50.0",
+    "cryptography==50.0.0",
+    "httpx==0.28.1",
 ]
 
 [tool.pytest.ini_options]

@@ -734,3 +734,84 @@ def finalize_credential(credential_reference: str, transaction_status: str) -> N
         transaction_status,
     )
     _CREDENTIALS.pop(credential_reference, None)
+
+
+def charge_mandate(
+    mandate_id: str,
+    amount: Decimal | str | int | float,
+    currency: str,
+    merchant_name: str,
+    idempotency_key: str,
+    description: str | None = None,
+    *,
+    request_timeout_seconds: float = 20,
+) -> dict:
+    """Charge an active user-approved Prava mandate for recurring billing.
+
+    Executes POST /v1/mandates/{mandate_id}/charge against the configured Prava API host.
+    This operation is idempotent when idempotency_key is provided and enforces
+    the merchant and budget caps established during passkey mandate creation.
+    """
+    if not mandate_id or not str(mandate_id).strip():
+        raise ValueError("mandate_id is required")
+    if not idempotency_key or not str(idempotency_key).strip():
+        raise ValueError("idempotency_key is required")
+    if not merchant_name or not str(merchant_name).strip():
+        raise ValueError("merchant_name is required")
+
+    parsed_amount = Decimal(str(amount)).quantize(Decimal("0.01"))
+    if parsed_amount <= 0:
+        raise ValueError("amount must be positive")
+
+    normalized_currency = str(currency).upper().strip()
+    if len(normalized_currency) != 3:
+        raise ValueError("currency must be a three-letter code")
+
+    request_timeout_seconds = _validate_request_timeout(request_timeout_seconds)
+
+    if STUB_MODE:
+        return {
+            "charge_id": f"chg_stub_{uuid4().hex}",
+            "mandate_id": str(mandate_id).strip(),
+            "status": "approved",
+            "charged_amount": format(parsed_amount, "f"),
+            "currency": normalized_currency,
+            "merchant_name": str(merchant_name).strip(),
+            "idempotency_key": str(idempotency_key).strip(),
+            "approved_at": datetime.now(timezone.utc).isoformat(),
+            "execution_mode": "sandbox",
+        }
+
+    payload = {
+        "amount": format(parsed_amount, "f"),
+        "currency": normalized_currency,
+        "merchant_name": str(merchant_name).strip(),
+        "idempotency_key": str(idempotency_key).strip(),
+    }
+    if description:
+        payload["description"] = str(description).strip()
+
+    api_key, base_url = _load_prava_config()
+    clean_mandate_id = quote(str(mandate_id).strip(), safe="")
+    request = Request(
+        f"{base_url}/v1/mandates/{clean_mandate_id}/charge",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Idempotency-Key": str(idempotency_key).strip(),
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=request_timeout_seconds) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        raise _api_error(exc, "Prava mandate charge failed") from exc
+    except TimeoutError as exc:
+        raise RuntimeError("Prava mandate charge request timed out") from exc
+    except URLError as exc:
+        raise RuntimeError("Prava mandate charge could not reach the configured API") from exc
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise RuntimeError("Prava mandate charge returned an invalid response") from exc
+

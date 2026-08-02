@@ -121,6 +121,22 @@ export type MerchantAddress = {
   label: string;
 };
 
+export type ZeptoConnection = {
+  provider: "zepto";
+  status: "not_connected" | "pending" | "connected" | "error" | "revoked";
+  oauth_configured: boolean;
+  history_import: "suggestions_only";
+  last_verified_at?: string | null;
+  token_expires_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type ZeptoHistorySuggestion = {
+  merchant_sku_id: string;
+  name: string;
+  search_query: string;
+};
+
 export type MerchantCatalogProduct = {
   merchant: "zepto";
   merchant_sku_id: string;
@@ -186,7 +202,10 @@ async function read<T>(path: string): Promise<T> {
     credentials: "include",
     headers: await requestHeaders(),
   });
-  if (!response.ok) throw new ApiError(response.status, `${path} returned ${response.status}`);
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new ApiError(response.status, body.detail || `${path} returned ${response.status}`);
+  }
   return response.json() as Promise<T>;
 }
 
@@ -263,10 +282,22 @@ export const api = {
     if (!response.ok) throw new ApiError(response.status, body.detail || "Starter pantry setup failed");
     return body as { created: number; existing: number; items: TrackedItem[] };
   },
+  zeptoConnection: () => read<ZeptoConnection>("/api/v1/integrations/zepto/connection"),
+  beginZeptoConnection: async () => {
+    const response = await fetch(endpoint("/api/v1/integrations/zepto/connect"), {
+      method: "POST",
+      credentials: "include",
+      headers: await requestHeaders(),
+    });
+    const body = await response.json();
+    if (!response.ok) throw new ApiError(response.status, body.detail || "Could not start Zepto connection");
+    return body as { authorization_url: string };
+  },
   zeptoAddresses: () => read<{ addresses: MerchantAddress[] }>("/api/v1/integrations/zepto/addresses"),
   zeptoProducts: (query: string, addressRef: string) => read<{ products: MerchantCatalogProduct[] }>(
     `/api/v1/integrations/zepto/products?query=${encodeURIComponent(query)}&address_ref=${encodeURIComponent(addressRef)}`,
   ),
+  zeptoHistorySuggestions: () => read<{ suggestions: ZeptoHistorySuggestion[] }>("/api/v1/integrations/zepto/history/suggestions"),
   createHomeCatalogItem: async (input: {
     query: string;
     merchant_sku_id: string;

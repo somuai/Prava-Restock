@@ -12,9 +12,13 @@ the compact recently-restocked list with its next expected date.
 Zepto's authenticated remote MCP server provides merchant operations for the
 selected transaction: address selection, product search, SKU resolution, cart
 preview, availability and final-price checks, payment-method discovery,
-checkout, order history, and payment-status reconciliation. Prava provides the
-scoped intent, passkey, mandate, and short-lived payment credential used at the
-payment boundary. The current Prava skills repository exposes a generic
+checkout, order history, and payment-status reconciliation. Each Restock user
+connects their own Zepto account using OAuth 2.1 authorization code flow with
+PKCE. Restock encrypts that user's refresh token at rest and uses it only for
+their request; it never shares a provider connection, receives a Zepto password,
+or returns raw address data to the browser. Prava provides the scoped intent,
+passkey, mandate, and short-lived payment credential used at the payment
+boundary. The current Prava skills repository exposes a generic
 `prava-shopping` workflow; Restock's Zepto adapter talks to Zepto's remote MCP
 directly instead of assuming a Zepto-specific skill still exists in that repo.
 
@@ -28,11 +32,12 @@ send their consumer purchase histories into Restock through one public API.
 Prava is not a cross-merchant purchase-history aggregator. It authorizes and
 executes scoped payments.
 
-The live Zepto MCP connection can list order history and past-order items. In
-the response shape verified on 30 July 2026, that history does not include the
-stable SKU and purchase timestamp needed to infer depletion by itself. It can
-help a user choose or confirm an item, but it is not silently promoted into
-forecast history.
+The live Zepto MCP connection can list order history and past-order items after
+the user explicitly requests suggestions during onboarding. In the response
+shape verified on 30 July 2026, that history does not include the stable SKU and
+purchase timestamp needed to infer depletion by itself. It can help a user
+choose or confirm an item, but it is not silently promoted into forecast
+history or made into a tracked product without an explicit selection.
 
 Slack is not an ingestion source. It receives Teams renewal notifications and
 returns explicit user actions. SaaS renewal dates and invoice amounts must come

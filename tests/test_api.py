@@ -355,10 +355,11 @@ def test_live_zepto_onboarding_persists_only_provider_resolved_product(
     repository.upsert_user(demo_user())
     monkeypatch.setattr(api, "REPOSITORY", repository)
     monkeypatch.setenv("HOME_MERCHANT_MODE", "real")
+    monkeypatch.setattr(api, "_user_zepto_client", lambda **_: object())
     monkeypatch.setattr(
         api.zepto_checkout,
         "list_saved_address_summaries",
-        lambda: [
+        lambda *, client: [
             api.zepto_checkout.MerchantAddressSummary(
                 reference="address-1", label="Home"
             )
@@ -367,7 +368,7 @@ def test_live_zepto_onboarding_persists_only_provider_resolved_product(
     monkeypatch.setattr(
         api.zepto_checkout,
         "search_catalog",
-        lambda query, *, address_ref: [
+        lambda query, *, address_ref, client: [
             MerchantCatalogProduct(
                 merchant="zepto",
                 merchant_sku_id="real-coffee-variant",

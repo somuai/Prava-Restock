@@ -23,6 +23,7 @@ from storage.schema import (
     ForecastObservationRow,
     InvitationRow,
     MembershipRow,
+    MerchantConnectionRow,
     MerchantCheckoutAttemptRow,
     NotificationActionRow,
     NotificationRow,
@@ -67,6 +68,21 @@ def _row_dict(row: Any) -> dict[str, Any]:
         column.name: getattr(row, column.name)
         for column in row.__table__.columns
     }
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    """Normalize SQLite's timezone-naive timestamps before comparisons.
+
+    SQLite does not preserve timezone metadata for ``DateTime`` columns. All
+    Restock timestamps are written as UTC, so a value returned without tzinfo
+    is safely interpreted as UTC rather than compared to an aware datetime.
+    """
+
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 class RestockRepository:
@@ -123,6 +139,235 @@ class RestockRepository:
                 )
             )
             return _row_dict(row) if row else None
+
+    @staticmethod
+    def _merchant_connection_summary(row: MerchantConnectionRow) -> dict[str, Any]:
+        """Return merchant connection state without state, verifier, or tokens."""
+
+        return {
+            "provider": row.provider,
+            "status": row.status,
+            "last_verified_at": _as_utc(row.last_verified_at),
+            "token_expires_at": _as_utc(row.token_expires_at),
+            "updated_at": _as_utc(row.updated_at),
+        }
+
+    def get_merchant_connection(
+        self, *, user_id: str, provider: str
+    ) -> dict[str, Any] | None:
+        """Internal-only provider connection lookup; callers must not serialize it."""
+
+        with self.database.session() as session:
+            row = session.scalar(
+                select(MerchantConnectionRow).where(
+                    MerchantConnectionRow.user_id == user_id,
+                    MerchantConnectionRow.provider == provider,
+                )
+            )
+            return _row_dict(row) if row else None
+
+    def merchant_connection_summary(
+        self, *, user_id: str, provider: str
+    ) -> dict[str, Any]:
+        with self.database.session() as session:
+            row = session.scalar(
+                select(MerchantConnectionRow).where(
+                    MerchantConnectionRow.user_id == user_id,
+                    MerchantConnectionRow.provider == provider,
+                )
+            )
+            if row is None:
+                return {
+                    "provider": provider,
+                    "status": "not_connected",
+                    "last_verified_at": None,
+                    "token_expires_at": None,
+                    "updated_at": None,
+                }
+            return self._merchant_connection_summary(row)
+
+    def begin_merchant_connection(
+        self,
+        *,
+        user_id: str,
+        provider: str,
+        state_hash: str,
+        encrypted_code_verifier: str,
+        expires_at: datetime,
+    ) -> None:
+        if not user_id or not provider or len(state_hash) != 64:
+            raise ValueError("invalid merchant connection request")
+        now = datetime.now(timezone.utc)
+        with self.database.session() as session:
+            if session.get(UserRow, user_id) is None:
+                raise KeyError(f"unknown user_id: {user_id}")
+            row = session.scalar(
+                select(MerchantConnectionRow)
+                .where(
+                    MerchantConnectionRow.user_id == user_id,
+                    MerchantConnectionRow.provider == provider,
+                )
+                .with_for_update()
+            )
+            if row is None:
+                row = MerchantConnectionRow(
+                    user_id=user_id,
+                    provider=provider,
+                    status="pending",
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(row)
+            row.status = "pending"
+            row.encrypted_tokens = None
+            row.authorization_state_hash = state_hash
+            row.encrypted_code_verifier = encrypted_code_verifier
+            row.authorization_expires_at = expires_at
+            row.token_expires_at = None
+            row.last_error = None
+            row.updated_at = now
+
+    def get_pending_merchant_connection_by_state(
+        self, *, state_hash: str, provider: str
+    ) -> dict[str, Any] | None:
+        with self.database.session() as session:
+            row = session.scalar(
+                select(MerchantConnectionRow).where(
+                    MerchantConnectionRow.provider == provider,
+                    MerchantConnectionRow.authorization_state_hash == state_hash,
+                    MerchantConnectionRow.status == "pending",
+                )
+            )
+            if row is None or row.authorization_expires_at is None:
+                return None
+            if _as_utc(row.authorization_expires_at) <= datetime.now(timezone.utc):
+                return None
+            return _row_dict(row)
+
+    def complete_merchant_connection(
+        self,
+        *,
+        state_hash: str,
+        provider: str,
+        encrypted_tokens: str,
+        token_expires_at: datetime,
+    ) -> str | None:
+        """Atomically consume an OAuth state and return its connected user."""
+
+        now = datetime.now(timezone.utc)
+        with self.database.session() as session:
+            row = session.scalar(
+                select(MerchantConnectionRow)
+                .where(
+                    MerchantConnectionRow.provider == provider,
+                    MerchantConnectionRow.authorization_state_hash == state_hash,
+                    MerchantConnectionRow.status == "pending",
+                )
+                .with_for_update()
+            )
+            if (
+                row is None
+                or row.authorization_expires_at is None
+                or _as_utc(row.authorization_expires_at) <= now
+            ):
+                return None
+            row.status = "connected"
+            row.encrypted_tokens = encrypted_tokens
+            row.authorization_state_hash = None
+            row.encrypted_code_verifier = None
+            row.authorization_expires_at = None
+            row.token_expires_at = token_expires_at
+            row.last_verified_at = now
+            row.last_error = None
+            row.updated_at = now
+            return row.user_id
+
+    def fail_merchant_connection(
+        self, *, state_hash: str, provider: str, error_code: str
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        with self.database.session() as session:
+            row = session.scalar(
+                select(MerchantConnectionRow)
+                .where(
+                    MerchantConnectionRow.provider == provider,
+                    MerchantConnectionRow.authorization_state_hash == state_hash,
+                    MerchantConnectionRow.status == "pending",
+                )
+                .with_for_update()
+            )
+            if row is None:
+                return
+            row.status = "error"
+            row.authorization_state_hash = None
+            row.encrypted_code_verifier = None
+            row.authorization_expires_at = None
+            row.last_error = error_code[:100]
+            row.updated_at = now
+
+    def refresh_merchant_connection_tokens(
+        self,
+        *,
+        user_id: str,
+        provider: str,
+        encrypted_tokens: str,
+        token_expires_at: datetime,
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        with self.database.session() as session:
+            row = session.scalar(
+                select(MerchantConnectionRow)
+                .where(
+                    MerchantConnectionRow.user_id == user_id,
+                    MerchantConnectionRow.provider == provider,
+                    MerchantConnectionRow.status == "connected",
+                )
+                .with_for_update()
+            )
+            if row is None:
+                raise KeyError("connected merchant account not found")
+            row.encrypted_tokens = encrypted_tokens
+            row.token_expires_at = token_expires_at
+            row.last_verified_at = now
+            row.last_error = None
+            row.updated_at = now
+
+    def mark_merchant_connection_verified(
+        self, *, user_id: str, provider: str
+    ) -> None:
+        with self.database.session() as session:
+            row = session.scalar(
+                select(MerchantConnectionRow).where(
+                    MerchantConnectionRow.user_id == user_id,
+                    MerchantConnectionRow.provider == provider,
+                    MerchantConnectionRow.status == "connected",
+                )
+            )
+            if row is None:
+                return
+            row.last_verified_at = datetime.now(timezone.utc)
+            row.last_error = None
+            row.updated_at = datetime.now(timezone.utc)
+
+    def revoke_merchant_connection(self, *, user_id: str, provider: str) -> bool:
+        with self.database.session() as session:
+            row = session.scalar(
+                select(MerchantConnectionRow).where(
+                    MerchantConnectionRow.user_id == user_id,
+                    MerchantConnectionRow.provider == provider,
+                )
+            )
+            if row is None:
+                return False
+            row.status = "revoked"
+            row.encrypted_tokens = None
+            row.authorization_state_hash = None
+            row.encrypted_code_verifier = None
+            row.authorization_expires_at = None
+            row.token_expires_at = None
+            row.last_error = None
+            row.updated_at = datetime.now(timezone.utc)
+            return True
 
     def list_auth_providers(self, user_id: str) -> list[str]:
         """Return the external sign-in methods explicitly linked to a user."""

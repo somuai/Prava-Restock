@@ -56,6 +56,8 @@ import {
   type Capabilities,
   type MerchantAddress,
   type MerchantCatalogProduct,
+  type ZeptoConnection,
+  type ZeptoHistorySuggestion,
   type Notification,
   type SandboxApprovalRequest,
   type SandboxApprovalHandoff,
@@ -2824,18 +2826,25 @@ function StarterPantryOnboarding({
   onSkip: () => void;
 }) {
   const [addresses, setAddresses] = useState<MerchantAddress[]>([]);
+  const [connection, setConnection] = useState<ZeptoConnection | null>(null);
   const [addressRef, setAddressRef] = useState("");
   const [query, setQuery] = useState("coffee");
   const [products, setProducts] = useState<MerchantCatalogProduct[]>([]);
   const [selected, setSelected] = useState<MerchantCatalogProduct | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [historySuggestions, setHistorySuggestions] = useState<ZeptoHistorySuggestion[]>([]);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
 
   useEffect(() => {
     let active = true;
     setBusy(true);
-    void api.zeptoAddresses()
-      .then(({ addresses: next }) => {
+    void api.zeptoConnection()
+      .then(async (nextConnection) => {
+        if (!active) return;
+        setConnection(nextConnection);
+        if (nextConnection.status !== "connected") return;
+        const { addresses: next } = await api.zeptoAddresses();
         if (!active) return;
         setAddresses(next);
         setAddressRef(next[0]?.reference || "");
@@ -2846,6 +2855,18 @@ function StarterPantryOnboarding({
       .finally(() => { if (active) setBusy(false); });
     return () => { active = false; };
   }, []);
+
+  const connectZepto = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const { authorization_url } = await api.beginZeptoConnection();
+      window.location.assign(authorization_url);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not start Zepto connection.");
+      setBusy(false);
+    }
+  };
 
   const runSearch = async () => {
     if (!addressRef || query.trim().length < 2) return;
@@ -2862,6 +2883,50 @@ function StarterPantryOnboarding({
       setBusy(false);
     }
   };
+
+  const loadHistorySuggestions = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api.zeptoHistorySuggestions();
+      setHistorySuggestions(result.suggestions);
+      setHistoryLoaded(true);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not read Zepto history.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!connection || connection.status !== "connected") {
+    const unavailable = Boolean(connection && !connection.oauth_configured);
+    return (
+      <main className="starter-onboarding">
+        <section className="starter-onboarding__paper" aria-labelledby="starter-title">
+          <Brand />
+          <div className="starter-onboarding__copy">
+            <p className="eyebrow">Welcome, {displayName.split(" ")[0]}</p>
+            <h1 id="starter-title">Connect Zepto before your pantry starts watching.</h1>
+            <p>
+              Zepto handles its own sign-in and phone verification. Restock receives a revocable connection for this pantry only—never your Zepto password or street address.
+            </p>
+          </div>
+          <div className="starter-connection-note">
+            <strong>{unavailable ? "Zepto connection is being configured" : "One private Zepto connection"}</strong>
+            <span>Past orders can suggest products, but nothing is tracked until you choose an exact current listing.</span>
+          </div>
+          {error && <p className="login-error" role="alert">{error}</p>}
+          <footer className="starter-onboarding__actions">
+            <button type="button" className="starter-skip" onClick={onSkip} disabled={busy}>Start empty</button>
+            <button type="button" className="starter-submit" disabled={busy || unavailable} onClick={() => void connectZepto()}>
+              {busy ? "Opening Zepto…" : "Connect Zepto"}
+              <ArrowRight size={17} />
+            </button>
+          </footer>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main className="starter-onboarding">
@@ -2889,6 +2954,27 @@ function StarterPantryOnboarding({
               {busy ? "Checking Zepto…" : "Search live catalog"}
             </button>
           </form>
+        </div>
+
+        <div className="starter-history">
+          <button type="button" className="starter-history__button" onClick={() => void loadHistorySuggestions()} disabled={busy}>
+            {busy ? "Checking Zepto…" : historyLoaded ? "Refresh past-order suggestions" : "Suggest from past Zepto orders"}
+          </button>
+          {historyLoaded && !historySuggestions.length && <small>No reusable product suggestions came back. Search for a product instead.</small>}
+          {!!historySuggestions.length && (
+            <div className="starter-history__list" aria-label="Past Zepto order suggestions">
+              {historySuggestions.map((suggestion) => (
+                <button
+                  key={suggestion.merchant_sku_id}
+                  type="button"
+                  onClick={() => { setQuery(suggestion.search_query); setProducts([]); setSelected(null); }}
+                >
+                  {suggestion.name}
+                </button>
+              ))}
+            </div>
+          )}
+          <small>Suggestions never add products automatically. Restock will search Zepto again for a current price and stock check.</small>
         </div>
 
         <fieldset className="starter-grid" hidden={!products.length}>

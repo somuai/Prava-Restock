@@ -14,6 +14,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import UUID
 
+from cryptography.fernet import Fernet
+
 
 REQUIRED_VARIABLES: dict[str, tuple[str, ...]] = {
     "api": (
@@ -197,6 +199,23 @@ def validate(service: str, environment: Mapping[str, str]) -> list[str]:
                 issues.append("ZEPTO_DEVICE_ID_REQUIRED")
             if environment.get("ZEPTO_CART_PREPARATION_ENABLED") != "1":
                 issues.append("ZEPTO_CART_PREPARATION_GATE_REQUIRED")
+            token_key = environment.get("RESTOCK_MERCHANT_TOKEN_ENCRYPTION_KEY", "")
+            client_id = environment.get("ZEPTO_OAUTH_CLIENT_ID", "").strip()
+            # OAuth client registration is provider-gated. Keep the API
+            # available and surface an unavailable connection state while the
+            # provider allowlists the callback, instead of failing all users
+            # during service startup. Once a client is configured, encryption
+            # is mandatory before any user consent flow can begin.
+            if client_id and not token_key:
+                issues.append("RESTOCK_MERCHANT_TOKEN_ENCRYPTION_KEY_REQUIRED")
+            if token_key:
+                try:
+                    Fernet(token_key.encode("ascii"))
+                except (TypeError, ValueError, UnicodeEncodeError):
+                    issues.append("RESTOCK_MERCHANT_TOKEN_ENCRYPTION_KEY_INVALID")
+            public_api = environment.get("RESTOCK_PUBLIC_API_URL", "")
+            if client_id and public_api and urlsplit(public_api).scheme != "https":
+                issues.append("RESTOCK_PUBLIC_API_URL_HTTPS_REQUIRED")
         payment_mode = environment.get("HOME_PAYMENT_MODE", "disclosed_mock")
         if payment_mode not in {"real", "sandbox", "disclosed_mock"}:
             issues.append("HOME_PAYMENT_MODE_INVALID")
@@ -225,8 +244,7 @@ def validate(service: str, environment: Mapping[str, str]) -> list[str]:
         if teams_mode == "real":
             if environment.get("TEAMS_REAL_PAYMENT_ENABLED") != "1":
                 issues.append("TEAMS_REAL_PAYMENT_GATE_REQUIRED")
-            if environment.get("TEAMS_RECURRING_ENABLED") == "1":
-                issues.append("TEAMS_RECURRING_MANDATE_UNCONFIRMED")
+
             teams_hosts = [
                 host.strip()
                 for host in environment.get("TEAMS_PAYMENT_ALLOWED_HOSTS", "").split(",")

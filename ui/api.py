@@ -27,7 +27,7 @@ from fastapi import (
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.exc import SQLAlchemyError
@@ -35,6 +35,12 @@ from sqlalchemy.exc import SQLAlchemyError
 from common import audit_store, notification_store
 from common import password_auth
 from common import session_auth
+from common.secret_encryption import (
+    SecretDecryptionError,
+    SecretEncryptionConfigurationError,
+    decrypt_secret,
+    encrypt_secret,
+)
 from common.starter_items import (
     STARTER_TEMPLATE_SUMMARIES,
     StarterTemplateId,
@@ -54,8 +60,18 @@ from merchant.zepto_mcp import (
     ZeptoMCPClient,
     ZeptoMCPError,
     ZeptoRateLimitError,
+    ZeptoTransientError,
     mcp_authorization_verified_recently,
     mcp_remote_runtime_ready,
+)
+from merchant.zepto_oauth import (
+    ZeptoOAuthConfigurationError,
+    ZeptoOAuthError,
+    ZeptoOAuthToken,
+    begin_authorization as begin_zepto_authorization,
+    exchange_authorization_code,
+    oauth_is_configured as zepto_oauth_is_configured,
+    refresh_access_token,
 )
 from storage import Database, RestockRepository
 from workflow import WorkflowService
@@ -349,6 +365,7 @@ def runtime_modes() -> dict[str, str | bool]:
         )
     )
     oauth_status = _zepto_oauth_status()
+    user_oauth_configured = zepto_oauth_is_configured()
     mcp_runtime_ready = mcp_remote_runtime_ready()
     teams_runtime_ready, teams_runtime_status = _teams_runtime_status()
     production = os.getenv("RESTOCK_ENV", "development") == "production"
@@ -358,12 +375,7 @@ def runtime_modes() -> dict[str, str | bool]:
         and bool(os.getenv("ZEPTO_DEVICE_ID", "").strip())
     )
     home_catalog_real = zepto_checkout.merchant_mode().value == "real"
-    home_catalog_operational = (
-        home_catalog_real
-        and mcp_runtime_ready
-        and cart_ready
-        and oauth_status == "verified_recently"
-    )
+    home_catalog_operational = home_catalog_real and user_oauth_configured
     return {
         "auth_mode": _auth_mode(),
         "google_auth_configured": bool(os.getenv("GOOGLE_CLIENT_ID", "").strip()),
@@ -385,6 +397,11 @@ def runtime_modes() -> dict[str, str | bool]:
         "prava_mode": prava_mode,
         "home_merchant_mode": zepto_checkout.merchant_mode().value,
         "home_catalog_operational": home_catalog_operational,
+        # Live catalog access is user-owned: OAuth is configured globally, but
+        # each signed-in person must complete Zepto's consent flow before
+        # addresses, history suggestions, or catalog results are available.
+        "zepto_user_oauth_mode": "per_user_pkce",
+        "zepto_user_oauth_configured": user_oauth_configured,
         "home_onboarding_mode": (
             "live_zepto"
             if home_catalog_real
@@ -1171,6 +1188,56 @@ def _require_real_zepto_catalog() -> None:
         )
 
 
+def _zepto_state_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _zepto_callback_redirect(outcome: str) -> RedirectResponse:
+    """Return only to the configured public app, never a caller-supplied URL."""
+
+    base = os.getenv("RESTOCK_PUBLIC_APP_URL", "").strip().rstrip("/")
+    if not base:
+        base = "/app"
+    separator = "&" if "?" in base else "?"
+    return RedirectResponse(f"{base}{separator}zepto={outcome}", status_code=303)
+
+
+def _user_zepto_client(
+    *, user_id: str, repository: RestockRepository
+) -> ZeptoMCPClient:
+    """Resolve one user's encrypted OAuth connection into a short-lived client."""
+
+    if not zepto_oauth_is_configured():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Zepto connection is not configured yet",
+        )
+    connection = repository.get_merchant_connection(user_id=user_id, provider="zepto")
+    if connection is None or connection["status"] != "connected":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="connect your Zepto account before using the live catalog",
+        )
+    try:
+        token = ZeptoOAuthToken.from_encrypted_payload(
+            decrypt_secret(str(connection["encrypted_tokens"] or ""))
+        )
+        if token.is_expiring():
+            token = refresh_access_token(token)
+            repository.refresh_merchant_connection_tokens(
+                user_id=user_id,
+                provider="zepto",
+                encrypted_tokens=encrypt_secret(token.to_encrypted_payload()),
+                token_expires_at=token.expires_at,
+            )
+    except (SecretDecryptionError, ZeptoOAuthError, SecretEncryptionConfigurationError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="your Zepto connection needs to be reconnected",
+        ) from exc
+    return ZeptoMCPClient(access_token=token.access_token)
+
+
 def _raise_zepto_http(exc: Exception) -> None:
     if isinstance(exc, ZeptoRateLimitError):
         raise HTTPException(
@@ -1178,21 +1245,125 @@ def _raise_zepto_http(exc: Exception) -> None:
             detail="Zepto is rate-limiting catalog requests; try again shortly",
             headers={"Retry-After": str(max(1, int(exc.retry_after_seconds or 30)))},
         ) from exc
+    if isinstance(exc, ZeptoTransientError):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Zepto is temporarily unavailable; try again shortly",
+            headers={"Retry-After": str(max(1, int(exc.retry_after_seconds or 10)))},
+        ) from exc
     raise HTTPException(
         status_code=503,
         detail="Zepto connection is unavailable; reconnect the provider and retry",
     ) from exc
 
 
+@app.get("/api/v1/integrations/zepto/connection")
+def zepto_connection_status(
+    user_id: str = Depends(require_user),
+    repository: RestockRepository = Depends(get_repository),
+) -> dict[str, Any]:
+    """Return only the signed-in user's non-sensitive Zepto connection state."""
+
+    return {
+        **repository.merchant_connection_summary(user_id=user_id, provider="zepto"),
+        "oauth_configured": zepto_oauth_is_configured(),
+        "history_import": "suggestions_only",
+    }
+
+
+@app.post("/api/v1/integrations/zepto/connect")
+def zepto_begin_connection(
+    user_id: str = Depends(require_user),
+    repository: RestockRepository = Depends(get_repository),
+) -> dict[str, str]:
+    """Start one user's PKCE OAuth consent flow; no tokens reach the browser."""
+
+    _require_real_zepto_catalog()
+    try:
+        state, verifier, authorization_url, expires_at = begin_zepto_authorization()
+        repository.begin_merchant_connection(
+            user_id=user_id,
+            provider="zepto",
+            state_hash=_zepto_state_hash(state),
+            encrypted_code_verifier=encrypt_secret(verifier),
+            expires_at=expires_at,
+        )
+    except (ZeptoOAuthConfigurationError, SecretEncryptionConfigurationError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Zepto connection is not configured yet",
+        ) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid user") from exc
+    return {"authorization_url": authorization_url}
+
+
+@app.get("/api/v1/integrations/zepto/callback", include_in_schema=False)
+def zepto_connection_callback(
+    state: str = Query(min_length=16, max_length=512),
+    code: str | None = Query(default=None, min_length=1, max_length=4096),
+    error: str | None = Query(default=None, max_length=128),
+    repository: RestockRepository = Depends(get_repository),
+) -> RedirectResponse:
+    """Finish a PKCE flow without exposing the user session or token material."""
+
+    state_hash = _zepto_state_hash(state)
+    pending = repository.get_pending_merchant_connection_by_state(
+        state_hash=state_hash, provider="zepto"
+    )
+    if pending is None:
+        return _zepto_callback_redirect("expired")
+    if error or not code:
+        repository.fail_merchant_connection(
+            state_hash=state_hash,
+            provider="zepto",
+            error_code="authorization_denied" if error else "authorization_incomplete",
+        )
+        return _zepto_callback_redirect("cancelled")
+    try:
+        verifier = decrypt_secret(str(pending["encrypted_code_verifier"] or ""))
+        token = exchange_authorization_code(code=code, verifier=verifier)
+        user_id = repository.complete_merchant_connection(
+            state_hash=state_hash,
+            provider="zepto",
+            encrypted_tokens=encrypt_secret(token.to_encrypted_payload()),
+            token_expires_at=token.expires_at,
+        )
+    except (ZeptoOAuthError, SecretDecryptionError, SecretEncryptionConfigurationError):
+        repository.fail_merchant_connection(
+            state_hash=state_hash,
+            provider="zepto",
+            error_code="token_exchange_failed",
+        )
+        return _zepto_callback_redirect("failed")
+    if user_id is None:
+        return _zepto_callback_redirect("expired")
+    return _zepto_callback_redirect("connected")
+
+
+@app.delete("/api/v1/integrations/zepto/connection")
+def zepto_disconnect(
+    user_id: str = Depends(require_user),
+    repository: RestockRepository = Depends(get_repository),
+) -> dict[str, bool]:
+    """Revoke Restock's local access record; Zepto account data stays at Zepto."""
+
+    return {"disconnected": repository.revoke_merchant_connection(user_id=user_id, provider="zepto")}
+
+
 @app.get("/api/v1/integrations/zepto/addresses")
 def zepto_saved_addresses(
-    _: str = Depends(require_user),
+    user_id: str = Depends(require_user),
+    repository: RestockRepository = Depends(get_repository),
 ) -> dict[str, Any]:
     """Return labels and opaque IDs only; street addresses stay at Zepto."""
 
     _require_real_zepto_catalog()
     try:
-        addresses = zepto_checkout.list_saved_address_summaries()
+        addresses = zepto_checkout.list_saved_address_summaries(
+            client=_user_zepto_client(user_id=user_id, repository=repository)
+        )
+        repository.mark_merchant_connection_verified(user_id=user_id, provider="zepto")
     except (ZeptoMCPError, RuntimeError, OSError) as exc:
         _raise_zepto_http(exc)
     return {"addresses": [address.model_dump(mode="json") for address in addresses]}
@@ -1202,16 +1373,72 @@ def zepto_saved_addresses(
 def zepto_products(
     query: str = Query(min_length=2, max_length=120),
     address_ref: str = Query(min_length=1, max_length=255),
-    _: str = Depends(require_user),
+    user_id: str = Depends(require_user),
+    repository: RestockRepository = Depends(get_repository),
 ) -> dict[str, Any]:
     """Search the current Zepto catalog for one authenticated saved address."""
 
     _require_real_zepto_catalog()
     try:
-        products = zepto_checkout.search_catalog(query, address_ref=address_ref)
+        products = zepto_checkout.search_catalog(
+            query,
+            address_ref=address_ref,
+            client=_user_zepto_client(user_id=user_id, repository=repository),
+        )
+        repository.mark_merchant_connection_verified(user_id=user_id, provider="zepto")
     except (ZeptoMCPError, RuntimeError, OSError) as exc:
         _raise_zepto_http(exc)
     return {"products": [product.model_dump(mode="json") for product in products]}
+
+
+def _history_suggestions(payload: dict[str, Any]) -> list[dict[str, str]]:
+    """Reduce provider history to opt-in product suggestions without order PII."""
+
+    values: Any = payload.get("items") or payload.get("pastOrderItems") or payload.get("products")
+    if values is None and isinstance(payload.get("data"), dict):
+        nested = payload["data"]
+        values = nested.get("items") or nested.get("pastOrderItems") or nested.get("products")
+    if not isinstance(values, list):
+        return []
+    suggestions: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for value in values:
+        if not isinstance(value, dict):
+            continue
+        name = value.get("name") or value.get("productName") or value.get("title")
+        sku = value.get("productVariantId") or value.get("variantId") or value.get("id")
+        if not isinstance(name, str) or not name.strip() or not sku:
+            continue
+        key = str(sku)
+        if key in seen:
+            continue
+        seen.add(key)
+        suggestions.append(
+            {
+                "merchant_sku_id": key[:255],
+                "name": name.strip()[:200],
+                "search_query": name.strip()[:120],
+            }
+        )
+        if len(suggestions) >= 20:
+            break
+    return suggestions
+
+
+@app.get("/api/v1/integrations/zepto/history/suggestions")
+def zepto_history_suggestions(
+    user_id: str = Depends(require_user),
+    repository: RestockRepository = Depends(get_repository),
+) -> dict[str, Any]:
+    """Return consented suggestions only; history never silently creates items."""
+
+    _require_real_zepto_catalog()
+    try:
+        payload = _user_zepto_client(user_id=user_id, repository=repository).get_past_order_items()
+        repository.mark_merchant_connection_verified(user_id=user_id, provider="zepto")
+    except (ZeptoMCPError, RuntimeError, OSError) as exc:
+        _raise_zepto_http(exc)
+    return {"suggestions": _history_suggestions(payload)}
 
 
 @app.post("/api/v1/items/home", status_code=201)
@@ -1229,7 +1456,9 @@ def create_home_catalog_item(
         products = zepto_checkout.search_catalog(
             body.query,
             address_ref=body.merchant_address_ref,
+            client=_user_zepto_client(user_id=user_id, repository=repository),
         )
+        repository.mark_merchant_connection_verified(user_id=user_id, provider="zepto")
     except (ZeptoMCPError, RuntimeError, OSError) as exc:
         _raise_zepto_http(exc)
     selected = next(

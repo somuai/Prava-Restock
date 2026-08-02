@@ -54,6 +54,53 @@ class AuthIdentityRow(Base):
     )
 
 
+class MerchantConnectionRow(Base):
+    """One user-owned OAuth connection to a merchant provider.
+
+    Provider access and refresh tokens are stored only as ciphertext.  OAuth
+    state and PKCE verifier data are short-lived and are cleared as soon as a
+    connection is completed, failed, or expires.
+    """
+
+    __tablename__ = "merchant_connections"
+    __table_args__ = (
+        UniqueConstraint("user_id", "provider", name="uq_user_merchant_connection"),
+        UniqueConstraint("authorization_state_hash", name="uq_merchant_connection_state"),
+        CheckConstraint(
+            "status IN ('not_connected', 'pending', 'connected', 'error', 'revoked')",
+            name="ck_merchant_connection_status",
+        ),
+    )
+
+    connection_id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid4())
+    )
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.user_id"), nullable=False, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(30), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="not_connected", nullable=False)
+    encrypted_tokens: Mapped[str | None] = mapped_column(Text, nullable=True)
+    authorization_state_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    encrypted_code_verifier: Mapped[str | None] = mapped_column(Text, nullable=True)
+    authorization_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    token_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_error: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+
+
 class WaitlistLeadRow(Base):
     """Public pilot interest, intentionally separate from users and auth."""
 

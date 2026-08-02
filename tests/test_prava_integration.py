@@ -119,3 +119,40 @@ def test_webhook_sandbox_limitation_is_explicit() -> None:
         "The current Prava OpenAPI/docs expose polling but no webhook registration, "
         "event schema, signature contract, or sandbox trigger"
     )
+
+
+def test_charge_mandate_stub_mode(monkeypatch) -> None:
+    monkeypatch.setattr(prava_client, "STUB_MODE", True)
+    res = prava_client.charge_mandate(
+        mandate_id="mandate_test_123",
+        amount=29.50,
+        currency="usd",
+        merchant_name="TeamTool Pro",
+        idempotency_key="idem_test_456",
+        description="Monthly renewal",
+    )
+    assert res["status"] == "approved"
+    assert res["mandate_id"] == "mandate_test_123"
+    assert res["charged_amount"] == "29.50"
+    assert res["currency"] == "USD"
+    assert res["merchant_name"] == "TeamTool Pro"
+    assert res["idempotency_key"] == "idem_test_456"
+    assert res["execution_mode"] == "sandbox"
+
+
+def test_charge_mandate_validates_inputs() -> None:
+    with pytest.raises(ValueError, match="mandate_id is required"):
+        prava_client.charge_mandate("", 10, "USD", "Vendor", "idem")
+
+    with pytest.raises(ValueError, match="idempotency_key is required"):
+        prava_client.charge_mandate("mandate_1", 10, "USD", "Vendor", "")
+
+    with pytest.raises(ValueError, match="merchant_name is required"):
+        prava_client.charge_mandate("mandate_1", 10, "USD", "", "idem")
+
+    with pytest.raises(ValueError, match="amount must be positive"):
+        prava_client.charge_mandate("mandate_1", -5, "USD", "Vendor", "idem")
+
+    with pytest.raises(ValueError, match="currency must be a three-letter code"):
+        prava_client.charge_mandate("mandate_1", 10, "INVALID", "Vendor", "idem")
+

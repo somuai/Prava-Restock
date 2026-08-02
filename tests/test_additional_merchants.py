@@ -60,8 +60,20 @@ def test_one_time_invoice_is_https_idempotent_and_disclosed(monkeypatch) -> None
             currency="USD",
         )
     monkeypatch.setenv("TEAMS_RECURRING_ENABLED", "1")
-    with pytest.raises(RuntimeError, match="pending Prava confirmation"):
-        saas_invoice_checkout.complete_checkout("credential", "invoice-124", "29", "invoice-idem-2")
+    recurring_res = saas_invoice_checkout.complete_checkout("mandate-124", "invoice-124", "29", "invoice-idem-2")
+    assert recurring_res["status"] == "completed"
+    assert recurring_res["execution_mode"] == "disclosed_mock"
+    assert "recurring billing" in recurring_res.get("disclosure_reason", "").lower()
+
+    # Test real recurring mandate charging
+    monkeypatch.setenv("TEAMS_BILLING_MODE", "real")
+    monkeypatch.setenv("TEAMS_REAL_PAYMENT_ENABLED", "1")
+    monkeypatch.setattr(prava_client, "STUB_MODE", True)
+    real_recurring = saas_invoice_checkout.complete_checkout("mandate-125", "invoice-125", "29.99", "invoice-idem-3")
+    assert real_recurring["status"] == "completed"
+    assert real_recurring["execution_mode"] == "real"
+    assert str(real_recurring["charged_amount"]) == "29.99"
+
 
 
 class _HostedExecutor:

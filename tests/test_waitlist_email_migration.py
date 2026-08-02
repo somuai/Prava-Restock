@@ -52,7 +52,7 @@ def test_waitlist_welcome_outbox_migration_backfills_and_downgrades(
         assert row.created_at is not None
         assert connection.execute(
             text("SELECT version_num FROM alembic_version")
-        ).scalar_one() == "20260801_11"
+        ).scalar_one() == "20260802_12"
 
     command.downgrade(config, "20260801_10")
 

@@ -97,7 +97,7 @@ are held in platform secret storage, not committed or baked into the image.
   Real-money execution remains disabled and every unavailable boundary remains
   mode-tagged. `/capabilities` is authoritative for the running environment.
 
-Runtime modes are returned by `/capabilities`. `HOME_MERCHANT_MODE` controls catalog/cart quoting independently from `HOME_PAYMENT_MODE`, which controls the final charge. Production Home onboarding accepts only products returned by the authenticated Zepto catalog and fails closed on OAuth, provider, stock, or rate-limit failures. Local fixtures remain available only to tests and the explicit offline dry run. A real charge additionally requires `ZEPTO_REAL_PAYMENT_ENABLED=1`, production Prava configuration, and an allowlisted payment-browser executor; it is never enabled in CI.
+Runtime modes are returned by `/capabilities`. `HOME_MERCHANT_MODE` controls catalog/cart quoting independently from `HOME_PAYMENT_MODE`, which controls the final charge. A signed-in user connects Zepto through a user-owned OAuth 2.1 + PKCE consent flow; Restock stores the resulting token encrypted and never receives the user's Zepto password or full address. Past orders are opt-in suggestions only: they never create tracked products automatically, and each suggestion is re-searched for a current SKU, stock state, and price. Production Home onboarding accepts only products returned by that user's authenticated Zepto catalog and fails closed on OAuth, provider, stock, rate-limit, or temporary-provider failures. Local fixtures remain available only to tests and the explicit offline dry run. A real charge additionally requires `ZEPTO_REAL_PAYMENT_ENABLED=1`, production Prava configuration, and an allowlisted payment-browser executor; it is never enabled in CI.
 
 Teams targets hosted invoice links because they expose a payable, tokenized
 surface without asking Restock to store or automate a vendor-account password.
@@ -153,17 +153,20 @@ The production container carries Node.js 24 and an image-local
 `mcp-remote@0.1.38` bridge installed from a committed integrity lockfile. Runtime
 does not include npm/npx or download executable packages; CI checks the bridge with container
 networking disabled, without starting OAuth or contacting Zepto. A Railway
-deployment still needs an operator-completed
-Zepto OAuth/mobile-OTP session and persistent storage for
-`/home/restock/.mcp-auth`; the repository does not create or embed that external
-authorization.
+deployment uses per-user Zepto OAuth 2.1 + PKCE rather than a shared
+`mcp-remote` browser cache for catalog onboarding. It requires a registered
+Zepto OAuth client, `RESTOCK_MERCHANT_TOKEN_ENCRYPTION_KEY` in Railway secret
+management, and user-completed Zepto consent/phone verification. No shared
+Zepto account or address can be exposed to another Restock user.
+The activation command and current provider allowlisting gate are recorded in
+[Zepto OAuth activation](docs/zepto_oauth_activation.md).
 
 For local live-MCP development, run `npm ci` in `merchant/mcp-runtime`; Restock
 then resolves that locked repository-local binary. `MCP_REMOTE_BINARY` may point
 to another absolute executable in development only. Production rejects overrides
 and always uses `/opt/zepto-mcp/node_modules/.bin/mcp-remote`. The capabilities
-API reports Zepto OAuth only as `unknown` or `configured_unverified`; cache
-presence is not proof that provider authorization remains valid. Real-money
+API separately reports the legacy bridge cache state and whether per-user OAuth
+is configured; neither claims a user connection has been verified. Real-money
 readiness requires a successful MCP initialize/tool call in the current process
 within the short verification TTL (300 seconds by default); a later bridge,
 authorization, or provider-call failure clears that proof.

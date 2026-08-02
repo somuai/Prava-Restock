@@ -4077,6 +4077,74 @@ button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visibl
   line-height: 1.5;
 }
 
+.starter-connection-note {
+  display: grid;
+  gap: 7px;
+  max-width: 580px;
+  padding: 19px 20px;
+  color: #386250;
+  background: rgba(232, 239, 233, .72);
+  border-left: 3px solid #17624d;
+}
+
+.starter-connection-note strong {
+  color: #173d31;
+  font-size: 16px;
+}
+
+.starter-connection-note span,
+.starter-history small {
+  color: #62645c;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.starter-history {
+  display: grid;
+  gap: 10px;
+  margin: 18px 0 0;
+  padding: 16px 0;
+  border-top: 1px solid rgba(49, 56, 45, .14);
+  border-bottom: 1px solid rgba(49, 56, 45, .14);
+}
+
+.starter-history__button {
+  justify-self: start;
+  padding: 0;
+  color: #17624d;
+  background: transparent;
+  border: 0;
+  font: 700 13px/1.2 "Geist", sans-serif;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.starter-history__button:disabled { cursor: wait; opacity: .55; }
+
+.starter-history__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.starter-history__list button {
+  min-height: 34px;
+  padding: 6px 11px;
+  color: #25352e;
+  background: #f1eee5;
+  border: 1px solid rgba(49, 56, 45, .18);
+  border-radius: 999px;
+  font: 600 12px/1.15 "Geist", sans-serif;
+  cursor: pointer;
+}
+
+.starter-history__list button:hover,
+.starter-history__list button:focus-visible {
+  background: #e8efe9;
+  border-color: rgba(24, 98, 77, .55);
+}
+
 .starter-onboarding__actions {
   display: flex;
   justify-content: space-between;
