@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import secrets
 import time
+import traceback
 from typing import Any, Literal
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
@@ -1884,11 +1885,11 @@ def reviewer_sandbox_approval(
         run = service.begin(user, item, quote=quote)
         run = service.act(run["run_id"], user_id=user_id, action=body.action)
         approval_url_value = service.approval_url(run["run_id"])
-    except (OSError, RuntimeError, ValueError) as exc:
-        LOGGER.error(json.dumps({"event": "sandbox_approval_handoff_failed"}))
+    except Exception as exc:
+        LOGGER.error(json.dumps({"event": "sandbox_approval_handoff_failed", "error": str(exc), "traceback": traceback.format_exc()}))
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Prava sandbox session could not be created",
+            detail=f"Prava sandbox session could not be created: {exc}",
         ) from exc
     return {
         "run_id": str(run["run_id"]),
