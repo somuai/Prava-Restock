@@ -520,6 +520,41 @@ export function reviewerTeamSubscriptionPresentation(
   return subscriptionId ? subscriptionById.get(subscriptionId) : undefined;
 }
 
+/**
+ * The temporary reviewer account is a deliberate, isolated walkthrough
+ * surface. It restores the original shelf composition from the demo rather
+ * than showing generic Restock marks for its five workflow fixtures. Only
+ * those persisted fixtures receive an itemId; the remaining objects are
+ * presentation-only so they cannot create a workflow or payment action.
+ */
+export function reviewerShowcaseProducts(items: TrackedItem[]): PantryProduct[] {
+  const itemByPresentationId = new Map<string, TrackedItem>();
+  for (const item of items.filter((candidate) => candidate.track === "home")) {
+    const presentation = reviewerHomeProductPresentation(item.merchant_sku_id);
+    if (presentation) itemByPresentationId.set(presentation.id, item);
+  }
+  return products.map((product) => {
+    const item = itemByPresentationId.get(product.id);
+    return item
+      ? { ...product, id: `reviewer-${item.item_id}`, itemId: item.item_id }
+      : product;
+  });
+}
+
+export function reviewerShowcaseSubscriptions(items: TrackedItem[]): SubscriptionProduct[] {
+  const itemByPresentationId = new Map<string, TrackedItem>();
+  for (const item of items.filter((candidate) => candidate.track === "teams")) {
+    const presentation = reviewerTeamSubscriptionPresentation(item.merchant_sku_id);
+    if (presentation) itemByPresentationId.set(presentation.id, item);
+  }
+  return subscriptions.map((subscription) => {
+    const item = itemByPresentationId.get(subscription.id);
+    return item
+      ? { ...subscription, id: `reviewer-${item.item_id}`, itemId: item.item_id }
+      : subscription;
+  });
+}
+
 const DAY_MS = 86_400_000;
 
 function dateLabel(value?: string | null): string {
@@ -2718,15 +2753,17 @@ export default function App() {
   );
   const visibleProducts = useMemo(() => {
     if (!backendConnected) return import.meta.env.DEV ? products : [];
+    if (profile?.reviewer_fixture) return reviewerShowcaseProducts(trackedItems);
     return trackedItems
       .filter((item) => item.track === "home")
       .map((item) => trackedHomeProduct(presentationProductForItem(item), item));
-  }, [backendConnected, trackedItems]);
+  }, [backendConnected, profile?.reviewer_fixture, trackedItems]);
   const visibleSubscriptions = useMemo(() => {
     if (!backendConnected) return import.meta.env.DEV ? subscriptions : [];
+    if (profile?.reviewer_fixture) return reviewerShowcaseSubscriptions(trackedItems);
     const tracked = trackedItems.filter((item) => item.track === "teams");
     return tracked.map((item) => trackedTeamSubscription(item));
-  }, [backendConnected, trackedItems]);
+  }, [backendConnected, profile?.reviewer_fixture, trackedItems]);
 
   useEffect(() => {
     if (selectedProduct || selectedSubscription || foregroundNotification) return;

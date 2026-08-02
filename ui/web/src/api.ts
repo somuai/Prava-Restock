@@ -53,6 +53,7 @@ export type UserProfile = {
   per_transaction_cap: string;
   created_at: string;
   auth_providers?: string[];
+  reviewer_fixture?: boolean;
 };
 
 export type TenantSummary = {

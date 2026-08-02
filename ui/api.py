@@ -1124,6 +1124,14 @@ def me(
     if value is None:
         raise HTTPException(status_code=404, detail="user not found")
     value["auth_providers"] = repository.list_auth_providers(user_id)
+    # The expiring reviewer account intentionally receives the curated
+    # presentation fixtures used in the Prava walkthrough.  This flag is
+    # identity-bound on the server rather than inferred from a display name,
+    # so a normal user can never accidentally see another user's showcase.
+    value["reviewer_fixture"] = secrets.compare_digest(
+        user_id,
+        os.getenv("RESTOCK_REVIEWER_USER_ID", "").strip(),
+    )
     return value
 
 

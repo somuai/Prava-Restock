@@ -331,7 +331,9 @@ def test_authenticated_v1_endpoints_and_action(tmp_path, monkeypatch) -> None:
     repository.transition(run["run_id"], expected={"intent_created"}, state="notified")
     monkeypatch.setattr(api, "REPOSITORY", repository)
 
-    assert client.get("/api/v1/me", headers=AUTH_HEADERS).status_code == 200
+    profile = client.get("/api/v1/me", headers=AUTH_HEADERS)
+    assert profile.status_code == 200
+    assert profile.json()["reviewer_fixture"] is False
     assert len(client.get("/api/v1/items", headers=AUTH_HEADERS).json()) == 1
     response = client.post(
         f"/api/v1/workflows/{run['run_id']}/actions",
