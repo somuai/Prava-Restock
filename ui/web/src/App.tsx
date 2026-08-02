@@ -573,7 +573,7 @@ export function reviewerShowcaseProducts(items: TrackedItem[]): PantryProduct[] 
   }
   return products.map((product) => {
     const item = itemByPresentationId.get(product.id);
-    if (item) return { ...product, itemId: item.item_id };
+    if (item) return { ...product, itemId: item.item_id, lifecycle: product.lifecycle === "restocked" ? "attention" : product.lifecycle };
     // Presentation-only cards must not retain the old local-demo UUIDs.
     // That prevents a reviewer who signed in through Google from ever
     // attempting an action against another account's fixture workflow.
@@ -1606,7 +1606,7 @@ function LivingPantry({
     });
     return { ...product, lifecycle };
   }), [notification, trackedProducts, workflows]);
-  const shelfProducts = presentationProducts;
+  const shelfProducts = presentationProducts.filter((product) => product.lifecycle !== "restocked");
   const upperProducts = shelfProducts.slice(0, 3);
   const middleProducts = shelfProducts.slice(3, 5);
   const lowerProducts = shelfProducts.slice(5, 8);
