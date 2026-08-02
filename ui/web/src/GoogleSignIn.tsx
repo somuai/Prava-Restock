@@ -95,6 +95,7 @@ export function GoogleSignIn({
       setError("Google sign-in is not configured for this environment yet.");
       return;
     }
+    setError("");
 
     let active = true;
     let resizeObserver: ResizeObserver | null = null;
