@@ -1855,45 +1855,13 @@ def reviewer_sandbox_approval(
     service = WorkflowService(repository)
     active = repository.latest_workflow_for_item(str(item.item_id))
     if active is not None and active.get("active_item_key"):
-        created_raw = active.get("created_at")
-        if created_raw is not None:
-            created_dt = created_raw if created_raw.tzinfo else created_raw.replace(tzinfo=timezone.utc)
-            if (datetime.now(timezone.utc) - created_dt).total_seconds() > 180:
-                repository.transition(
-                    active["run_id"],
-                    expected={active["state"]},
-                    state="expired",
-                    error_code="SANDBOX_SESSION_EXPIRED",
-                )
-                active = None
-    if active is not None and active.get("active_item_key"):
-        try:
-            approval_url_value = service.approval_url(active["run_id"])
-        except RuntimeError:
-            repository.transition(
-                active["run_id"],
-                expected={active["state"]},
-                state="failed",
-                error_code="SANDBOX_APPROVAL_CONTEXT_EXPIRED",
-            )
-        else:
-            if active["state"] == "notified":
-                active = service.act(
-                    active["run_id"], user_id=user_id, action="approve"
-                )
-            elif active["state"] != "passkey_pending":
-                raise HTTPException(
-                    status_code=409,
-                    detail="The sandbox approval workflow is already in progress",
-                )
-            return {
-                "run_id": str(active["run_id"]),
-                "state": str(active["state"]),
-                "approval_url": approval_url_value,
-                "sandbox_otp": "456789",
-                "track": body.track,
-                "action": body.action,
-            }
+        repository.transition(
+            active["run_id"],
+            expected={active["state"]},
+            state="expired",
+            error_code="SANDBOX_RECREATED",
+        )
+        active = None
 
     if body.track == "home":
         amount = item.last_observed_price or item.last_purchase_amount or Decimal("380.00")
