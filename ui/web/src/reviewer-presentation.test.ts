@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   reviewerHomeProductPresentation,
+  reviewerShowcaseNotifications,
   reviewerShowcaseProducts,
   reviewerShowcaseSubscriptions,
   reviewerTeamSubscriptionPresentation,
@@ -75,8 +76,9 @@ describe("reviewer product presentation", () => {
       image: "/app/assets/product-amul-taaza.png",
     });
     expect(shelf.find((product) => product.name === "Amul Taaza milk")).not.toHaveProperty("itemId");
-    expect(reviewerShowcaseProducts([]).find((product) => product.name === "Attikan Estate coffee"))
-      .not.toHaveProperty("itemId");
+    const presentationCoffee = reviewerShowcaseProducts([]).find((product) => product.name === "Attikan Estate coffee");
+    expect(presentationCoffee).toMatchObject({ id: "coffee" });
+    expect(presentationCoffee).not.toHaveProperty("itemId");
   });
 
   it("restores the complete provider-award shelf while binding only Copilot to the fixture", () => {
@@ -90,7 +92,18 @@ describe("reviewer product presentation", () => {
       logo: "/app/assets/providers/vercel.svg",
     });
     expect(awards.find((subscription) => subscription.name === "Vercel Pro")).not.toHaveProperty("itemId");
-    expect(reviewerShowcaseSubscriptions([]).find((subscription) => subscription.name === "GitHub Copilot Business"))
-      .not.toHaveProperty("itemId");
+    const presentationCopilot = reviewerShowcaseSubscriptions([]).find((subscription) => subscription.name === "GitHub Copilot Business");
+    expect(presentationCopilot).toMatchObject({ id: "copilot" });
+    expect(presentationCopilot).not.toHaveProperty("itemId");
+  });
+
+  it("keeps safe approval previews visible when the review account has no pending workflows", () => {
+    const reviewNotifications = reviewerShowcaseNotifications([]);
+    expect(reviewNotifications).toHaveLength(2);
+    expect(reviewNotifications.map((notification) => notification.actions)).toEqual([
+      ["approve", "adjust", "skip"],
+      ["renew_as_is", "switch_plan", "skip"],
+    ]);
+    expect(reviewNotifications.every((notification) => notification.status === "preview")).toBe(true);
   });
 });

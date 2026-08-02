@@ -148,6 +148,10 @@ function initialViewFromUrl(): View {
   return requested === "teams" || requested === "activity" ? requested : "home";
 }
 
+function reviewerShowcaseFromUrl(): boolean {
+  return new URLSearchParams(window.location.search).get("review") === "showcase";
+}
+
 const products: PantryProduct[] = [
   {
     id: "coffee",
@@ -535,12 +539,12 @@ export function reviewerShowcaseProducts(items: TrackedItem[]): PantryProduct[] 
   }
   return products.map((product) => {
     const item = itemByPresentationId.get(product.id);
-    if (item) return { ...product, id: `reviewer-${item.item_id}`, itemId: item.item_id };
+    if (item) return { ...product, itemId: item.item_id };
     // Presentation-only cards must not retain the old local-demo UUIDs.
     // That prevents a reviewer who signed in through Google from ever
     // attempting an action against another account's fixture workflow.
     const { itemId: _itemId, ...visual } = product;
-    return { ...visual, id: `showcase-${product.id}` };
+    return visual;
   });
 }
 
@@ -552,10 +556,18 @@ export function reviewerShowcaseSubscriptions(items: TrackedItem[]): Subscriptio
   }
   return subscriptions.map((subscription) => {
     const item = itemByPresentationId.get(subscription.id);
-    if (item) return { ...subscription, id: `reviewer-${item.item_id}`, itemId: item.item_id };
+    if (item) return { ...subscription, itemId: item.item_id };
     const { itemId: _itemId, ...visual } = subscription;
-    return { ...visual, id: `showcase-${subscription.id}` };
+    return visual;
   });
+}
+
+export function reviewerShowcaseNotifications(pending: Notification[]): Notification[] {
+  const pendingTracks = new Set(pending.map((notification) => notification.track));
+  return [
+    ...pending,
+    ...previews.filter((notification) => !pendingTracks.has(notification.track)),
+  ];
 }
 
 const DAY_MS = 86_400_000;
@@ -2658,10 +2670,13 @@ function StarterPantryOnboarding({
 }
 
 export default function App() {
+  const reviewerShowcaseRequested = reviewerShowcaseFromUrl();
   const [view, setView] = useState<View>(initialViewFromUrl);
   const [selectedProduct, setSelectedProduct] = useState<PantryProduct | null>(null);
   const [selectedSubscription, setSelectedSubscription] = useState<SubscriptionProduct | null>(null);
-  const [notifications, setNotifications] = useState<Notification[]>(import.meta.env.DEV ? previews : []);
+  const [notifications, setNotifications] = useState<Notification[]>(
+    reviewerShowcaseRequested || import.meta.env.DEV ? previews : [],
+  );
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [workflows, setWorkflows] = useState<WorkflowRun[]>([]);
   const [trackedItems, setTrackedItems] = useState<TrackedItem[]>([]);
@@ -2705,7 +2720,10 @@ export default function App() {
         api.me().catch(() => null),
         api.tenants().catch(() => []),
       ]);
-      setNotifications(pending);
+      const visibleNotifications = reviewerShowcaseRequested
+        ? reviewerShowcaseNotifications(pending)
+        : pending;
+      setNotifications(visibleNotifications);
       setAudit(events);
       setWorkflows(workflowRuns);
       setTrackedItems(currentItems);
@@ -2713,7 +2731,7 @@ export default function App() {
       if (currentUser) setProfile(currentUser);
       setTenants(currentTenants);
       setAuthState("ready");
-      setStatus(pending.length ? `${pending.length} decision${pending.length === 1 ? "" : "s"} waiting` : "Everything is being watched");
+      setStatus(visibleNotifications.length ? `${visibleNotifications.length} decision${visibleNotifications.length === 1 ? "" : "s"} waiting` : "Everything is being watched");
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         await clearApiSessionToken();
@@ -2723,7 +2741,7 @@ export default function App() {
       }
       setBackendConnected(false);
       if (import.meta.env.PROD) {
-        setNotifications([]);
+        setNotifications(reviewerShowcaseRequested ? previews : []);
         setTrackedItems([]);
       }
       setAuthState("ready");
@@ -2757,7 +2775,6 @@ export default function App() {
   // This is an explicit presentation route for provider review. It contains
   // only local, non-actionable visual fixtures; the default authenticated
   // view continues to show a user's own persisted products.
-  const reviewerShowcaseRequested = new URLSearchParams(window.location.search).get("review") === "showcase";
   const showReviewerShowcase = Boolean(profile?.reviewer_fixture) || reviewerShowcaseRequested;
   const visibleProducts = useMemo(() => {
     if (!backendConnected) return import.meta.env.DEV ? products : [];
