@@ -645,6 +645,9 @@ export type PaymentOutcomeCopy = {
   message: string;
   charged: boolean;
   reference: string;
+  disclosure: string;
+  nextStep: string;
+  stages: [string, string, string];
 };
 
 export function paymentOutcomeCopy(
@@ -661,17 +664,36 @@ export function paymentOutcomeCopy(
   if (charged) {
     return {
       title: "Payment complete",
-      message: "Your approval was verified and the provider confirmed the completed payment.",
+      message: "The provider confirmed your payment. Restock has already started the next tracking cycle.",
       charged: true,
       reference: run.run_id,
+      disclosure: "Provider-confirmed payment",
+      nextStep: "The item is back on its normal tracking schedule. Its receipt and complete audit trail are saved in Activity.",
+      stages: ["Approval verified", "Payment confirmed", "Tracking restarted"],
     };
   }
   return {
-    title: "Sandbox flow complete",
-    message: "Prava approval was verified. The final provider payment remained a disclosed simulation, so no real charge was made.",
+    title: "Sandbox approval complete",
+    message: "Prava verified the sandbox approval. The provider payment was simulated, so nothing was charged.",
     charged: false,
     reference: run.run_id,
+    disclosure: "Sandbox · no real charge",
+    nextStep: "The complete sandbox trail is ready in Activity. Your real shelf and payment method remain unchanged.",
+    stages: ["Approval verified", "Simulation recorded", "Audit ready"],
   };
+}
+
+function receiptTimestamp(value?: string): string {
+  if (!value) return "Just now";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Just now";
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(parsed);
 }
 
 const DAY_MS = 86_400_000;
@@ -1406,6 +1428,11 @@ function PaymentConfirmation({
   onViewActivity: () => void;
 }) {
   const copy = paymentOutcomeCopy(run, capabilities);
+  const provider = providerBrandForName(run.merchant || "") || {
+    name: humanize(run.merchant || "Restock"),
+    logo: "/app/assets/restock-mark.png",
+    accent: "#1f6b54",
+  };
   const dialogRef = useRef<HTMLElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -1425,29 +1452,61 @@ function PaymentConfirmation({
       <section
         ref={dialogRef}
         className="payment-confirmation"
+        style={{ "--provider-accent": provider.accent } as CSSProperties}
         role="dialog"
         aria-modal="true"
         aria-labelledby="payment-confirmation-title"
+        aria-describedby="payment-confirmation-message"
         tabIndex={-1}
       >
-        <div className="payment-confirmation-seal" aria-hidden="true">
-          <SealCheck size={38} weight="fill" />
+        <header className="payment-confirmation-heading">
+          <span className="payment-confirmation-provider">
+            <img src={provider.logo} alt="" />
+            <span><small>Completed with</small><strong>{provider.name}</strong></span>
+          </span>
+          <span className="payment-confirmation-seal" aria-hidden="true">
+            <SealCheck size={38} weight="fill" />
+          </span>
+        </header>
+
+        <div className="payment-confirmation-copy" role="status" aria-live="polite">
+          <p className="eyebrow">Restock receipt</p>
+          <h2 id="payment-confirmation-title">{copy.title}</h2>
+          <p id="payment-confirmation-message">{copy.message}</p>
         </div>
-        <p className="eyebrow">Restock receipt</p>
-        <h2 id="payment-confirmation-title">{copy.title}</h2>
-        <p>{copy.message}</p>
-        <dl>
-          {amount && <div><dt>Approved amount</dt><dd>{amount}</dd></div>}
-          <div><dt>Provider</dt><dd>{humanize(run.merchant || "provider")}</dd></div>
-          <div><dt>Reference</dt><dd>{copy.reference.slice(0, 12)}</dd></div>
-          <div><dt>Next</dt><dd>{copy.charged ? "Tracking restarts from today" : "Review the audit trail"}</dd></div>
+
+        <div className="payment-confirmation-amount">
+          <span>{copy.charged ? "Paid" : "Approved in sandbox"}</span>
+          <strong>{amount || "Recorded"}</strong>
+          <small>{receiptTimestamp(run.updated_at)}</small>
+        </div>
+
+        <ol className="payment-confirmation-steps" aria-label="Completion status">
+          {copy.stages.map((stage) => (
+            <li key={stage}>
+              <span aria-hidden="true"><Check size={14} weight="bold" /></span>
+              <strong>{stage}</strong>
+            </li>
+          ))}
+        </ol>
+
+        <dl className="payment-confirmation-reference">
+          <div><dt>Provider</dt><dd>{provider.name}</dd></div>
+          <div><dt>Reference</dt><dd title={copy.reference}>{copy.reference.slice(0, 12)}</dd></div>
         </dl>
-        <p className="payment-confirmation-disclosure">
-          {copy.charged ? "Provider-confirmed payment" : "Sandbox approval · no real charge"}
-        </p>
+
+        <section className="payment-confirmation-next" aria-labelledby="payment-confirmation-next-title">
+          <ClockCounterClockwise size={22} weight="duotone" aria-hidden="true" />
+          <span>
+            <strong id="payment-confirmation-next-title">What happens next</strong>
+            <p>{copy.nextStep}</p>
+          </span>
+        </section>
+
+        <p className="payment-confirmation-disclosure">{copy.disclosure}</p>
         <footer>
-          <button type="button" className="secondary" onClick={onClose}>Back to shelf</button>
-          <button type="button" className="primary" onClick={onViewActivity}>View activity <ArrowRight size={16} /></button>
+          <button type="button" className="secondary" onClick={onClose}>Return to shelf</button>
+          <button type="button" className="primary" onClick={onViewActivity}>View receipt in Activity <ArrowRight size={16} /></button>
         </footer>
       </section>
     </div>
@@ -2926,7 +2985,21 @@ export default function App() {
   });
   const [approvalChecking, setApprovalChecking] = useState(false);
   const approvalCheckingRef = useRef(false);
-  const [paymentOutcome, setPaymentOutcome] = useState<WorkflowRun | null>(null);
+  const [paymentOutcome, setPaymentOutcome] = useState<WorkflowRun | null>(() => {
+    if (!import.meta.env.DEV || new URLSearchParams(window.location.search).get("completion") !== "preview") {
+      return null;
+    }
+    return {
+      run_id: "sandbox-preview-01KZ",
+      item_id: "00000000-0000-0000-0000-000000000101",
+      state: "completed",
+      updated_at: new Date().toISOString(),
+      merchant: "zepto",
+      currency: "INR",
+      proposed_amount: "380.00",
+      modes: { prava: "sandbox", home_payment: "disclosed_mock" },
+    };
+  });
 
   useEffect(() => {
     const images = revealAssets.map((src) => {
@@ -2952,7 +3025,7 @@ export default function App() {
       }
       if (finalRun.state === "completed") {
         setPaymentOutcome(finalRun);
-        setStatus("Sandbox flow complete");
+        setStatus("Sandbox approval complete");
         setActionFeedback("Prava approval verified. No real charge was made in this sandbox flow.");
         if (soundOn) playInterfaceSound("confirm");
       } else if (["failed", "rejected", "expired"].includes(finalRun.state)) {

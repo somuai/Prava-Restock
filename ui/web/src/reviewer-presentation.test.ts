@@ -94,9 +94,37 @@ describe("reviewer product presentation", () => {
       whatsapp_configured: false,
       demo_mode: false,
     })).toMatchObject({
-      title: "Sandbox flow complete",
+      title: "Sandbox approval complete",
       charged: false,
       reference: "sandbox-run",
+      disclosure: "Sandbox · no real charge",
+      stages: ["Approval verified", "Simulation recorded", "Audit ready"],
+    });
+  });
+
+  it("explains the next state after a real provider-confirmed payment", () => {
+    expect(paymentOutcomeCopy({
+      run_id: "production-run",
+      item_id: reviewerCoffee.item_id,
+      state: "completed",
+      merchant: "zepto",
+      currency: "INR",
+      proposed_amount: "380.00",
+      modes: { prava: "real", home_payment: "real" },
+    }, {
+      prava_mode: "production",
+      home_merchant_mode: "real",
+      home_payment_mode: "real",
+      teams_billing_mode: "real",
+      real_money_enabled: true,
+      slack_configured: true,
+      whatsapp_configured: false,
+      demo_mode: false,
+    })).toMatchObject({
+      title: "Payment complete",
+      charged: true,
+      disclosure: "Provider-confirmed payment",
+      stages: ["Approval verified", "Payment confirmed", "Tracking restarted"],
     });
   });
 
