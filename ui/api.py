@@ -1916,6 +1916,13 @@ def workflow_payment_status(
         raise HTTPException(status_code=404, detail="workflow not found") from exc
     if run["user_id"] != user_id:
         raise HTTPException(status_code=403, detail="workflow belongs to a different user")
+    if run["state"] == "completed":
+        return {
+            "run_id": run_id,
+            "workflow_state": str(run["state"]),
+            "provider_status": "completed",
+            "resumable": True,
+        }
     if run["state"] != "passkey_pending":
         return {
             "run_id": run_id,
@@ -1939,7 +1946,7 @@ def workflow_payment_status(
         "run_id": run_id,
         "workflow_state": str(run["state"]),
         "provider_status": provider_status,
-        "resumable": provider_status in {"awaiting_result", "failed"},
+        "resumable": provider_status in {"awaiting_result", "failed", "completed"},
     }
 
 
@@ -1987,6 +1994,8 @@ def resume_workflow(
     run = repository.get_workflow(run_id)
     if run["user_id"] != user_id:
         raise HTTPException(status_code=403, detail="workflow belongs to a different user")
+    if run["state"] in TERMINAL_STATES or run["state"] == "completed":
+        return run
     try:
         return build_workflow_service(repository).resume_after_passkey(run_id)
     except (RuntimeError, ValueError) as exc:
