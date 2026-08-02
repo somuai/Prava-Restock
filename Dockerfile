@@ -60,4 +60,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 
 # Production validates the complete API contract before touching schema or
 # accepting traffic. Development keeps the zero-configuration local path.
-CMD ["sh", "-c", "python scripts/materialize_zepto_oauth_cache.py && unset ZEPTO_MCP_AUTH_CACHE_B64 && if [ \"${RESTOCK_ENV:-development}\" = \"production\" ]; then python scripts/validate_service_env.py api; fi && alembic upgrade head && if [ -n \"${RESTOCK_REVIEWER_USER_ID:-}\" ]; then python scripts/provision_reviewer.py; fi && exec uvicorn ui.api:app --host 0.0.0.0 --port ${PORT}"]
+CMD ["sh", "-c", "python scripts/materialize_zepto_oauth_cache.py && unset ZEPTO_MCP_AUTH_CACHE_B64 && if [ \"${RESTOCK_ENV:-development}\" = \"production\" ]; then python scripts/validate_service_env.py api; fi && alembic upgrade head && if [ -n \"${RESTOCK_REVIEWER_USER_ID:-}\" ]; then python scripts/provision_reviewer.py; fi && exec env PYTHONPATH=/app uvicorn ui.api:app --host 0.0.0.0 --port ${PORT}"]
