@@ -939,6 +939,13 @@ button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visibl
   padding: 7px 13px;
   color: var(--green-dark);
 }
+.commerce-brand-logo {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  flex: 0 0 auto;
+}
+.commerce-brand-logo--wide { width: 38px; }
 .commerce-chip > span {
   display: grid;
   gap: 1px;
@@ -2518,23 +2525,25 @@ button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visibl
 }
 .foreground-notification > header {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) 36px;
+  grid-template-columns: 52px minmax(0, 1fr) 36px;
   align-items: center;
   gap: 10px;
 }
 .notification-mark {
-  width: 34px;
+  width: 48px;
   height: 34px;
   display: grid;
   place-items: center;
-  border-radius: 50%;
-  background: var(--green-soft);
+  border: 1px solid color-mix(in srgb, var(--provider-accent, var(--green)) 22%, #deded5);
+  border-radius: 11px;
+  background: #fff;
 }
-.notification-mark img { width: 22px; height: 22px; object-fit: contain; }
+.notification-mark img { width: 24px; height: 24px; object-fit: contain; }
+.notification-mark--wide img { width: 40px; height: 20px; }
 .foreground-notification header small,
 .foreground-notification header strong { display: block; }
 .foreground-notification header small {
-  color: var(--green);
+  color: var(--provider-accent, var(--green));
   font-family: "Geist Pixel Square", monospace;
   font-size: 7px;
   letter-spacing: .07em;

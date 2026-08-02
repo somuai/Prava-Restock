@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  providerBrandForName,
   reviewerHomeProductPresentation,
   reviewerShowcaseNotifications,
   reviewerShowcaseProducts,
@@ -34,6 +35,21 @@ const reviewerCopilot: TrackedItem = {
 };
 
 describe("reviewer product presentation", () => {
+  it("uses the official provider marks for approval surfaces", () => {
+    expect(providerBrandForName("Zepto")).toMatchObject({
+      name: "Zepto",
+      logo: "/app/assets/providers/zepto.svg",
+    });
+    expect(providerBrandForName("GitHub Copilot Business")).toMatchObject({
+      name: "GitHub Copilot",
+      logo: "/app/assets/providers/githubcopilot.svg",
+    });
+    expect(providerBrandForName("Vercel Pro")).toMatchObject({
+      name: "Vercel",
+      logo: "/app/assets/providers/vercel.svg",
+    });
+  });
+
   it("uses real pack imagery only for the four exact Home review fixtures", () => {
     expect(reviewerHomeProductPresentation("zepto-arabica-coffee-500g")).toMatchObject({
       name: "Attikan Estate coffee",

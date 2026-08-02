@@ -124,6 +124,31 @@ type SubscriptionProduct = {
   alternateDescription: string;
 };
 
+export type ProviderBrand = {
+  name: string;
+  logo: string;
+  accent: string;
+  wide?: boolean;
+};
+
+const providerBrands: Array<ProviderBrand & { matches: string[] }> = [
+  { name: "Zepto", logo: "/app/assets/providers/zepto.svg", accent: "#7b1fa2", wide: true, matches: ["zepto"] },
+  { name: "GitHub Copilot", logo: "/app/assets/providers/githubcopilot.svg", accent: "#24292f", matches: ["github", "copilot"] },
+  { name: "Vercel", logo: "/app/assets/providers/vercel.svg", accent: "#111111", matches: ["vercel"] },
+  { name: "Figma", logo: "/app/assets/providers/figma.svg", accent: "#a259ff", matches: ["figma"] },
+  { name: "Railway", logo: "/app/assets/providers/railway.svg", accent: "#6c4cf1", matches: ["railway"] },
+  { name: "Notion", logo: "/app/assets/providers/notion.svg", accent: "#111111", matches: ["notion"] },
+  { name: "Netflix", logo: "/app/assets/providers/netflix.svg", accent: "#e50914", matches: ["netflix"] },
+];
+
+export function providerBrandForName(provider: string): ProviderBrand | null {
+  const normalized = provider.trim().toLowerCase();
+  const match = providerBrands.find((brand) => brand.matches.some((candidate) => normalized.includes(candidate)));
+  if (!match) return null;
+  const { matches: _matches, ...brand } = match;
+  return brand;
+}
+
 const previews: Notification[] = [
   {
     notification_id: "preview-home",
@@ -1225,10 +1250,12 @@ function AppHeader({
 
 function ForegroundNotificationSlip({
   notification,
+  brand,
   onOpen,
   onClose,
 }: {
   notification: Notification;
+  brand: ProviderBrand;
   onOpen: () => void;
   onClose: () => void;
 }) {
@@ -1243,10 +1270,12 @@ function ForegroundNotificationSlip({
       onPointerLeave={paperWind.onPointerLeave}
     >
       <p className="sr-only" role="status" aria-live="polite">{notification.message}</p>
-      <header>
-        <span className="notification-mark"><img src="/app/assets/restock-mark.png" alt="" /></span>
+      <header style={{ "--provider-accent": brand.accent } as React.CSSProperties}>
+        <span className={`notification-mark${brand.wide ? " notification-mark--wide" : ""}`}>
+          <img src={brand.logo} alt={`${brand.name} logo`} />
+        </span>
         <span>
-          <small>{isTeams ? "Teams" : "Home"} · needs your say</small>
+          <small>{brand.name} · {isTeams ? "Teams" : "Home"}</small>
           <strong>{isTeams ? "A renewal is waiting" : "Your pantry noticed something"}</strong>
         </span>
         <button type="button" aria-label="Dismiss this popup" onClick={onClose}><X size={16} /></button>
@@ -1525,6 +1554,7 @@ function ProductDetail({
   const actionable = Boolean(notification && ["pending", "preview"].includes(notification.status));
   const isCoffee = product.id === "coffee";
   const isFood = ["Coffee", "Dairy", "Pantry"].includes(product.category);
+  const merchantBrand = providerBrandForName(product.merchant);
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -1575,7 +1605,9 @@ function ProductDetail({
             <div className="detail-commerce" aria-label={`Current price ${product.price}; source ${product.merchant}; product by ${product.brand}`}>
               <span className="price-pin"><Tag size={17} weight="fill" /><strong>{product.price}</strong></span>
               <span className="commerce-chip">
-                <Storefront size={18} weight="duotone" />
+                {merchantBrand
+                  ? <img className={`commerce-brand-logo${merchantBrand.wide ? " commerce-brand-logo--wide" : ""}`} src={merchantBrand.logo} alt={`${merchantBrand.name} logo`} />
+                  : <Storefront size={18} weight="duotone" />}
                 <span><small>Source merchant</small><strong>{product.merchant}</strong></span>
               </span>
               <span className="commerce-chip">
@@ -2911,6 +2943,94 @@ export default function App() {
     if (product) openProduct(product);
   };
 
+  const providerBrandForNotification = (notification: Notification): ProviderBrand => {
+    const isTeams = notification.track === "teams" || notification.actions.includes("switch_plan");
+    if (isTeams) {
+      const subscription = visibleSubscriptions.find((candidate) => candidate.itemId === notification.item_id)
+        || visibleSubscriptions.find((candidate) => candidate.id === "copilot")
+        || visibleSubscriptions[0];
+      return providerBrandForName(subscription?.name || "GitHub") || {
+        name: "Restock Teams",
+        logo: "/app/assets/restock-mark.png",
+        accent: "#1f6b54",
+      };
+    }
+    const product = visibleProducts.find((candidate) => candidate.itemId === notification.item_id)
+      || visibleProducts.find((candidate) => candidate.id === "coffee")
+      || visibleProducts[0];
+    return providerBrandForName(product?.merchant || "Zepto") || {
+      name: product?.merchant || "Restock Home",
+      logo: "/app/assets/restock-mark.png",
+      accent: "#1f6b54",
+    };
+  };
+
+  const renderApprovalHandoff = (target: Window, brand: ProviderBrand) => {
+    const document = target.document;
+    document.title = `${brand.name} · secure approval`;
+    document.documentElement.lang = "en";
+    document.body.replaceChildren();
+    Object.assign(document.body.style, {
+      margin: "0",
+      minHeight: "100vh",
+      display: "grid",
+      placeItems: "center",
+      background: "#f4f4ef",
+      color: "#161714",
+      fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
+    });
+    const card = document.createElement("main");
+    Object.assign(card.style, {
+      width: "min(420px, calc(100vw - 40px))",
+      padding: "42px 36px",
+      border: "1px solid #deded5",
+      borderTop: `5px solid ${brand.accent}`,
+      borderRadius: "24px",
+      background: "#fffefa",
+      boxShadow: "0 28px 80px rgba(35, 37, 31, .14)",
+      textAlign: "center",
+      boxSizing: "border-box",
+    });
+    const logo = document.createElement("img");
+    logo.src = new URL(brand.logo, window.location.origin).href;
+    logo.alt = `${brand.name} logo`;
+    Object.assign(logo.style, {
+      display: "block",
+      width: brand.wide ? "112px" : "64px",
+      height: "64px",
+      objectFit: "contain",
+      margin: "0 auto 26px",
+    });
+    const eyebrow = document.createElement("p");
+    eyebrow.textContent = `${brand.name} purchase`;
+    Object.assign(eyebrow.style, {
+      margin: "0 0 12px",
+      color: brand.accent,
+      fontSize: "12px",
+      fontWeight: "700",
+      letterSpacing: ".12em",
+      textTransform: "uppercase",
+    });
+    const heading = document.createElement("h1");
+    heading.textContent = "Opening secure approval";
+    Object.assign(heading.style, { margin: "0", fontSize: "29px", letterSpacing: "-.04em" });
+    const copy = document.createElement("p");
+    copy.textContent = "You’ll continue on Prava’s protected payment surface. Keep this window open.";
+    Object.assign(copy.style, { margin: "16px auto 0", maxWidth: "330px", color: "#6a6c65", lineHeight: "1.55" });
+    const progress = document.createElement("div");
+    progress.setAttribute("role", "progressbar");
+    progress.setAttribute("aria-label", "Opening secure approval");
+    Object.assign(progress.style, {
+      width: "100%",
+      height: "4px",
+      marginTop: "30px",
+      borderRadius: "999px",
+      background: `linear-gradient(90deg, ${brand.accent} 58%, #e7e7df 58%)`,
+    });
+    card.append(logo, eyebrow, heading, copy, progress);
+    document.body.append(card);
+  };
+
   const closeSubscription = () => {
     sound("close");
     setSelectedSubscription(null);
@@ -2938,8 +3058,7 @@ export default function App() {
         approvalWindow = window.open("about:blank", "_blank");
         if (approvalWindow) {
           approvalWindow.opener = null;
-          approvalWindow.document.title = "Restock secure approval";
-          approvalWindow.document.body.textContent = "Opening secure passkey approval…";
+          renderApprovalHandoff(approvalWindow, providerBrandForNotification(notification));
         }
       }
       const run = await api.action(notification.run_id, action, adjustedAmount);
@@ -3010,6 +3129,7 @@ export default function App() {
       {foregroundNotification && !selectedProduct && !selectedSubscription && (
         <ForegroundNotificationSlip
           notification={foregroundNotification}
+          brand={providerBrandForNotification(foregroundNotification)}
           onClose={() => setForegroundNotification(null)}
           onOpen={() => openNotification(foregroundNotification)}
         />
