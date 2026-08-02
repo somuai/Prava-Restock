@@ -1606,7 +1606,7 @@ function LivingPantry({
     });
     return { ...product, lifecycle };
   }), [notification, trackedProducts, workflows]);
-  const shelfProducts = presentationProducts.filter((product) => product.lifecycle !== "restocked");
+  const shelfProducts = presentationProducts;
   const upperProducts = shelfProducts.slice(0, 3);
   const middleProducts = shelfProducts.slice(3, 5);
   const lowerProducts = shelfProducts.slice(5, 8);
