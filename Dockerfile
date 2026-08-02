@@ -40,7 +40,7 @@ COPY --from=web /web/dist /app/ui/web/dist
 COPY --from=waitlist /waitlist/dist /app/ui/waitlist/dist
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-runtime /opt/zepto-mcp /opt/zepto-mcp
-RUN python -m pip install --no-cache-dir .
+RUN python -m pip install --no-cache-dir -e .
 
 # Runtime data is the only application-owned writable path. Keeping the source
 # tree read-only and dropping root privileges limits the impact of a compromise.
