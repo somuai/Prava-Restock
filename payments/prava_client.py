@@ -409,6 +409,7 @@ def register_intent_context(
     _INTENTS.setdefault(
         str(intent_ref),
         {
+            "session_id": str(intent_ref),
             "merchant": str(merchant),
             "amount": str(amount),
             "item_description": "Restock checkout",
