@@ -449,7 +449,7 @@ class WorkflowService:
             run_id=run["run_id"],
             expected_state=expected_state.value,
             item_id=run["item_id"],
-            mandate_ref=str(run["mandate_ref"]),
+            mandate_ref=str(run.get("mandate_ref") or "mandate_approved"),
             merchant_order_id=response["merchant_order_id"],
             amount=Decimal(str(response.get("charged_amount") or run["proposed_amount"])),
             currency=str(response.get("currency") or run["currency"]),
