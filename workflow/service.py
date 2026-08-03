@@ -1026,9 +1026,20 @@ class WorkflowService:
                 locked_quote = getattr(self.quote_provider, "revalidate_locked", None)
                 if not callable(locked_quote):
                     locked_quote = getattr(self.quote_provider, "quote_locked", None)
-                fresh_quote: MerchantQuote = (
-                    locked_quote(item) if callable(locked_quote) else self.quote_provider(item)
-                )
+                try:
+                    fresh_quote: MerchantQuote = (
+                        locked_quote(item) if callable(locked_quote) else self.quote_provider(item)
+                    )
+                except Exception as quote_exc:
+                    LOGGER.warning(
+                        json.dumps(
+                            {
+                                "event": "revalidate_quote_failed_using_approved_quote",
+                                "error": str(quote_exc),
+                            }
+                        )
+                    )
+                    fresh_quote = MerchantQuote.model_validate(run["quote"])
                 if fresh_quote.stock_status is StockStatus.OUT_OF_STOCK:
                     self._retire_unused_credential(result["credential_reference"])
                     failed = self.repository.transition(
