@@ -290,7 +290,8 @@ class WorkflowService:
 
         try:
             yield
-        except Exception:
+        except Exception as exc:
+            LOGGER.error(json.dumps({"event": "post_mandate_failure_guard_caught", "error": str(exc), "traceback": traceback.format_exc()}))
             current = self.repository.get_workflow(run_id)
             state = current["state"]
             if state in {
