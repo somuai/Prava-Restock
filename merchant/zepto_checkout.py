@@ -1043,20 +1043,11 @@ def check_current_price(
 def complete_checkout(credential_reference, merchant_sku_id, amount, idempotency_key):
     """Complete the safe configured boundary without silently spending real money."""
     mode = payment_mode()
-    if mode is ExecutionMode.REAL and (
-        os.getenv(REAL_PAYMENT_MODE_ENV) != "1"
-        or not real_payment_runtime_ready()
-        or _REAL_CHECKOUT_RUNTIME is None
-    ):
-        response = mock_checkout.complete_checkout(
-            credential_reference,
-            merchant_sku_id,
-            amount,
-            idempotency_key,
-        )
-        response["execution_mode"] = "disclosed_mock"
-        response["disclosure_reason"] = "real_payment_runtime_unconfigured"
-        return response
+    if mode is ExecutionMode.REAL:
+        if os.getenv(REAL_PAYMENT_MODE_ENV) != "1":
+            raise RuntimeError("real Zepto payment is disabled: set ZEPTO_REAL_PAYMENT_ENABLED=1")
+        if not real_payment_runtime_ready() or _REAL_CHECKOUT_RUNTIME is None:
+            raise RuntimeError("executor/redirect policy is not configured")
     if mode is not ExecutionMode.REAL:
         response = mock_checkout.complete_checkout(
             credential_reference,

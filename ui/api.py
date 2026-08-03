@@ -1998,7 +1998,7 @@ def resume_workflow(
     try:
         return build_workflow_service(repository).resume_after_passkey(run_id)
     except (RuntimeError, ValueError) as exc:
-        LOGGER.error(json.dumps({"event": "resume_after_passkey_failed", "run_id": run_id, "error": str(exc), "traceback": traceback.format_exc()}))
+        LOGGER.warning(json.dumps({"event": "resume_after_passkey_failed", "run_id": run_id, "error": str(exc)}))
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
