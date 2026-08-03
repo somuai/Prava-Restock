@@ -487,11 +487,30 @@ def await_mandate(intent_ref):
         token = f"tok_sandbox_{uuid4().hex[:12]}"
         dynamic_cvv = "123"
         txn_ref_id = f"txn_sandbox_{uuid4().hex[:12]}"
+        credential_reference = f"prava_credential_{uuid4().hex}"
+        _CREDENTIALS[credential_reference] = {
+            "token": token,
+            "dynamic_cvv": dynamic_cvv,
+            "expiry_month": "12",
+            "expiry_year": "2028",
+            "session_id": session_id,
+            "txn_ref_id": txn_ref_id,
+            "created_at": datetime.now(timezone.utc),
+            "consumed_at": None,
+        }
         outcome = {
             "status": "approved",
+            "mandate_id": txn_ref_id,
+            "txn_ref_id": txn_ref_id,
+            "credential_reference": credential_reference,
             "provider_payment_id": session_id,
             "merchant_account_id": "ma_01KXJ63ZSRN4JGKE6GPNTJ9JH2",
             "authorized_amount": intent["amount"],
+            "scope": {
+                "merchant": intent["merchant"],
+                "max_amount": intent["amount"],
+            },
+            "approved_at": datetime.now(timezone.utc).isoformat(),
             "line_items": [
                 {
                     "token": token,
