@@ -1020,9 +1020,20 @@ class WorkflowService:
             if self._quote_provider_supports(item):
                 scope = getattr(self.quote_provider, "checkout_scope", None)
                 if callable(scope):
-                    cart_lease = stack.enter_context(
-                        scope(item, owner_key=run["idempotency_key"])
-                    )
+                    try:
+                        cart_lease = stack.enter_context(
+                            scope(item, owner_key=run["idempotency_key"])
+                        )
+                    except Exception as scope_exc:
+                        LOGGER.warning(
+                            json.dumps(
+                                {
+                                    "event": "checkout_scope_failed_ignoring",
+                                    "error": str(scope_exc),
+                                }
+                            )
+                        )
+                        cart_lease = None
                 locked_quote = getattr(self.quote_provider, "revalidate_locked", None)
                 if not callable(locked_quote):
                     locked_quote = getattr(self.quote_provider, "quote_locked", None)
