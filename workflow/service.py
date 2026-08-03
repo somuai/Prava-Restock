@@ -4,8 +4,12 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from enum import Enum
 from contextlib import ExitStack, contextmanager
+import logging
 import os
+import traceback
 from typing import Any, Callable, Protocol
+
+LOGGER = logging.getLogger(__name__)
 from uuid import uuid4
 
 from merchant import saas_invoice_checkout, swiggy_checkout, zepto_checkout
