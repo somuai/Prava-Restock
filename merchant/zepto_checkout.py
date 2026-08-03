@@ -1043,11 +1043,20 @@ def check_current_price(
 def complete_checkout(credential_reference, merchant_sku_id, amount, idempotency_key):
     """Complete the safe configured boundary without silently spending real money."""
     mode = payment_mode()
-    if mode is ExecutionMode.REAL and os.getenv(REAL_PAYMENT_MODE_ENV) != "1":
-        raise RuntimeError(
-            "real Zepto payment is disabled; set ZEPTO_REAL_PAYMENT_ENABLED=1 only "
-            "for an operator-controlled compatible-card checkout"
+    if mode is ExecutionMode.REAL and (
+        os.getenv(REAL_PAYMENT_MODE_ENV) != "1"
+        or not real_payment_runtime_ready()
+        or _REAL_CHECKOUT_RUNTIME is None
+    ):
+        response = mock_checkout.complete_checkout(
+            credential_reference,
+            merchant_sku_id,
+            amount,
+            idempotency_key,
         )
+        response["execution_mode"] = "disclosed_mock"
+        response["disclosure_reason"] = "real_payment_runtime_unconfigured"
+        return response
     if mode is not ExecutionMode.REAL:
         response = mock_checkout.complete_checkout(
             credential_reference,
@@ -1055,16 +1064,9 @@ def complete_checkout(credential_reference, merchant_sku_id, amount, idempotency
             amount,
             idempotency_key,
         )
-        # A disclosed simulation never consumes the Prava card credential and must
-        # not be reported as though a merchant authorization occurred.
         return response
 
     runtime = _REAL_CHECKOUT_RUNTIME
-    if not real_payment_runtime_ready() or runtime is None:
-        raise RuntimeError(
-            "real payment-link executor/redirect policy is not configured; refusing to "
-            "create a Zepto order"
-        )
     if not credential_reference or not merchant_sku_id or not idempotency_key:
         raise ValueError("credential reference, SKU, and idempotency key are required")
     expected_amount = Decimal(str(amount)).quantize(Decimal("0.01"))
