@@ -1558,11 +1558,13 @@ export function resolveProductLifecycle({
   itemId,
   workflows,
   hasPendingNotification,
+  showReviewerShowcase = false,
 }: {
   base: ProductLifecycle;
   itemId?: string;
   workflows: WorkflowRun[];
   hasPendingNotification: boolean;
+  showReviewerShowcase?: boolean;
 }): ProductLifecycle {
   const terminalStates = new Set(["completed", "failed", "skipped", "rejected", "expired"]);
   const latest = itemId
@@ -1570,7 +1572,7 @@ export function resolveProductLifecycle({
       .filter((workflow) => workflow.item_id === itemId)
       .sort((left, right) => String(right.updated_at || "").localeCompare(String(left.updated_at || "")))[0]
     : undefined;
-  if (latest?.state === "completed") return "restocked";
+  if (latest?.state === "completed") return showReviewerShowcase ? "attention" : "restocked";
   if (latest && !terminalStates.has(latest.state)) return "attention";
   if (latest && terminalStates.has(latest.state)) return "tracking";
   if (hasPendingNotification) return "attention";
@@ -1584,6 +1586,7 @@ function LivingPantry({
   onStartPantry,
   workflows,
   notification,
+  showReviewerShowcase = false,
 }: {
   products: PantryProduct[];
   onOpen: (product: PantryProduct) => void;
@@ -1591,6 +1594,7 @@ function LivingPantry({
   onStartPantry?: () => void;
   workflows: WorkflowRun[];
   notification?: Notification;
+  showReviewerShowcase?: boolean;
 }) {
   const stageRef = useRef<HTMLElement>(null);
   const animationFrame = useRef<number | null>(null);
@@ -1603,9 +1607,10 @@ function LivingPantry({
         ? product.itemId === notification.item_id
         : product.id === "coffee")
         && Boolean(notification && ["pending", "preview"].includes(notification.status)),
+      showReviewerShowcase,
     });
     return { ...product, lifecycle };
-  }), [notification, trackedProducts, workflows]);
+  }), [notification, showReviewerShowcase, trackedProducts, workflows]);
   const shelfProducts = presentationProducts.filter((product) => product.lifecycle !== "restocked");
   const upperProducts = shelfProducts.slice(0, 3);
   const middleProducts = shelfProducts.slice(3, 5);
@@ -3460,11 +3465,6 @@ export default function App() {
     let approvalWindow: Window | null = null;
     try {
       if (shouldOpenSandboxApproval(notification, action, capabilities)) {
-        approvalWindow = window.open("about:blank", "_blank");
-        if (approvalWindow) {
-          approvalWindow.opener = null;
-          renderApprovalHandoff(approvalWindow, providerBrandForNotification(notification));
-        }
         const handoff = await api.sandboxApproval(sandboxApprovalRequest(notification, action));
         const activeApproval: ApprovalProgress = {
           run_id: handoff.run_id,
@@ -3480,10 +3480,9 @@ export default function App() {
             ? { ...item, run_id: handoff.run_id, status: handoff.state }
             : item
         )));
-        if (approvalWindow) approvalWindow.location.replace(handoff.approval_url);
-        else window.location.assign(handoff.approval_url);
         setStatus("Prava sandbox approval opened");
         setActionFeedback(`Prava sandbox opened. Enter OTP ${handoff.sandbox_otp}; no SMS is sent. No real merchant charge can occur.`);
+        window.location.assign(handoff.approval_url);
         return;
       }
       if (notification.status === "preview") {
@@ -3493,29 +3492,19 @@ export default function App() {
         sound("confirm");
         return;
       }
-      if (["approve", "renew_as_is", "switch_plan"].includes(action)) {
-        approvalWindow = window.open("about:blank", "_blank");
-        if (approvalWindow) {
-          approvalWindow.opener = null;
-          renderApprovalHandoff(approvalWindow, providerBrandForNotification(notification));
-        }
-      }
       const run = await api.action(notification.run_id, action, adjustedAmount);
       if (run.state === "passkey_pending") {
         const { approval_url } = await api.approvalUrl(notification.run_id);
-        if (approvalWindow) approvalWindow.location.replace(approval_url);
-        else window.location.assign(approval_url);
         setStatus("Passkey opened · Return after approval");
-        setActionFeedback("Passkey approval opened in a new tab. Return here after approving.");
+        setActionFeedback("Passkey approval opened. Return here after approving.");
+        window.location.assign(approval_url);
       } else {
-        approvalWindow?.close();
         setStatus(`Workflow · ${humanize(run.state)}`);
         setActionFeedback(`Workflow updated: ${humanize(run.state)}.`);
       }
       sound("confirm");
       await refresh();
     } catch (error) {
-      approvalWindow?.close();
       if (error instanceof ApiError && error.status === 401) {
         await clearApiSessionToken();
         setAuthState("required");
@@ -3614,6 +3603,7 @@ export default function App() {
           onStartPantry={() => setOnboardingDismissed(false)}
           workflows={workflows}
           notification={homeNotification}
+          showReviewerShowcase={showReviewerShowcase}
         />
       ) : selectedSubscription && view === "teams" ? (
         <SubscriptionDetail
