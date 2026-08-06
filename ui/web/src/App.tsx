@@ -3227,14 +3227,29 @@ export default function App() {
     };
   }, []);
 
-  const homeNotification = useMemo(
-    () => notifications.find((notification) => (notification.track || (notification.actions.includes("switch_plan") ? "teams" : "home")) === "home"),
-    [notifications],
-  );
-  const teamsNotification = useMemo(
-    () => notifications.find((notification) => (notification.track || (notification.actions.includes("switch_plan") ? "teams" : "home")) === "teams"),
-    [notifications],
-  );
+  const productNotification = useMemo(() => {
+    if (!selectedProduct) return undefined;
+    return notifications.find((candidate) =>
+      candidate.item_id === selectedProduct.itemId
+      || candidate.run_id === selectedProduct.itemId
+    ) || (
+      selectedProduct.id === "coffee"
+        ? notifications.find((candidate) => (candidate.track || "home") === "home" && (candidate.notification_id === "preview-home" || (candidate.message || "").toLowerCase().includes("coffee") || (candidate.message || "").toLowerCase().includes("arabica")))
+        : undefined
+    );
+  }, [notifications, selectedProduct]);
+
+  const subscriptionNotification = useMemo(() => {
+    if (!selectedSubscription) return undefined;
+    return notifications.find((candidate) =>
+      candidate.item_id === selectedSubscription.itemId
+      || candidate.run_id === selectedSubscription.itemId
+    ) || (
+      selectedSubscription.id === "copilot"
+        ? notifications.find((candidate) => (candidate.track || "home") === "teams" && (candidate.notification_id === "preview-teams" || (candidate.message || "").toLowerCase().includes("copilot")))
+        : undefined
+    );
+  }, [notifications, selectedSubscription]);
   // This is an explicit presentation route for provider review. It contains
   // only local, non-actionable visual fixtures; the default authenticated
   // view continues to show a user's own persisted products.
@@ -3598,14 +3613,9 @@ export default function App() {
       {selectedProduct && view === "home" ? (
         <ProductDetail
           product={selectedProduct}
-          notification={
-            selectedProduct.itemId === homeNotification?.item_id
-            || (!homeNotification?.item_id && selectedProduct.id === "coffee")
-              ? homeNotification
-              : undefined
-          }
+          notification={productNotification}
           capabilities={capabilities}
-          busy={busyNotificationId === homeNotification?.notification_id}
+          busy={busyNotificationId === productNotification?.notification_id}
           actionStatus={actionFeedback}
           onBack={closeProduct}
           onAction={(notification, action, amount) => void act(notification, action, amount)}
@@ -3617,20 +3627,15 @@ export default function App() {
           onPreview={() => sound("hover")}
           onStartPantry={() => setOnboardingDismissed(false)}
           workflows={workflows}
-          notification={homeNotification}
+          notification={productNotification}
           showReviewerShowcase={showReviewerShowcase}
         />
       ) : selectedSubscription && view === "teams" ? (
         <SubscriptionDetail
           subscription={selectedSubscription}
-          notification={
-            selectedSubscription.itemId === teamsNotification?.item_id
-            || (!teamsNotification?.item_id && selectedSubscription.id === "copilot")
-              ? teamsNotification
-              : undefined
-          }
+          notification={subscriptionNotification}
           capabilities={capabilities}
-          busy={busyNotificationId === teamsNotification?.notification_id}
+          busy={busyNotificationId === subscriptionNotification?.notification_id}
           actionStatus={actionFeedback}
           onBack={closeSubscription}
           onAction={(notification, action) => void act(notification, action)}
