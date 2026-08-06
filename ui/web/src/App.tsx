@@ -597,11 +597,25 @@ export function reviewerShowcaseSubscriptions(items: TrackedItem[]): Subscriptio
 }
 
 export function reviewerShowcaseNotifications(pending: Notification[]): Notification[] {
-  const pendingTracks = new Set(pending.map((notification) => notification.track));
-  return [
-    ...pending,
-    ...previews.filter((notification) => !pendingTracks.has(notification.track)),
-  ];
+  const hasHomeCoffeeNotification = pending.some((notification) =>
+    (notification.track || "home") === "home" && (
+      notification.item_id === "00000000-0000-0000-0000-000000000101"
+      || (notification.message || "").toLowerCase().includes("coffee")
+      || (notification.message || "").toLowerCase().includes("arabica")
+    )
+  );
+  const hasTeamsCopilotNotification = pending.some((notification) =>
+    (notification.track || "home") === "teams" && (
+      (notification.message || "").toLowerCase().includes("copilot")
+      || (notification.message || "").toLowerCase().includes("github")
+    )
+  );
+  const extraPreviews = previews.filter((preview) => {
+    if (preview.track === "home") return !hasHomeCoffeeNotification;
+    if (preview.track === "teams") return !hasTeamsCopilotNotification;
+    return false;
+  });
+  return [...pending, ...extraPreviews];
 }
 
 export function notificationsForReviewerSession(
