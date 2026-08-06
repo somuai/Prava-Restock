@@ -559,12 +559,14 @@ def await_mandate(intent_ref):
             continue
 
         status = str(result.get("status", "")).lower()
+        if status == "completed":
+            raise RuntimeError(f"Prava session {intent_ref} was already completed")
         transactions = result.get("transactions") or []
         transaction = transactions[0] if transactions else {}
         line_items = transaction.get("line_items") or []
         line_item = line_items[0] if line_items else {}
 
-        if status in {"awaiting_result", "completed"}:
+        if status in {"awaiting_result", "approved"}:
             token = line_item.get("token") or f"tok_sandbox_{uuid4().hex[:12]}"
             dynamic_cvv = line_item.get("dynamic_cvv") or "123"
             txn_ref_id = (
