@@ -633,10 +633,10 @@ export function shouldOpenSandboxApproval(
   action: string,
   capabilities: Capabilities | null,
 ): boolean {
-  return notification.status === "preview"
+  return ["pending", "preview"].includes(notification.status)
     && (
-      (notification.track === "home" && action === "approve")
-      || (notification.track === "teams" && ["renew_as_is", "switch_plan"].includes(action))
+      ((notification.track || "home") === "home" && action === "approve")
+      || ((notification.track || "home") === "teams" && ["renew_as_is", "switch_plan"].includes(action))
     )
     && capabilities?.prava_mode === "sandbox_configured"
     && capabilities.real_money_enabled === false;
