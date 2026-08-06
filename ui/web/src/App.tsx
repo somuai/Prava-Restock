@@ -3285,6 +3285,7 @@ export default function App() {
     && profile
     && trackedItems.length === 0
     && !onboardingDismissed
+    && !showReviewerShowcase
   ) {
     return (
       <StarterPantryOnboarding
