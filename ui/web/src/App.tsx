@@ -76,10 +76,48 @@ type ProductTone = "attention" | "soon" | "watching";
 export type ProductLifecycle = "attention" | "tracking" | "restocked";
 type SoundKind = "hover" | "open" | "close" | "navigate" | "submit" | "confirm";
 
-type ApprovalProgress = Pick<
-  SandboxApprovalHandoff,
-  "run_id" | "sandbox_otp" | "track" | "action"
-> & { provider: string };
+type ApprovalProgress = Pick<SandboxApprovalHandoff, "run_id"> & {
+  sandbox_otp?: string;
+  track?: Track;
+  action?: SandboxApprovalHandoff["action"];
+  provider: string;
+};
+
+const ACTIVE_APPROVAL_STORAGE_KEY = "restock-active-sandbox-approval";
+const PAYMENT_RECEIPT_STORAGE_KEY = "restock-payment-receipt-run";
+
+function storageValue(key: string): string | null {
+  try {
+    return window.sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function storeValue(key: string, value: string): void {
+  try {
+    window.sessionStorage.setItem(key, value);
+  } catch {
+    // Receipt recovery is a progressive enhancement; the durable workflow
+    // remains the source of truth when browser storage is unavailable.
+  }
+}
+
+function removeStoredValue(key: string): void {
+  try {
+    window.sessionStorage.removeItem(key);
+  } catch {
+    // Ignore disabled private-mode storage.
+  }
+}
+
+export function completedReceiptForWorkflows(
+  workflows: WorkflowRun[],
+  receiptRunId: string | null,
+): WorkflowRun | null {
+  if (!receiptRunId) return null;
+  return workflows.find((run) => run.run_id === receiptRunId && run.state === "completed") || null;
+}
 
 type PantryProduct = {
   id: string;
@@ -1412,19 +1450,24 @@ function ApprovalProgressCard({
   approval,
   checking,
   onCheck,
+  onOpen,
 }: {
   approval: ApprovalProgress;
   checking: boolean;
   onCheck: () => void;
+  onOpen: () => void;
 }) {
   return (
     <aside className="approval-progress-card" role="status" aria-live="polite">
       <span className="approval-progress-icon"><ShieldCheck size={23} weight="duotone" /></span>
       <span className="approval-progress-copy">
         <small>Prava sandbox · {approval.provider}</small>
-        <strong>Enter OTP <code>{approval.sandbox_otp}</code></strong>
-        <span>No SMS is sent in sandbox. Approve there, then return to Restock.</span>
+        <strong>{approval.sandbox_otp ? <>Enter OTP <code>{approval.sandbox_otp}</code></> : "Approve in Prava"}</strong>
+        <span>{approval.sandbox_otp
+          ? "No SMS is sent in sandbox. Approve there, then return to Restock."
+          : "Open the protected Prava approval in a separate tab, then return here."}</span>
       </span>
+      <button type="button" className="approval-progress-open" onClick={onOpen}>Open Prava</button>
       <button type="button" onClick={onCheck} disabled={checking}>
         {checking ? "Checking…" : "Check approval"}
       </button>
@@ -1728,11 +1771,11 @@ function LivingPantry({
 
         {shelfProducts.length === 0 && (
           <div className="shelf-empty">
-            <strong>Everything is stocked.</strong>
-            <span>The next item will appear here when its trigger fires.</span>
+            <strong>Your pantry is ready for its first item.</strong>
+            <span>Add a product to start tracking when it needs a restock.</span>
             {onStartPantry && (
               <button type="button" className="shelf-empty__action" onClick={onStartPantry}>
-                Add pantry items
+                Add your first product
               </button>
             )}
           </div>
@@ -3082,7 +3125,7 @@ export default function App() {
   const [teamsSetupOpen, setTeamsSetupOpen] = useState(false);
   const [approvalProgress, setApprovalProgress] = useState<ApprovalProgress | null>(() => {
     try {
-      const saved = window.sessionStorage.getItem("restock-active-sandbox-approval");
+      const saved = storageValue(ACTIVE_APPROVAL_STORAGE_KEY);
       return saved ? JSON.parse(saved) as ApprovalProgress : null;
     } catch {
       return null;
@@ -3106,6 +3149,21 @@ export default function App() {
     };
   });
 
+  const clearApprovalProgress = () => {
+    setApprovalProgress(null);
+    removeStoredValue(ACTIVE_APPROVAL_STORAGE_KEY);
+  };
+
+  const rememberPaymentOutcome = (run: WorkflowRun) => {
+    setPaymentOutcome(run);
+    storeValue(PAYMENT_RECEIPT_STORAGE_KEY, run.run_id);
+  };
+
+  const dismissPaymentOutcome = () => {
+    setPaymentOutcome(null);
+    removeStoredValue(PAYMENT_RECEIPT_STORAGE_KEY);
+  };
+
   useEffect(() => {
     const images = revealAssets.map((src) => {
       const image = new Image();
@@ -3123,27 +3181,29 @@ export default function App() {
     try {
       const paymentStatus = await api.paymentStatus(approvalProgress.run_id);
       if (["failed", "rejected", "expired"].includes(paymentStatus.workflow_state)) {
-        setApprovalProgress(null);
-        window.sessionStorage.removeItem("restock-active-sandbox-approval");
+        clearApprovalProgress();
         setStatus(`Workflow · ${humanize(paymentStatus.workflow_state)}`);
-        setActionFeedback(`The approval ended as ${humanize(paymentStatus.workflow_state)}. No payment was completed.`);
+        setActionFeedback(paymentStatus.workflow_state === "expired"
+          ? "This Prava sandbox session expired. No payment was completed. Start a fresh approval from the item when you are ready."
+          : `The approval ended as ${humanize(paymentStatus.workflow_state)}. No payment was completed.`);
         await refresh();
         return;
       }
       if (!paymentStatus.resumable) return;
       const finalRun = await api.resume(approvalProgress.run_id);
       if (["completed", "failed", "rejected", "expired", "checkout_pending", "reapproval_required"].includes(finalRun.state)) {
-        setApprovalProgress(null);
-        window.sessionStorage.removeItem("restock-active-sandbox-approval");
+        clearApprovalProgress();
       }
       if (finalRun.state === "completed") {
-        setPaymentOutcome(finalRun);
+        rememberPaymentOutcome(finalRun);
         setStatus("Sandbox approval complete");
         setActionFeedback("Prava approval verified. No real charge was made in this sandbox flow.");
         if (soundOn) playInterfaceSound("confirm");
       } else if (["failed", "rejected", "expired"].includes(finalRun.state)) {
         setStatus(`Workflow · ${humanize(finalRun.state)}`);
-        setActionFeedback(`The approval ended as ${humanize(finalRun.state)}. No payment was completed.`);
+        setActionFeedback(finalRun.state === "expired"
+          ? "This Prava session expired. No payment was completed. Start a fresh approval from the item when you are ready."
+          : `The approval ended as ${humanize(finalRun.state)}. No payment was completed.`);
       }
       await refresh();
     } catch (error) {
@@ -3151,8 +3211,7 @@ export default function App() {
         await clearApiSessionToken();
         setAuthState("required");
       } else if (error instanceof ApiError && [400, 404].includes(error.status)) {
-        setApprovalProgress(null);
-        window.sessionStorage.removeItem("restock-active-sandbox-approval");
+        clearApprovalProgress();
       } else {
         setActionFeedback(error instanceof Error ? error.message : "Could not check approval yet");
       }
@@ -3189,6 +3248,13 @@ export default function App() {
       setNotifications(visibleNotifications);
       setAudit(events);
       setWorkflows(workflowRuns);
+      const storedReceiptRunId = storageValue(PAYMENT_RECEIPT_STORAGE_KEY);
+      const restoredReceipt = completedReceiptForWorkflows(workflowRuns, storedReceiptRunId);
+      if (restoredReceipt) {
+        setPaymentOutcome(restoredReceipt);
+      } else if (storedReceiptRunId) {
+        removeStoredValue(PAYMENT_RECEIPT_STORAGE_KEY);
+      }
       setTrackedItems(currentItems);
       setBackendConnected(true);
       if (currentUser) setProfile(currentUser);
@@ -3478,6 +3544,27 @@ export default function App() {
     document.body.append(card);
   };
 
+  const prepareApprovalWindow = (brand: ProviderBrand): Window | null => {
+    const target = window.open("about:blank", "_blank");
+    if (target) renderApprovalHandoff(target, brand);
+    return target;
+  };
+
+  const openPravaApproval = async (runId: string, brand: ProviderBrand) => {
+    const target = prepareApprovalWindow(brand);
+    if (!target) {
+      setActionFeedback("Your browser blocked the secure approval tab. Allow pop-ups for Restock, then choose Open Prava again.");
+      return;
+    }
+    try {
+      const { approval_url } = await api.approvalUrl(runId);
+      target.location.replace(approval_url);
+    } catch (error) {
+      target.close();
+      setActionFeedback(error instanceof Error ? error.message : "Prava approval could not be opened.");
+    }
+  };
+
   const closeSubscription = () => {
     sound("close");
     setSelectedSubscription(null);
@@ -3492,9 +3579,12 @@ export default function App() {
     busyNotificationRef.current = notification.notification_id;
     setBusyNotificationId(notification.notification_id);
     sound("submit");
-    let approvalWindow: Window | null = null;
     try {
       if (shouldOpenSandboxApproval(notification, action, capabilities)) {
+        // Open the tab synchronously in response to the user gesture. The
+        // provider URL arrives asynchronously, so navigating the main app
+        // here would lose the durable receipt return path.
+        const approvalWindow = prepareApprovalWindow(providerBrandForNotification(notification));
         const handoff = await api.sandboxApproval(sandboxApprovalRequest(notification, action));
         const activeApproval: ApprovalProgress = {
           run_id: handoff.run_id,
@@ -3504,7 +3594,7 @@ export default function App() {
           provider: providerBrandForNotification(notification).name,
         };
         setApprovalProgress(activeApproval);
-        window.sessionStorage.setItem("restock-active-sandbox-approval", JSON.stringify(activeApproval));
+        storeValue(ACTIVE_APPROVAL_STORAGE_KEY, JSON.stringify(activeApproval));
         setNotifications((items) => items.map((item) => (
           item.notification_id === notification.notification_id
             ? { ...item, run_id: handoff.run_id, status: handoff.state }
@@ -3512,7 +3602,11 @@ export default function App() {
         )));
         setStatus("Prava sandbox approval opened");
         setActionFeedback(`Prava sandbox opened. Enter OTP ${handoff.sandbox_otp}; no SMS is sent. No real merchant charge can occur.`);
-        window.location.assign(handoff.approval_url);
+        if (approvalWindow) {
+          approvalWindow.location.replace(handoff.approval_url);
+        } else {
+          setActionFeedback("Prava approval is ready. Choose Open Prava above to continue in a separate tab.");
+        }
         return;
       }
       if (notification.status === "preview") {
@@ -3524,10 +3618,17 @@ export default function App() {
       }
       const run = await api.action(notification.run_id, action, adjustedAmount);
       if (run.state === "passkey_pending") {
-        const { approval_url } = await api.approvalUrl(notification.run_id);
-        setStatus("Passkey opened · Return after approval");
-        setActionFeedback("Passkey approval opened. Return here after approving.");
-        window.location.assign(approval_url);
+        const isTeams = notification.track === "teams" || notification.actions.includes("switch_plan");
+        const activeApproval: ApprovalProgress = {
+          run_id: notification.run_id,
+          track: isTeams ? "teams" : "home",
+          provider: providerBrandForNotification(notification).name,
+        };
+        setApprovalProgress(activeApproval);
+        storeValue(ACTIVE_APPROVAL_STORAGE_KEY, JSON.stringify(activeApproval));
+        setStatus("Passkey approval ready · Return after approval");
+        setActionFeedback("Passkey approval is ready in a secure Prava tab. Return here after approving.");
+        await openPravaApproval(notification.run_id, providerBrandForNotification(notification));
       } else {
         setStatus(`Workflow · ${humanize(run.state)}`);
         setActionFeedback(`Workflow updated: ${humanize(run.state)}.`);
@@ -3577,6 +3678,8 @@ export default function App() {
             setTenants([]);
             setTrackedItems([]);
             setNotifications([]);
+            clearApprovalProgress();
+            dismissPaymentOutcome();
             setBackendConnected(false);
             setAuthState("required");
             setStatus("Signed out");
@@ -3589,15 +3692,23 @@ export default function App() {
           approval={approvalProgress}
           checking={approvalChecking}
           onCheck={() => void checkApproval()}
+          onOpen={() => void openPravaApproval(
+            approvalProgress.run_id,
+            providerBrandForName(approvalProgress.provider) || {
+              name: approvalProgress.provider,
+              logo: "/app/assets/restock-mark.png",
+              accent: "#1f6b54",
+            },
+          )}
         />
       )}
       {paymentOutcome && (
         <PaymentConfirmation
           run={paymentOutcome}
           capabilities={capabilities}
-          onClose={() => setPaymentOutcome(null)}
+          onClose={dismissPaymentOutcome}
           onViewActivity={() => {
-            setPaymentOutcome(null);
+            dismissPaymentOutcome();
             setViewWithSound("activity");
           }}
         />

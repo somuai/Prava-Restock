@@ -1202,6 +1202,77 @@ class RestockRepository:
                 user.display_name = "Deleted user"
                 user.prava_account_ref = "deleted"
 
+    def reset_reviewer_fixture(self, *, user_id: str) -> dict[str, int]:
+        """Remove only the isolated review account's replayable demo history.
+
+        Reviewer access is deliberately separate from real users.  Resetting it
+        clears old handoffs, notifications, payment attempts, and audits before
+        a new presentation fixture is provisioned; it never touches another
+        account, auth identity, membership, or application-wide audit data.
+        """
+
+        with self.database.session() as session:
+            runs = select(WorkflowRunRow).where(WorkflowRunRow.user_id == user_id)
+            run_rows = session.scalars(runs).all()
+            run_ids = [row.run_id for row in run_rows]
+            idempotency_keys = [row.idempotency_key for row in run_rows]
+            notification_ids = select(NotificationRow.notification_id).where(
+                NotificationRow.user_id == user_id
+            )
+
+            counts = {
+                "workflows": len(run_rows),
+                "notifications": int(
+                    session.scalar(
+                        select(func.count()).select_from(NotificationRow).where(
+                            NotificationRow.user_id == user_id
+                        )
+                    ) or 0
+                ),
+                "audit_entries": int(
+                    session.scalar(
+                        select(func.count()).select_from(AuditRow).where(
+                            AuditRow.user_id == user_id
+                        )
+                    ) or 0
+                ),
+                "items": int(
+                    session.scalar(
+                        select(func.count()).select_from(TrackedItemRow).where(
+                            TrackedItemRow.user_id == user_id
+                        )
+                    ) or 0
+                ),
+            }
+            session.execute(delete(SlackDeliveryRow).where(
+                SlackDeliveryRow.notification_id.in_(notification_ids)
+            ))
+            session.execute(delete(NotificationActionRow).where(
+                NotificationActionRow.user_id == user_id
+            ))
+            if run_ids:
+                session.execute(delete(ApprovalDecisionRow).where(
+                    ApprovalDecisionRow.run_id.in_(run_ids)
+                ))
+                session.execute(delete(CompletionEffectsRow).where(
+                    CompletionEffectsRow.run_id.in_(run_ids)
+                ))
+                session.execute(delete(TransactionRow).where(
+                    TransactionRow.run_id.in_(run_ids)
+                ))
+            if idempotency_keys:
+                session.execute(delete(MerchantCheckoutAttemptRow).where(
+                    MerchantCheckoutAttemptRow.idempotency_key.in_(idempotency_keys)
+                ))
+            session.execute(delete(NotificationRow).where(NotificationRow.user_id == user_id))
+            session.execute(delete(AuditRow).where(AuditRow.user_id == user_id))
+            session.execute(delete(ForecastObservationRow).where(
+                ForecastObservationRow.user_id == user_id
+            ))
+            session.execute(delete(WorkflowRunRow).where(WorkflowRunRow.user_id == user_id))
+            session.execute(delete(TrackedItemRow).where(TrackedItemRow.user_id == user_id))
+            return counts
+
     def create_workflow(
         self,
         *,

@@ -11,6 +11,7 @@ import {
   reviewerShowcaseProducts,
   reviewerShowcaseSubscriptions,
   reviewerTeamSubscriptionPresentation,
+  completedReceiptForWorkflows,
 } from "./App";
 import type { TrackedItem } from "./api";
 
@@ -100,6 +101,20 @@ describe("reviewer product presentation", () => {
       disclosure: "Sandbox · no real charge",
       stages: ["Approval verified", "Simulation recorded", "Audit ready"],
     });
+  });
+
+  it("restores a saved receipt only for the same completed workflow", () => {
+    const completed = {
+      run_id: "completed-sandbox-run",
+      item_id: reviewerCoffee.item_id,
+      state: "completed",
+      merchant: "zepto",
+      currency: "INR",
+      proposed_amount: "380.00",
+    };
+    expect(completedReceiptForWorkflows([completed], "completed-sandbox-run")).toEqual(completed);
+    expect(completedReceiptForWorkflows([completed], "another-run")).toBeNull();
+    expect(completedReceiptForWorkflows([{ ...completed, state: "failed" }], "completed-sandbox-run")).toBeNull();
   });
 
   it("explains the next state after a real provider-confirmed payment", () => {

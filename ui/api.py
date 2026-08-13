@@ -1887,7 +1887,10 @@ def reviewer_sandbox_approval(
         LOGGER.error(json.dumps({"event": "sandbox_approval_handoff_failed", "error": str(exc), "traceback": traceback.format_exc()}))
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Prava sandbox session could not be created: {exc}",
+            detail=(
+                "Prava sandbox could not create a session. No approval link was "
+                "opened; try again after the provider recovers."
+            ),
         ) from exc
     return {
         "run_id": str(run["run_id"]),
@@ -1932,8 +1935,39 @@ def workflow_payment_status(
     intent_ref = run.get("prava_intent_ref")
     if not intent_ref:
         raise HTTPException(status_code=409, detail="workflow has no Prava session")
+    def mark_expired() -> dict[str, Any]:
+        """Persist a provider-confirmed expiry exactly once, without reapproval."""
+
+        try:
+            expired = repository.transition(
+                run_id,
+                expected={"passkey_pending"},
+                state="expired",
+                error_code="PRAVA_SESSION_EXPIRED",
+            )
+        except ValueError:
+            # Another poll/resume may have reached a terminal state first.
+            return repository.get_workflow(run_id)
+        repository.audit(
+            user_id=user_id,
+            run_id=run_id,
+            item_id=run["item_id"],
+            event_type="mandate_expired",
+            payload={"reason": "provider_session_expired"},
+            modes=run["modes"],
+        )
+        return expired
+
     try:
         provider_result = prava_client.get_payment_result(str(intent_ref))
+    except prava_client.MandateExpiredError:
+        expired = mark_expired()
+        return {
+            "run_id": run_id,
+            "workflow_state": str(expired["state"]),
+            "provider_status": "expired",
+            "resumable": False,
+        }
     except Exception as exc:
         LOGGER.warning(json.dumps({"event": "prava_payment_status_unavailable", "run_id": run_id}))
         raise HTTPException(
@@ -1941,6 +1975,14 @@ def workflow_payment_status(
             detail="Prava payment status is temporarily unavailable",
         ) from exc
     provider_status = str(provider_result.get("status", "")).lower()
+    if provider_status == "expired":
+        expired = mark_expired()
+        return {
+            "run_id": run_id,
+            "workflow_state": str(expired["state"]),
+            "provider_status": "expired",
+            "resumable": False,
+        }
     return {
         "run_id": run_id,
         "workflow_state": str(run["state"]),

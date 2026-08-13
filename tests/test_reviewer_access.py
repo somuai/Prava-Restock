@@ -40,3 +40,38 @@ def test_reviewer_provisioning_is_isolated_and_idempotent(tmp_path) -> None:
         if item["merchant_sku_id"] == "teamtool-pro-monthly"
     )
     assert refreshed_teams_fixture["name"] == "GitHub Copilot Business"
+
+
+def test_reviewer_history_reset_removes_only_reviewer_replay_data(tmp_path) -> None:
+    repository = RestockRepository(Database(f"sqlite:///{tmp_path / 'reviewer-reset.db'}"))
+    repository.create_schema()
+    reviewer_id = UUID("00000000-0000-0000-0000-000000000099")
+    provision_reviewer(repository, user_id=reviewer_id)
+    item = repository.list_items(str(reviewer_id))[0]
+    run = repository.create_workflow(
+        user_id=str(reviewer_id),
+        item_id=item["item_id"],
+        trigger_reason="review",
+        proposed_amount="10.00",
+        currency="INR",
+        merchant="zepto",
+        proposed_action=None,
+        quote=None,
+        modes={"prava": "sandbox"},
+        idempotency_key="reviewer-history-reset",
+    )
+    repository.audit(
+        user_id=str(reviewer_id),
+        run_id=run["run_id"],
+        item_id=item["item_id"],
+        event_type="old_reviewer_event",
+        payload={},
+        modes={"prava": "sandbox"},
+    )
+
+    created, total = provision_reviewer(repository, user_id=reviewer_id, reset_history=True)
+
+    assert (created, total) == (5, 5)
+    assert repository.list_workflows(str(reviewer_id)) == []
+    audit = repository.list_audit(str(reviewer_id))
+    assert [entry["event_type"] for entry in audit] == ["reviewer_fixture_refreshed"]

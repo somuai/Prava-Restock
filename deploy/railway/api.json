@@ -8,7 +8,7 @@
     "preDeployCommand": [
       "python scripts/validate_service_env.py api && alembic upgrade head"
     ],
-    "startCommand": "sh -c 'python scripts/materialize_zepto_oauth_cache.py && unset ZEPTO_MCP_AUTH_CACHE_B64 && if [ \"${RESTOCK_ENV:-development}\" = \"production\" ]; then python scripts/validate_service_env.py api; fi && alembic upgrade head && if [ -n \"${RESTOCK_REVIEWER_USER_ID:-}\" ]; then python scripts/provision_reviewer.py; fi && exec uvicorn ui.api:app --host 0.0.0.0 --port ${PORT:-8000}'",
+    "startCommand": "sh -c 'python scripts/materialize_zepto_oauth_cache.py && unset ZEPTO_MCP_AUTH_CACHE_B64 && if [ \"${RESTOCK_ENV:-development}\" = \"production\" ]; then python scripts/validate_service_env.py api; fi && alembic upgrade head && if [ -n \"${RESTOCK_REVIEWER_USER_ID:-}\" ]; then if [ \"${RESTOCK_REVIEWER_RESET_ON_DEPLOY:-0}\" = \"1\" ]; then python scripts/provision_reviewer.py --reset-history; else python scripts/provision_reviewer.py; fi; fi && exec uvicorn ui.api:app --host 0.0.0.0 --port ${PORT:-8000}'",
     "numReplicas": 1,
     "healthcheckPath": "/ready",
     "healthcheckTimeout": 100,

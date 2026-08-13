@@ -183,3 +183,56 @@ def test_payment_status_is_sanitized_before_it_reaches_the_browser(tmp_path, mon
     }
     assert "must-not-leak" not in response.text
     assert "999" not in response.text
+
+
+def test_provider_expiry_becomes_a_durable_expired_workflow(tmp_path, monkeypatch) -> None:
+    repository = RestockRepository(Database(f"sqlite:///{tmp_path / 'payment-expired.db'}"))
+    repository.create_schema()
+    repository.upsert_user(demo_user())
+    item = api.build_starter_item("coffee", user_id=str(demo_user().user_id))
+    repository.upsert_item(item)
+    run = repository.create_workflow(
+        user_id=str(demo_user().user_id),
+        item_id=str(item.item_id),
+        trigger_reason="predicted_depletion",
+        proposed_amount="380.00",
+        currency="INR",
+        merchant="zepto",
+        proposed_action=None,
+        quote=None,
+        idempotency_key="reviewer-expired-key",
+        modes={"prava": "sandbox", "home_payment": "disclosed_mock"},
+    )
+    repository.transition(
+        run["run_id"],
+        expected={"triggered"},
+        state="passkey_pending",
+        prava_intent_ref="expired-session-123",
+    )
+    api.app.dependency_overrides[api.get_repository] = lambda: repository
+    monkeypatch.setattr(
+        prava_client,
+        "get_payment_result",
+        lambda _session_id: (_ for _ in ()).throw(
+            prava_client.MandateExpiredError(message="Session expired")
+        ),
+    )
+
+    try:
+        response = TestClient(api.app).get(
+            f"/api/v1/workflows/{run['run_id']}/payment-status",
+            headers=AUTH_HEADERS,
+        )
+    finally:
+        api.app.dependency_overrides.pop(api.get_repository, None)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "run_id": run["run_id"],
+        "workflow_state": "expired",
+        "provider_status": "expired",
+        "resumable": False,
+    }
+    assert repository.get_workflow(run["run_id"])["state"] == "expired"
+    audit = repository.list_audit(str(demo_user().user_id))
+    assert any(entry["event_type"] == "mandate_expired" for entry in audit)

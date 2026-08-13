@@ -5,12 +5,11 @@ package owns card entry and passkey approval; this module implements the
 server-side session calls that Prava documents for Python applications.
 """
 
-import base64
 import json
 import logging
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 from math import isfinite
 from pathlib import Path
@@ -279,33 +278,11 @@ def _create_session(
     try:
         with urlopen(request, timeout=request_timeout_seconds) as response:
             result = json.loads(response.read().decode("utf-8"))
-    except Exception as exc:
-        if api_key.startswith("sk_test_"):
-            LOGGER.warning(json.dumps({"event": "prava_sandbox_rate_limit_fallback", "error": str(exc)}))
-            session_id = f"ses_01KZ_{uuid4().hex[:18].upper()}"
-            order_id = f"ord_01KZ_{uuid4().hex[:18].upper()}"
-            token = f"tok_sandbox_{uuid4().hex[:12]}"
-            now = datetime.now(timezone.utc)
-            expires = now + timedelta(minutes=effective_until_minutes)
-            payload_token = {
-                "merchantAccountId": "ma_01KXJ63ZSRN4JGKE6GPNTJ9JH2",
-                "merchantId": "prava_restock",
-                "customerId": "cus_01KXT7CY7EM41DPRKAYK42RM6H",
-                "externalUserId": str(user_id),
-                "tokenId": token,
-                "exp": int(expires.timestamp()),
-            }
-            mock_token = base64.urlsafe_b64encode(json.dumps(payload_token).encode()).decode()
-            return {
-                "session_id": session_id,
-                "order_id": order_id,
-                "session_token": mock_token,
-                "expires_at": expires.isoformat(),
-                "iframe_url": f"https://sandbox.collect.prava.space?session={session_id}",
-            }
-        if isinstance(exc, HTTPError):
-            raise _api_error(exc, "Prava session creation failed") from exc
-        raise
+    except HTTPError as exc:
+        # A test key does not make a locally invented session valid.  Surface
+        # the provider response so callers never send a user to a fake Prava
+        # URL after a rate limit, provisioning failure, or invalid request.
+        raise _api_error(exc, "Prava session creation failed") from exc
     except TimeoutError as exc:
         raise RuntimeError("Prava session creation timed out") from exc
     except URLError as exc:
@@ -435,28 +412,6 @@ def get_payment_result(session_id):
         with urlopen(request, timeout=20) as response:
             result = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
-        if exc.code in {404, 429} and api_key.startswith("sk_test_") and str(session_id) in _INTENTS:
-            token = f"tok_sandbox_{uuid4().hex[:12]}"
-            dynamic_cvv = "123"
-            txn_ref_id = f"txn_sandbox_{uuid4().hex[:12]}"
-            return {
-                "session_id": str(session_id),
-                "status": "awaiting_result",
-                "transactions": [
-                    {
-                        "txn_id": txn_ref_id,
-                        "line_items": [
-                            {
-                                "token": token,
-                                "dynamic_cvv": dynamic_cvv,
-                                "txn_ref_id": txn_ref_id,
-                                "expiry_month": "12",
-                                "expiry_year": "2028",
-                            }
-                        ],
-                    }
-                ],
-            }
         raise _api_error(exc, "Prava payment-result request failed") from exc
     except (TimeoutError, URLError) as exc:
         raise RuntimeError(
@@ -466,7 +421,7 @@ def get_payment_result(session_id):
         raise RuntimeError("Prava payment-result returned an invalid response") from exc
 
     status = str(result.get("status", "")).lower()
-    if status not in {"pending", "awaiting_result", "completed", "failed"}:
+    if status not in {"pending", "awaiting_result", "completed", "failed", "expired"}:
         raise RuntimeError("Prava payment-result returned an unknown status")
     if str(result.get("session_id") or session_id) != str(session_id):
         raise RuntimeError("Prava payment-result session reference does not match")
@@ -482,48 +437,6 @@ def await_mandate(intent_ref):
 
     if "outcome" in intent:
         return dict(intent["outcome"])
-
-    session_id = str(intent.get("session_id", ""))
-    if session_id.startswith("ses_01KZ_"):
-        token = f"tok_sandbox_{uuid4().hex[:12]}"
-        dynamic_cvv = "123"
-        txn_ref_id = f"txn_sandbox_{uuid4().hex[:12]}"
-        credential_reference = f"prava_credential_{uuid4().hex}"
-        _CREDENTIALS[credential_reference] = {
-            "token": token,
-            "dynamic_cvv": dynamic_cvv,
-            "expiry_month": "12",
-            "expiry_year": "2028",
-            "session_id": session_id,
-            "txn_ref_id": txn_ref_id,
-            "created_at": datetime.now(timezone.utc),
-            "consumed_at": None,
-        }
-        outcome = {
-            "status": "approved",
-            "mandate_id": txn_ref_id,
-            "txn_ref_id": txn_ref_id,
-            "credential_reference": credential_reference,
-            "provider_payment_id": session_id,
-            "merchant_account_id": "ma_01KXJ63ZSRN4JGKE6GPNTJ9JH2",
-            "authorized_amount": intent["amount"],
-            "scope": {
-                "merchant": intent["merchant"],
-                "max_amount": intent["amount"],
-            },
-            "approved_at": datetime.now(timezone.utc).isoformat(),
-            "line_items": [
-                {
-                    "token": token,
-                    "dynamic_cvv": dynamic_cvv,
-                    "txn_ref_id": txn_ref_id,
-                    "expiry_month": "12",
-                    "expiry_year": "2028",
-                }
-            ],
-        }
-        intent["outcome"] = outcome
-        return dict(outcome)
 
     constraints = intent["constraints"]
     poll_timeout = float(constraints.get("poll_timeout_seconds", 60))
@@ -567,13 +480,14 @@ def await_mandate(intent_ref):
         line_item = line_items[0] if line_items else {}
 
         if status in {"awaiting_result", "approved"}:
-            token = line_item.get("token") or f"tok_sandbox_{uuid4().hex[:12]}"
-            dynamic_cvv = line_item.get("dynamic_cvv") or "123"
-            txn_ref_id = (
-                line_item.get("txn_ref_id")
-                or transaction.get("txn_id")
-                or f"txn_sandbox_{uuid4().hex[:12]}"
-            )
+            token = line_item.get("token")
+            dynamic_cvv = line_item.get("dynamic_cvv")
+            txn_ref_id = line_item.get("txn_ref_id") or transaction.get("txn_id")
+            if not token or not dynamic_cvv or not txn_ref_id:
+                raise RuntimeError(
+                    "Prava payment-result is awaiting settlement but did not include "
+                    "the required one-time credential fields"
+                )
             credential_reference = f"prava_credential_{uuid4().hex}"
             _CREDENTIALS[credential_reference] = {
                 "token": token,
@@ -603,10 +517,12 @@ def await_mandate(intent_ref):
             intent["outcome"] = outcome
             return dict(outcome)
 
-        if status == "failed":
+        if status in {"failed", "expired"}:
             error = transaction.get("error") or result.get("error") or {}
             code = str(error.get("code", "")).upper()
-            outcome_status = "expired" if "EXPIRED" in code else "rejected"
+            outcome_status = (
+                "expired" if status == "expired" or "EXPIRED" in code else "rejected"
+            )
             outcome = {"status": outcome_status, "intent_ref": str(intent_ref)}
             intent["outcome"] = outcome
             return dict(outcome)
@@ -903,4 +819,3 @@ def charge_mandate(
         raise RuntimeError("Prava mandate charge could not reach the configured API") from exc
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise RuntimeError("Prava mandate charge returned an invalid response") from exc
-

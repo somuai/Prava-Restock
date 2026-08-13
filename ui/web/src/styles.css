@@ -2581,6 +2581,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visibl
   cursor: pointer;
 }
 .approval-progress-card > button:disabled { opacity: .6; cursor: wait; }
+.approval-progress-card > .approval-progress-open { background: var(--green); color: #fffefa; }
 
 .payment-confirmation-scrim {
   position: fixed;
@@ -2615,8 +2616,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visibl
   border: 1px solid rgba(32, 77, 58, .18);
   border-radius: 6px 6px 28px 28px;
   background:
-    linear-gradient(rgba(255, 254, 248, .985), rgba(255, 254, 248, .985)),
-    url("/app/assets/paper-grain.svg");
+    linear-gradient(rgba(255, 254, 248, .96), rgba(255, 254, 248, .96)),
+    url("/app/assets/cardboard-texture-cc0.png") center / 360px 360px repeat;
   box-shadow: 0 38px 120px rgba(25, 30, 23, .34);
   animation: confirmation-receipt-in 520ms var(--motion-settle) both;
 }

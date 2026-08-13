@@ -19,6 +19,7 @@ runtime-cache
 tests
 docs
 assets
+restock_system_architecture.png
 restock-landing
 logs
 node_modules

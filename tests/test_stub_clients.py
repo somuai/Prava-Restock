@@ -288,6 +288,54 @@ def test_get_payment_result_uses_documented_request_contract(monkeypatch) -> Non
     assert result["status"] == "pending"
 
 
+def test_sandbox_provider_failure_never_fabricates_a_payment_session(monkeypatch) -> None:
+    """A failed real request must not redirect a user to a made-up session."""
+
+    monkeypatch.setenv("PRAVA_API_KEY", "sk_test_unit_key")
+    monkeypatch.setenv("PRAVA_SANDBOX_URL", "https://sandbox.api.prava.space")
+
+    def rate_limited(*_args, **_kwargs):
+        raise HTTPError(
+            "https://sandbox.api.prava.space/v1/sessions",
+            429,
+            "Too Many Requests",
+            {},
+            BytesIO(json.dumps({"error": {"code": "RATE_LIMITED", "message": "Retry later"}}).encode()),
+        )
+
+    monkeypatch.setattr(prava_client, "urlopen", rate_limited)
+
+    with pytest.raises(prava_client.PravaAPIError) as exc_info:
+        prava_client.create_intent("zepto", "9.99", "Coffee", {})
+
+    assert exc_info.value.status_code == 429
+    assert exc_info.value.code == "RATE_LIMITED"
+    assert not any(key.startswith("ses_01KZ_") for key in prava_client._INTENTS)
+
+
+def test_missing_payment_result_never_fabricates_sandbox_credentials(monkeypatch) -> None:
+    prava_client._CREDENTIALS.clear()
+    monkeypatch.setenv("PRAVA_API_KEY", "sk_test_unit_key")
+    monkeypatch.setenv("PRAVA_SANDBOX_URL", "https://sandbox.api.prava.space")
+
+    def missing(*_args, **_kwargs):
+        raise HTTPError(
+            "https://sandbox.api.prava.space/v1/sessions/missing/payment-result",
+            404,
+            "Not Found",
+            {},
+            BytesIO(json.dumps({"error": {"code": "SESSION_NOT_FOUND"}}).encode()),
+        )
+
+    monkeypatch.setattr(prava_client, "urlopen", missing)
+    with pytest.raises(prava_client.PravaAPIError) as exc_info:
+        prava_client.get_payment_result("missing")
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.code == "SESSION_NOT_FOUND"
+    assert prava_client._CREDENTIALS == {}
+
+
 def test_report_status_uses_documented_optional_fields(monkeypatch) -> None:
     monkeypatch.setenv("PRAVA_API_KEY", "sk_test_unit_key")
     monkeypatch.setenv("PRAVA_SANDBOX_URL", "https://sandbox.api.prava.space")
@@ -409,6 +457,43 @@ def test_prava_client_normalizes_failed_session_as_rejected(monkeypatch) -> None
     )
     assert prava_client.await_mandate(intent_ref) == {
         "status": "rejected",
+        "intent_ref": intent_ref,
+    }
+
+
+def test_prava_client_normalizes_literal_expired_session_as_expired(monkeypatch) -> None:
+    """A provider's explicit expiry must never look like a rejection or retry."""
+
+    responses = iter(
+        [
+            {
+                "session_id": "sess_unit_expired",
+                "session_token": "session-token-unit",
+                "iframe_url": "https://sandbox.collect.prava.space/unit",
+                "order_id": "ord_unit",
+                "expires_at": "2099-12-31T23:59:59Z",
+            },
+            {
+                "session_id": "sess_unit_expired",
+                "status": "expired",
+                "transactions": [],
+            },
+        ]
+    )
+    monkeypatch.setenv("PRAVA_API_KEY", "sk_test_unit_key")
+    monkeypatch.setenv("PRAVA_SANDBOX_URL", "https://sandbox.api.prava.space")
+    monkeypatch.setattr(
+        prava_client,
+        "urlopen",
+        lambda *args, **kwargs: FakeResponse(next(responses)),
+    )
+
+    intent_ref = prava_client.create_intent(
+        "zepto", 450, "Coffee", {"poll_interval_seconds": 0}
+    )
+
+    assert prava_client.await_mandate(intent_ref) == {
+        "status": "expired",
         "intent_ref": intent_ref,
     }
 

@@ -35,6 +35,7 @@ declare global {
 }
 
 const GOOGLE_SCRIPT_ID = "google-identity-services";
+const GOOGLE_LOAD_TIMEOUT_MS = 8_000;
 let googleIdentityPromise: Promise<GoogleIdentity> | null = null;
 
 function loadGoogleIdentity(): Promise<GoogleIdentity> {
@@ -42,16 +43,41 @@ function loadGoogleIdentity(): Promise<GoogleIdentity> {
   if (googleIdentityPromise) return googleIdentityPromise;
 
   const pending = new Promise<GoogleIdentity>((resolve, reject) => {
+    let settled = false;
+    let pollTimer: number | undefined;
+    let timeoutTimer: number | undefined;
+
+    const cleanup = () => {
+      if (pollTimer !== undefined) window.clearInterval(pollTimer);
+      if (timeoutTimer !== undefined) window.clearTimeout(timeoutTimer);
+    };
     const finish = () => {
       const identity = window.google?.accounts.id;
-      if (identity) resolve(identity);
-      else reject(new Error("Google sign-in did not finish loading."));
+      if (!identity || settled) return;
+      settled = true;
+      cleanup();
+      resolve(identity);
     };
-    const fail = () => reject(new Error("Google sign-in could not be loaded. Check your connection and try again."));
+    const fail = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error("Google sign-in could not be loaded. Check your connection and try again."));
+    };
+    const observeGoogle = () => {
+      finish();
+    };
     const existing = document.getElementById(GOOGLE_SCRIPT_ID) as HTMLScriptElement | null;
     if (existing) {
-      existing.addEventListener("load", finish, { once: true });
+      // The script may have loaded just before this component mounted.  In
+      // that case there is no second load event, so check the global as well.
+      existing.addEventListener("load", observeGoogle, { once: true });
       existing.addEventListener("error", fail, { once: true });
+      observeGoogle();
+      if (!settled) {
+        pollTimer = window.setInterval(observeGoogle, 50);
+        timeoutTimer = window.setTimeout(fail, GOOGLE_LOAD_TIMEOUT_MS);
+      }
       return;
     }
 
@@ -60,9 +86,11 @@ function loadGoogleIdentity(): Promise<GoogleIdentity> {
     script.src = "https://accounts.google.com/gsi/client";
     script.async = true;
     script.defer = true;
-    script.addEventListener("load", finish, { once: true });
+    script.addEventListener("load", observeGoogle, { once: true });
     script.addEventListener("error", fail, { once: true });
     document.head.appendChild(script);
+    pollTimer = window.setInterval(observeGoogle, 50);
+    timeoutTimer = window.setTimeout(fail, GOOGLE_LOAD_TIMEOUT_MS);
   }).catch((error) => {
     googleIdentityPromise = null;
     throw error;

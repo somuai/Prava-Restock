@@ -17,8 +17,16 @@ from storage import Database, RestockRepository
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def provision_reviewer(repository: RestockRepository, *, user_id: UUID) -> tuple[int, int]:
+def provision_reviewer(
+    repository: RestockRepository,
+    *,
+    user_id: UUID,
+    reset_history: bool = False,
+) -> tuple[int, int]:
     """Create the reviewer and copy five safe demo fixtures idempotently."""
+
+    if reset_history:
+        repository.reset_reviewer_fixture(user_id=str(user_id))
 
     repository.upsert_user(
         User(
@@ -65,10 +73,32 @@ def provision_reviewer(repository: RestockRepository, *, user_id: UUID) -> tuple
             )
         )
         created += 1
-    return created, len(repository.list_items(str(user_id)))
+    total = len(repository.list_items(str(user_id)))
+    if reset_history:
+        repository.audit(
+            user_id=str(user_id),
+            event_type="reviewer_fixture_refreshed",
+            payload={"fixture_items": total, "purpose": "isolated_reviewer_showcase"},
+            modes={
+                "prava": "sandbox",
+                "home_catalog": "real",
+                "home_payment": "disclosed_mock",
+                "teams_billing": "disclosed_mock",
+            },
+        )
+    return created, total
 
 
 def main() -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--reset-history",
+        action="store_true",
+        help="Clear only the expiring reviewer fixture before reseeding it.",
+    )
+    args = parser.parse_args()
     load_dotenv(ROOT / ".env", override=False)
     raw_user_id = os.getenv("RESTOCK_REVIEWER_USER_ID", "").strip()
     raw_expiry = os.getenv("RESTOCK_REVIEWER_EXPIRES_AT", "").strip()
@@ -84,8 +114,13 @@ def main() -> int:
 
     repository = RestockRepository(Database())
     repository.create_schema()
-    created, total = provision_reviewer(repository, user_id=user_id)
-    print(f"PASS reviewer provisioned; created_items={created}; total_items={total}")
+    created, total = provision_reviewer(
+        repository, user_id=user_id, reset_history=args.reset_history
+    )
+    print(
+        "PASS reviewer provisioned; "
+        f"created_items={created}; total_items={total}; reset_history={args.reset_history}"
+    )
     return 0
 
 
