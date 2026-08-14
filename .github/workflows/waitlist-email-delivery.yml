@@ -17,12 +17,28 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
+      - name: Verify service is reachable
+        id: health
+        env:
+          RESTOCK_PUBLIC_API_URL: ${{ secrets.RESTOCK_PUBLIC_API_URL }}
+        run: |
+          test -n "$RESTOCK_PUBLIC_API_URL"
+          status=$(curl -s -o /dev/null -w "%{http_code}" \
+            --max-time 10 \
+            "${RESTOCK_PUBLIC_API_URL%/}/health" || echo "000")
+          echo "http_status=$status" >> "$GITHUB_OUTPUT"
+          if [ "$status" = "200" ]; then
+            echo "✅ Service healthy (HTTP $status)"
+          else
+            echo "⚠️ Service unreachable (HTTP $status) — skipping delivery"
+          fi
+
       - name: Deliver one bounded welcome-email batch
+        if: steps.health.outputs.http_status == '200'
         env:
           RESTOCK_PUBLIC_API_URL: ${{ secrets.RESTOCK_PUBLIC_API_URL }}
           RESTOCK_WORKER_SERVICE_TOKEN: ${{ secrets.RESTOCK_WORKER_SERVICE_TOKEN }}
         run: |
-          test -n "$RESTOCK_PUBLIC_API_URL"
           test -n "$RESTOCK_WORKER_SERVICE_TOKEN"
           curl --fail-with-body \
             --retry 1 \
