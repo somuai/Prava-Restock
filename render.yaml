@@ -1,13 +1,31 @@
 services:
   - type: web
-    name: restock-api
+    name: prava-restock
     runtime: docker
     plan: free
     region: singapore
-    healthCheckPath: /ready
+    healthCheckPath: /health
     autoDeployTrigger: checksPass
     envVars:
       - key: RESTOCK_ENV
         value: production
       - key: RESTOCK_DEMO_MODE
         value: "0"
+      - key: RESTOCK_AUTH_MODE
+        value: hybrid
+      - key: RESTOCK_SERVE_WAITLIST
+        value: "1"
+      - key: RESTOCK_SESSION_SECRET
+        generateValue: true
+      - key: RESTOCK_REVIEWER_USER_ID
+        value: "00000000-0000-0000-0000-000000000002"
+      - key: RESTOCK_REVIEWER_PASSWORD_HASH
+        sync: false
+      - key: RESTOCK_REVIEWER_EXPIRES_AT
+        value: "2026-12-31T23:59:59+05:30"
+      - key: PRAVA_SANDBOX_URL
+        value: "https://sandbox.api.prava.space"
+      - key: PRAVA_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
