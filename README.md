@@ -22,7 +22,7 @@
 
 ---
 
-## 🌐 Live Production Demo
+## Live Production Demo
 
 The application is deployed live with full PostgreSQL ACID persistence, Prava sandbox integration, and an automated 15-minute keep-alive scheduler:
 
@@ -36,7 +36,7 @@ The application is deployed live with full PostgreSQL ACID persistence, Prava sa
 
 ---
 
-## 🧠 Agentic AI Architecture
+## Agentic AI Architecture
 
 Unlike rigid auto-debits (which blindly charge fixed amounts on static calendar dates) or passive generative AI chatbots, Prava-Restock operates as an **Autonomous Financial & Commerce Agent**:
 
@@ -69,7 +69,7 @@ Unlike rigid auto-debits (which blindly charge fixed amounts on static calendar 
 
 ---
 
-## 📊 Key Highlights & Concurrency Benchmarks
+## Key Highlights & Concurrency Benchmarks
 
 - **446/446 Automated Tests Passing (100% Green)**: Comprehensive test suite validating FSM transitions, upstream rate-limit recoveries (HTTP 429), and schema boundaries.
 - **Zero Duplicate Orders (100% Deduplication)**: Concurrency stress tests with 16 parallel requests across 8 worker threads collapsed into **exactly 1 order**.
@@ -79,7 +79,7 @@ Unlike rigid auto-debits (which blindly charge fixed amounts on static calendar 
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Offline Dry Run (Deterministic Mode)
 ```bash
@@ -118,7 +118,7 @@ pytest -q
 
 ---
 
-## 🔒 Security & Guardrail Philosophy
+## Security & Guardrail Philosophy
 
 - **Zero-Plaintext Storage**: Scrypt-hashed passwords (`$16384$8$1$`) and HMAC-signed short-lived session cookies.
 - **Ephemeral Payment Tokens**: Mandate secrets and session credentials live strictly in memory and are discarded immediately after execution (`CREDENTIAL_LOST_BEFORE_EXPOSURE` policy).
@@ -126,7 +126,7 @@ pytest -q
 
 ---
 
-## 📚 Documentation & Specifications
+## Documentation & Specifications
 
 - [Product Requirements Document (PRD)](PRD.md)
 - [Technical Requirements Specification](TECHNICAL_PRD.md)
@@ -136,6 +136,6 @@ pytest -q
 
 ---
 
-## 📄 License
+## License
 
 Distributed under the MIT License. See `LICENSE` for more information.
