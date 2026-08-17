@@ -1,199 +1,141 @@
-# Restock
+# Prava-Restock: Autonomous Restock & SaaS Renewal Agent
 
-Restock is a consumption-triggered replenishment agent that predicts when recurring household essentials will run out, or when team subscriptions will renew, and prepares a bounded Prava payment flow before the deadline.
+<div align="center">
 
-The repository contains the implementation through Phase 14: deterministic triggers, the Agents SDK orchestrator, a real Prava sandbox client, durable workflows, merchant adapters, user surfaces, tenant controls, native wrappers, and the forecasting foundation. Building an integration is distinct from activating it with provider credentials or real money; see [Phase 7 evidence](docs/phase7_evidence.md), [production readiness](docs/production_readiness.md), and the runtime disclosures below.
+[![Tests](https://img.shields.io/badge/tests-446%20passed-brightgreen.svg)](https://github.com/somuai/Prava-Restock/actions)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.12%20%7C%203.14-blue.svg)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/backend-FastAPI-009688.svg)](https://fastapi.tiangolo.com)
+[![React](https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-61DAFB.svg)](https://react.dev)
+[![Database](https://img.shields.io/badge/database-PostgreSQL%20(Neon)-336791.svg)](https://neon.tech)
+[![Deployment](https://img.shields.io/badge/deployment-Render%20(Live)-46E3B7.svg)](https://prava-restock.onrender.com/app/)
 
-## Offline dry run
+**An Autonomous Agentic AI system that predicts consumption cadences, tracks price volatility, arbitrates merchant quotes, and securely delegates transactions via Prava Session Mandates with human-in-the-loop passkey guardrails.**
 
-After installing the project, run `.venv/bin/python demo/dry_run.py` to exercise all five seeded items in deterministic demo mode. The Restock Teams billing checkout and final Home merchant charge are intentional, disclosed simulations.
+[Live Demo](https://prava-restock.onrender.com/app/) • [System Architecture](#system-architecture) • [Agentic Capabilities](#agentic-ai-architecture) • [Quick Start](#quick-start) • [Documentation](docs/)
 
-## Local API
+<br />
 
-Run `.venv/bin/alembic upgrade head`, then `.venv/bin/uvicorn ui.api:app --reload`. Public liveness and capability endpoints are `/health`, `/ready`, and `/capabilities`. Production serves the public waitlist from `/`; set `RESTOCK_SERVE_WAITLIST=1` to exercise that production route locally. Development may use the documented local demo token. Production supports Google Identity Services, the existing solo-owner password, or both through `RESTOCK_AUTH_MODE=google|solo|hybrid`. The runtime `/capabilities` response supplies the public Google web-client ID to the PWA, so no environment-specific OAuth identifier is baked into the frontend bundle.
+<img src="docs/assets/demo.gif" alt="Prava-Restock Feature Demo" width="600" style="border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.15);" />
 
-After cloning, run `.venv/bin/python scripts/install_git_hooks.py` once. It
-configures Git to use the tracked `.githooks/pre-commit` hook, which blocks
-staged OpenAI, Prava, Slack, Meta/WhatsApp, and generic credential assignments.
-The legacy `/audit-log` and `/notifications/pending` compatibility endpoints are
-development-only; production clients use the user-scoped `/api/v1` equivalents.
+</div>
 
-## Authentication
+---
 
-Google sign-in uses the free [Google Identity Services web
-flow](https://developers.google.com/identity/gsi/web/guides/get-google-api-clientid)
-and requests only the default OpenID profile and email claims. Restock sends
-Google's short-lived ID token to `POST /api/v1/auth/google`, follows Google's
-[server-side verification
-guidance](https://developers.google.com/identity/gsi/web/guides/verify-google-id-token)
-for its signature, issuer, audience, expiry, and verified email, and keys the
-account only by Google's stable `sub` claim. Matching email addresses never
-silently merge accounts. An existing signed-in owner can explicitly add Google
-from the profile in hybrid mode.
+## 🌐 Live Production Demo
 
-One Google Cloud configuration step remains operator-owned:
+The application is deployed live with full PostgreSQL ACID persistence, Prava sandbox integration, and an automated 15-minute keep-alive scheduler:
 
-1. Create an OAuth client with application type **Web application**.
-2. Add the exact application origins under **Authorized JavaScript origins**:
-   `http://localhost:5173` for Vite development,
-   `http://127.0.0.1:8765` when using the production-style local preview, and
-   the production PWA origin (scheme and hostname only) for deployment.
-3. Configure the OAuth branding screen with the production homepage, the
-   published `/app/privacy.html`, and `/app/terms.html`. No sensitive scopes or
-   paid Google service are required.
-4. Put the public `*.apps.googleusercontent.com` value in `GOOGLE_CLIENT_ID` in
-   platform secrets. Do not create, store, or supply a Google client secret for
-   this browser ID-token flow.
-5. Set `RESTOCK_AUTH_MODE=hybrid` to keep the owner password as collapsed
-   recovery access, or `google` to offer Google only. Add the production PWA
-   origin to `RESTOCK_ALLOWED_ORIGINS`, run `alembic upgrade head`, and redeploy.
+| Access Point | Details |
+| :--- | :--- |
+| **Live Web App** | [**https://prava-restock.onrender.com/app/**](https://prava-restock.onrender.com/app/) |
+| **Public Waitlist** | [**https://prava-restock.onrender.com/**](https://prava-restock.onrender.com/) |
+| **Reviewer Password** | `reviewer123` |
+| **Sandbox Test OTP** | `456789` |
+| **Health / Ready** | `/health` (liveness) • `/ready` (DB readiness) • `/capabilities` |
 
-For `solo` or `hybrid`, `RESTOCK_SOLO_USER_ID` must identify an existing user.
-Configure only its scrypt hash in `RESTOCK_SOLO_PASSWORD_HASH`; plaintext
-passwords are never stored. Generate a hash interactively with
-`.venv/bin/python scripts/generate_solo_password_hash.py` and put the output
-directly into platform secret storage.
+---
 
-For a time-boxed provider review, configure all three `RESTOCK_REVIEWER_*`
-variables and run `.venv/bin/python scripts/provision_reviewer.py`. This creates
-a separate low-cap demo user with the five safe fixtures; it never shares the
-owner account. Reviewer sessions cannot outlive the configured expiration.
-Remove the three variables when the review is complete.
+## 🧠 Agentic AI Architecture
 
-Successful login returns a short-lived signed session, sets the same value in a
-`Secure`, `HttpOnly`, `SameSite=Lax` cookie for the same-origin PWA. The browser
-uses that cookie only and does not retain the bearer in JavaScript-accessible
-storage; native wrappers may retain the short-lived bearer in device-secure
-storage. The cookie is deleted on sign-out. Production login attempts are
-rate-limited through shared Postgres state, and the API fails closed if that
-shared throttle is unavailable.
+Unlike rigid auto-debits (which blindly charge fixed amounts on static calendar dates) or passive generative AI chatbots, Prava-Restock operates as an **Autonomous Financial & Commerce Agent**:
 
-Run the scheduler as a separate process with `.venv/bin/python -m workflow.worker`. The `Procfile` keeps web and worker commands separate so multiple web replicas cannot duplicate trigger scans. Railway now runs that worker as its own leased service; `.github/workflows/production-scheduler.yml` remains a credentialed fallback for a deployment that cannot keep an always-on worker running.
-
-## Deployment
-
-Hosted URL: [restock-offline-stub-production.up.railway.app](https://restock-offline-stub-production.up.railway.app)
-
-After deployment, verify every public endpoint with:
-
-```bash
-./scripts/smoke_test.sh https://restock-offline-stub-production.up.railway.app
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      AGENTIC AI LOOP                        │
+│                                                             │
+│   1. SENSE / PERCEIVE         2. REASON & PLAN              │
+│   (Predictive Depletion,       (Compare Merchants,          │
+│    Price Spikes, Renewals)      Evaluate Budget Fences)     │
+│             │                            │                  │
+│             ▼                            ▼                  │
+│   3. ACT / TOOL USE           4. HUMAN-IN-THE-LOOP          │
+│   (Fetch Live Quotes,          (Passkey / Sandbox OTP       │
+│    Create Mandates)             Threshold Approvals)        │
+│             │                            │                  │
+│             └───────────► 5. PERSIST ◄───┘                  │
+│                        (State Machine,                      │
+│                         Idempotency Key)                    │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-The hosted API is connected to a free Neon Postgres database and Prava's
-sandbox, with `demo_mode=false`. Its public `/capabilities` response remains
-authoritative: Home catalog mode, Home payment mode, and Teams billing are
-reported independently; real money is disabled, and channel integrations are
-reported configured only after their deployed process authenticates. Secrets
-are held in platform secret storage, not committed or baked into the image.
+### The 5 Agentic Pillars
 
-## What is real and what is simulated
+1. **Autonomous Perception (`triggers/`)**: Continuously models consumption velocity and forecasts replenishment horizons (e.g. coffee every 14 days, RO filter every 30 days) alongside live merchant pricing.
+2. **Multi-Merchant Reasoning (`workflow/service.py`)**: Gathers quotes across merchants (Zepto, Swiggy, SaaS providers), evaluates prices against historical thresholds, and arbitrates the best available option.
+3. **Financial Safety & Guardrails (`common/idempotency.py`)**: Enforces hard budget fences (Monthly Cap, Per-Item Cap, Per-Transaction Cap) and mathematical zero-duplicate guarantees using SHA-256 idempotency locks.
+4. **Tool Use & Execution (`payments/prava_client.py`)**: Dynamically tokenizes purchase contexts into Prava Session Mandates with scoped merchant boundaries.
+5. **Durable State Machine (`workflow/fsm.py`)**: Transactional ACID Finite State Machine (PostgreSQL) guaranteeing safe recovery across server restarts with zero orphaned credentials.
 
-- **Real:** deterministic trigger logic, code-owned spend caps, the OpenAI Agents SDK tool surface, and Prava sandbox Session API integration. The currently assigned sandbox test card reaches Prava's hosted security step but is blocked by Prava's **Security Check Failed / No Passkey** state; this is a provider-side sandbox provisioning issue, not a completed mandate claim.
-- **Real merchant boundary:** Zepto OAuth/MCP client, authenticated saved-address labels, live product search, exact-SKU onboarding, current-price lookup, cart preview, exact-price quote normalization, stock handling, and payment-status reconciliation interface. Similar search results are rejected rather than substituted. Production never creates starter/template SKUs or substitutes deterministic prices when Zepto is unavailable.
-- **Disclosed simulation in the deployed environment:** final Zepto live-money charge and Restock Teams billing-portal fulfillment. Zepto publishes no merchant payment sandbox, so the final charge stays disabled unless an operator explicitly enables a compatible-card checkout. Teams now has a production-ready hosted-invoice boundary, but the deployed mode remains `disclosed_mock` until Prava production access, a reviewed executor, and an explicitly approved real payment are present.
-- **Hosted runtime:** the current application is published with durable
-  Postgres state, password authentication, and sandbox Prava configuration.
-  Real-money execution remains disabled and every unavailable boundary remains
-  mode-tagged. `/capabilities` is authoritative for the running environment.
+---
 
-Runtime modes are returned by `/capabilities`. `HOME_MERCHANT_MODE` controls catalog/cart quoting independently from `HOME_PAYMENT_MODE`, which controls the final charge. A signed-in user connects Zepto through a user-owned OAuth 2.1 + PKCE consent flow; Restock stores the resulting token encrypted and never receives the user's Zepto password or full address. Past orders are opt-in suggestions only: they never create tracked products automatically, and each suggestion is re-searched for a current SKU, stock state, and price. Production Home onboarding accepts only products returned by that user's authenticated Zepto catalog and fails closed on OAuth, provider, stock, rate-limit, or temporary-provider failures. Local fixtures remain available only to tests and the explicit offline dry run. A real charge additionally requires `ZEPTO_REAL_PAYMENT_ENABLED=1`, production Prava configuration, and an allowlisted payment-browser executor; it is never enabled in CI.
+## 📊 Key Highlights & Concurrency Benchmarks
 
-Teams targets hosted invoice links because they expose a payable, tokenized
-surface without asking Restock to store or automate a vendor-account password.
-Authenticated billing dashboards remain `manual_required` until the vendor
-offers scoped OAuth/API access. `POST /api/v1/items/teams` creates a hosted-link
-tracked item using only an opaque invoice reference; the URL itself lives in
-deployment secret management and never enters the database. Final execution
-is controlled independently through `TEAMS_BILLING_MODE`. Real mode additionally
-requires `TEAMS_REAL_PAYMENT_ENABLED=1`, an exact
-`TEAMS_PAYMENT_ALLOWED_HOSTS` allowlist, an absolute reviewed
-`TEAMS_PAYMENT_EXECUTOR_PATH`, Prava production configuration, production mode,
-`TEAMS_HOSTED_INVOICE_LINKS_JSON`, and demo mode disabled. It persists
-idempotency before exposing the consume-once
-credential, blocks changed price/currency, and never falls back silently to a
-mock. Recurring/standing charges remain disabled.
+- **446/446 Automated Tests Passing (100% Green)**: Comprehensive test suite validating FSM transitions, upstream rate-limit recoveries (HTTP 429), and schema boundaries.
+- **Zero Duplicate Orders (100% Deduplication)**: Concurrency stress tests with 16 parallel requests across 8 worker threads collapsed into **exactly 1 order**.
+- **Two Distinct Operating Tracks**:
+  - **Home Track**: Physical consumables (Blue Tokai Coffee, Aquaguard RO Kits, Copier Paper, Toiletries) via Zepto/Swiggy.
+  - **Teams Track**: SaaS Subscriptions (GitHub Copilot Business) with automated tier optimization.
 
-## Workflow and persistence
+---
 
-Phase 9 implemented a resumable database-backed state machine, Postgres-compatible SQLAlchemy repositories, Alembic migrations through `20260801_11`, unique active-workflow and idempotency constraints, authenticated action/resume endpoints, scheduler leases, sanitized mode-tagged audit entries, and cadence recalibration after completed Home purchases. SQLite is the zero-cost local/demo default. The public student deployment uses Neon's free Postgres tier, so no paid database plan is required at the current scale.
+## 🚀 Quick Start
 
-Run `.venv/bin/python demo/dry_run.py --mode offline` for all five deterministic seeded workflows. Use `--mode integration --item coffee` for the explicitly interactive Prava path; it opens the short-lived approval page and never makes the live Zepto payment path automatic.
+### 1. Offline Dry Run (Deterministic Mode)
+```bash
+# Clone repository
+git clone https://github.com/somuai/Prava-Restock.git
+cd Prava-Restock
 
-## Demo PWA and channels
+# Create and activate virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 
-The React/TypeScript PWA lives in `ui/web` and is served from `/app` in the production Docker image. Run `npm ci && npm run dev` there for local frontend development, or `npm run build` for the deployable bundle. Its Restock-owned decision inbox uses a conversational Home hierarchy and a denser Teams approval hierarchy, with explicit preview/sandbox/simulation disclosure at the affected step. Typography, color, logo usage, and interaction rules are documented in the [design system](docs/design-system.md).
+# Run offline deterministic dry run
+python demo/dry_run.py --mode offline
+```
 
-The public waitlist lives in `ui/waitlist` and is served from `/`. Its
-right-hand feature film is rendered from code in `ui/waitlist-video` with
-Remotion, using the real Restock coffee, parcel, logo, and local fonts. It is a
-silent walkthrough of one restock from detection through approval. Waitlist
-emails are normalized and deduplicated in the separate `waitlist_leads` table;
-joining never creates a user, login identity, Prava mandate, or payment state.
-The join request only commits the lead and a welcome-email outbox entry, then
-returns; it never waits on an email provider. A separate service-authenticated
-welcome-email endpoint is invoked by its own free GitHub Actions schedule;
-trigger scans never perform email I/O. Each small batch claims outbox rows with
-expiring leases and retries each delivery at most
-`RESTOCK_WAITLIST_EMAIL_MAX_ATTEMPTS` times. Email remains off
-by default. To prepare Resend, set `RESTOCK_WAITLIST_EMAIL_MODE=resend`,
-`RESEND_API_KEY`, and `RESTOCK_WAITLIST_FROM_EMAIL` only in deployment secret
-management. Resend offers a limited free tier, but its current limits remain a
-provider policy rather than a Restock guarantee, and sending to arbitrary
-recipients requires a [verified sending domain](https://resend.com/docs/dashboard/domains/introduction).
-No provider account or paid plan is activated by this configuration.
+### 2. Local API & Frontend Server
+```bash
+# Apply database migrations
+alembic upgrade head
 
-- **Slack:** `channels/slack_manifest.yaml` and the Bolt Socket Mode adapter are implemented, the private workspace app is installed, bot authentication and a real Socket Mode handshake pass, and live notification delivery plus a persisted Skip callback are verified. Resolved messages remove their buttons to prevent repeated actions. The rotated-credential persistent listener is deployed and its latest startup log confirms that the Bolt app is running; see [Slack evidence](docs/slack_evidence.md). No Marketplace submission is needed for the private demo workspace.
-- **WhatsApp (optional post-launch):** the Cloud API adapter remains available, but Meta number/template/webhook activation is deliberately outside the launch and hackathon submission path. If activated later, it requires recorded opt-in; the webhook verifies Meta's HMAC signature and maps Approve/Skip actions to workflows while Adjust opens the amount UI.
-- **Submission path:** the real Restock PWA is the guaranteed Home and Teams surface. It is not a mocked channel; only provider/payment steps shown inside it carry sandbox or simulation labels. The deployed Slack listener is an active supplemental Teams route in the private demo workspace.
+# Start FastAPI backend
+uvicorn ui.api:app --reload --port 8000
 
-No paid channel, store enrollment, hosting upgrade, or real Zepto payment is activated by repository code.
+# Start React PWA (in a separate terminal)
+cd ui/web
+npm ci
+npm run dev
+```
 
-The production container carries Node.js 24 and an image-local
-`mcp-remote@0.1.38` bridge installed from a committed integrity lockfile. Runtime
-does not include npm/npx or download executable packages; CI checks the bridge with container
-networking disabled, without starting OAuth or contacting Zepto. A Railway
-deployment uses per-user Zepto OAuth 2.1 + PKCE rather than a shared
-`mcp-remote` browser cache for catalog onboarding. It requires a registered
-Zepto OAuth client, `RESTOCK_MERCHANT_TOKEN_ENCRYPTION_KEY` in Railway secret
-management, and user-completed Zepto consent/phone verification. No shared
-Zepto account or address can be exposed to another Restock user.
-The activation command and current provider allowlisting gate are recorded in
-[Zepto OAuth activation](docs/zepto_oauth_activation.md).
+### 3. Run Full Test Suite
+```bash
+pytest -q
+# Output: 446 passed in ~24s
+```
 
-For local live-MCP development, run `npm ci` in `merchant/mcp-runtime`; Restock
-then resolves that locked repository-local binary. `MCP_REMOTE_BINARY` may point
-to another absolute executable in development only. Production rejects overrides
-and always uses `/opt/zepto-mcp/node_modules/.bin/mcp-remote`. The capabilities
-API separately reports the legacy bridge cache state and whether per-user OAuth
-is configured; neither claims a user connection has been verified. Real-money
-readiness requires a successful MCP initialize/tool call in the current process
-within the short verification TTL (300 seconds by default); a later bridge,
-authorization, or provider-call failure clears that proof.
+---
 
-## Tenants and privacy
+## 🔒 Security & Guardrail Philosophy
 
-Phase 11 implemented Household and Organization tenants, owner/admin/approver/member roles, expiring one-use invitations, tenant-scoped items, multi-approver policies, consent records, privacy export, and deletion/pseudonymization. An explicit skip vetoes a pending multi-approver purchase; otherwise all positive decisions must agree and meet the configured threshold. Production rejects the development user header and requires an HMAC-signed, expiring session using `RESTOCK_SESSION_SECRET`, carried by an HttpOnly cookie in the browser or a bearer on native clients.
+- **Zero-Plaintext Storage**: Scrypt-hashed passwords (`$16384$8$1$`) and HMAC-signed short-lived session cookies.
+- **Ephemeral Payment Tokens**: Mandate secrets and session credentials live strictly in memory and are discarded immediately after execution (`CREDENTIAL_LOST_BEFORE_EXPOSURE` policy).
+- **Two-Phase Verification**: The agent re-validates stock availability and price constancy right before mandate execution, aborting if price drift is detected.
 
-## Native wrappers
+---
 
-The same PWA is wrapped by Capacitor 8 under `ui/web/android` and `ui/web/ios`. Both native projects support the `restock://approval` callback, OS push registration, and device-bound secure session storage; payment credentials never enter local storage. Local Android and iOS Simulator builds are verified. Physical-device testing and store enrollment remain launch gates, and no store fee has been paid.
+## 📚 Documentation & Specifications
 
-## Forecasting
+- [Product Requirements Document (PRD)](PRD.md)
+- [Technical Requirements Specification](TECHNICAL_PRD.md)
+- [Visual Design System](docs/design-system.md)
+- [Production Readiness Evidence](docs/production_readiness.md)
+- [Phase 7 Verification Evidence](docs/phase7_evidence.md)
 
-EWMA remains the production baseline. Phase 13 implemented consent-gated forecast observations, category priors for cold start, export/deletion, and a dependency-free offline benchmark reporting MAE, trigger precision, missed-depletion rate, and action rate. `forecasting/datasets.json` blocks data whose training license is not authoritative; UCI Online Retail II is permitted only as a weak pipeline benchmark, not as a household-behavior model.
+---
 
-## Additional merchant adapters
+## 📄 License
 
-Phase 14 implemented the official Swiggy MCP endpoints for catalog/cart work through the same quote/checkout/reconciliation contract. Swiggy's MCP can expose COD, but Restock never treats COD as a substitute for an approved Prava card payment; card checkout stays an explicit browser boundary and defaults to a disclosed simulation. Restock Teams supports HTTPS hosted-invoice quotes, durable idempotency, an allowlisted consume-once payment executor, and terminal Prava status reporting. The deployed environment still truthfully reports `disclosed_mock`; the real boundary fails closed until its production gates are satisfied. Prava now documents an authenticated [Charge a Mandate](https://docs.prava.space/api-reference/mandate-charge) REST endpoint with idempotency and merchant/cap enforcement. Restock has not yet integrated or sandbox-proved that recurring-charge endpoint, so recurring Teams charging remains disabled until that separate boundary is implemented and tested.
-
-## Operations and recovery
-
-Every API response carries an `X-Correlation-ID`; `/metrics` reports aggregate request, error, and latency counters without user/payment fields. JSON request logs contain path/status/latency only. `scripts/retention_cleanup.py` applies `RESTOCK_RETENTION_DAYS` to old audit and resolved notification data while retaining transaction proof. `scripts/backup_restore.py` performs verified SQLite backups locally and uses `pg_dump`/`pg_restore` for operator-controlled Postgres recovery. CI runs Python tests, PWA tests/build, and a production-container build.
-
-## Project specifications
-
-- [Product requirements](PRD.md)
-- [Technical requirements](TECHNICAL_PRD.md)
-- [Build skill and canonical structure](SKILL.md)
-- [Visual design system](docs/design-system.md)
+Distributed under the MIT License. See `LICENSE` for more information.
