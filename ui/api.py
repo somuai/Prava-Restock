@@ -1893,7 +1893,6 @@ def reviewer_sandbox_approval(
             )
         )
         session_id = f"ses_01KZ_{uuid4().hex[:18].upper()}"
-        approval_url_value = f"https://sandbox.collect.prava.space?session={session_id}"
         run = repository.latest_workflow_for_item(str(item.item_id))
         if run is None or run.get("state") not in {"passkey_pending", "triggered", "notified"}:
             active = repository.latest_workflow_for_item(str(item.item_id))
@@ -1922,6 +1921,7 @@ def reviewer_sandbox_approval(
                 )
             except Exception:
                 run = repository.latest_workflow_for_item(str(item.item_id)) or {"run_id": str(uuid4()), "state": "passkey_pending"}
+        approval_url_value = f"/app/sandbox-approval.html?session={session_id}&run_id={run.get('run_id', '')}&otp=456789&amount={quote.amount}&currency={quote.currency}&merchant={quote.merchant}&item={quote.product_name}"
     return {
         "run_id": str(run["run_id"]),
         "state": str(run.get("state", "passkey_pending")),

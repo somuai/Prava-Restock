@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prava Pay · Sandbox Mandate Approval</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #10b981;
+      --primary-dark: #059669;
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 32px;
+      width: 100%;
+      max-width: 440px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .brand-logo {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, #10b981, #047857);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      color: white;
+      font-size: 18px;
+    }
+    .brand-name {
+      font-weight: 700;
+      font-size: 18px;
+      letter-spacing: -0.02em;
+    }
+    .badge {
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .summary {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      margin-bottom: 24px;
+    }
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+    .summary-row:last-child {
+      margin-bottom: 0;
+      padding-top: 8px;
+      border-top: 1px dashed var(--border);
+    }
+    .summary-label {
+      color: var(--text-muted);
+    }
+    .summary-value {
+      font-weight: 600;
+    }
+    .amount {
+      font-size: 20px;
+      font-weight: 800;
+      color: #34d399;
+    }
+    .otp-section {
+      margin-bottom: 24px;
+    }
+    .otp-label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+    .otp-inputs {
+      display: flex;
+      gap: 8px;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .otp-box {
+      width: 52px;
+      height: 56px;
+      border-radius: 12px;
+      border: 2px solid var(--border);
+      background: #0f172a;
+      color: var(--text);
+      font-size: 22px;
+      font-weight: 700;
+      text-align: center;
+      outline: none;
+      transition: all 0.15s ease;
+    }
+    .otp-box:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+    }
+    .hint {
+      font-size: 12px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .hint code {
+      background: rgba(255, 255, 255, 0.1);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: #38bdf8;
+      font-weight: 700;
+    }
+    .btn-submit {
+      width: 100%;
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: white;
+      border: none;
+      border-radius: 12px;
+      padding: 14px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25);
+    }
+    .btn-submit:hover {
+      opacity: 0.95;
+      transform: translateY(-1px);
+    }
+    .btn-submit:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .footer-note {
+      text-align: center;
+      margin-top: 16px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .success-state {
+      display: none;
+      text-align: center;
+      padding: 20px 0;
+    }
+    .success-icon {
+      width: 64px;
+      height: 64px;
+      background: rgba(16, 185, 129, 0.2);
+      border: 2px solid #10b981;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 16px;
+      color: #34d399;
+      font-size: 32px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <div class="brand">
+        <div class="brand-logo">P</div>
+        <div class="brand-name">Prava Pay</div>
+      </div>
+      <div class="badge">Sandbox Mode</div>
+    </div>
+
+    <div id="form-view">
+      <div class="summary">
+        <div class="summary-row">
+          <span class="summary-label">Merchant</span>
+          <span class="summary-value" id="merchant-name">Zepto</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">Item</span>
+          <span class="summary-value" id="item-name">Blue Tokai Coffee (500g)</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">Mandate Type</span>
+          <span class="summary-value">Bounded Restock Mandate</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">Total Amount</span>
+          <span class="amount" id="total-amount">₹380.00</span>
+        </div>
+      </div>
+
+      <div class="otp-section">
+        <label class="otp-label" for="otp-1">Enter 6-Digit Sandbox Passkey / OTP</label>
+        <div class="otp-inputs">
+          <input type="text" maxlength="1" class="otp-box" id="otp-1" value="4" autofocus>
+          <input type="text" maxlength="1" class="otp-box" id="otp-2" value="5">
+          <input type="text" maxlength="1" class="otp-box" id="otp-3" value="6">
+          <input type="text" maxlength="1" class="otp-box" id="otp-4" value="7">
+          <input type="text" maxlength="1" class="otp-box" id="otp-5" value="8">
+          <input type="text" maxlength="1" class="otp-box" id="otp-6" value="9">
+        </div>
+        <div class="hint">
+          <span>Test OTP is <code>456789</code> · No real SMS sent</span>
+        </div>
+      </div>
+
+      <button type="button" class="btn-submit" id="btn-authorize">
+        Authorize Mandate
+      </button>
+
+      <div class="footer-note">
+        Protected by Prava Sandbox Security · 256-bit Encrypted Token
+      </div>
+    </div>
+
+    <div id="success-view" class="success-state">
+      <div class="success-icon">✓</div>
+      <h2 style="font-size: 20px; font-weight: 700; margin-bottom: 8px;">Mandate Authorized!</h2>
+      <p style="font-size: 14px; color: var(--text-muted); margin-bottom: 24px;">
+        Prava session approved. Your restock order has been safely confirmed.
+      </p>
+      <button type="button" class="btn-submit" id="btn-return">
+        Return to Restock
+      </button>
+    </div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const runId = params.get('run_id') || '';
+    const merchant = params.get('merchant') || 'Zepto';
+    const amount = params.get('amount') || '380.00';
+    const currency = params.get('currency') || 'INR';
+    const item = params.get('item') || 'Blue Tokai Coffee (500g)';
+    const otp = params.get('otp') || '456789';
+
+    if (document.getElementById('merchant-name')) {
+      document.getElementById('merchant-name').textContent = merchant.charAt(0).toUpperCase() + merchant.slice(1);
+    }
+    if (document.getElementById('item-name')) {
+      document.getElementById('item-name').textContent = item;
+    }
+    if (document.getElementById('total-amount')) {
+      document.getElementById('total-amount').textContent = (currency === 'INR' ? '₹' : '$') + amount;
+    }
+
+    // Handle OTP inputs
+    const inputs = document.querySelectorAll('.otp-box');
+    inputs.forEach((input, index) => {
+      input.addEventListener('input', (e) => {
+        if (e.target.value.length === 1 && index < inputs.length - 1) {
+          inputs[index + 1].focus();
+        }
+      });
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Backspace' && !e.target.value && index > 0) {
+          inputs[index - 1].focus();
+        }
+      });
+    });
+
+    const btnAuthorize = document.getElementById('btn-authorize');
+    const formView = document.getElementById('form-view');
+    const successView = document.getElementById('success-view');
+
+    btnAuthorize.addEventListener('click', async () => {
+      btnAuthorize.disabled = true;
+      btnAuthorize.textContent = 'Authorizing with Prava...';
+      
+      try {
+        if (runId) {
+          await fetch(`/api/v1/workflows/${runId}/resume`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+      } catch (err) {
+        console.warn('Resume callback:', err);
+      }
+
+      formView.style.display = 'none';
+      successView.style.display = 'block';
+
+      setTimeout(() => {
+        if (window.opener) {
+          window.close();
+        } else {
+          window.location.href = '/app/';
+        }
+      }, 1500);
+    });
+
+    document.getElementById('btn-return').addEventListener('click', () => {
+      if (window.opener) {
+        window.close();
+      } else {
+        window.location.href = '/app/';
+      }
+    });
+  </script>
+</body>
+</html>
