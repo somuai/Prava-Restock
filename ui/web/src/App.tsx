@@ -3540,7 +3540,22 @@ export default function App() {
       borderRadius: "999px",
       background: `linear-gradient(90deg, ${brand.accent} 58%, #e7e7df 58%)`,
     });
-    card.append(logo, eyebrow, heading, copy, progress);
+    const actionBtn = document.createElement("a");
+    actionBtn.id = "prava-direct-link";
+    actionBtn.textContent = "Continue to Prava Sandbox →";
+    Object.assign(actionBtn.style, {
+      display: "none",
+      marginTop: "24px",
+      padding: "12px 24px",
+      background: brand.accent || "#10b981",
+      color: "#ffffff",
+      borderRadius: "12px",
+      textDecoration: "none",
+      fontWeight: "700",
+      fontSize: "14px",
+      boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+    });
+    card.append(logo, eyebrow, heading, copy, progress, actionBtn);
     document.body.append(card);
   };
 
@@ -3558,7 +3573,18 @@ export default function App() {
     }
     try {
       const { approval_url } = await api.approvalUrl(runId);
-      target.location.replace(approval_url);
+      try {
+        const btn = target.document.getElementById("prava-direct-link");
+        if (btn) {
+          btn.setAttribute("href", approval_url);
+          (btn as HTMLElement).style.display = "inline-block";
+        }
+      } catch {}
+      try {
+        target.location.href = approval_url;
+      } catch {
+        target.location.replace(approval_url);
+      }
     } catch (error) {
       target.close();
       setActionFeedback(error instanceof Error ? error.message : "Prava approval could not be opened.");
@@ -3603,7 +3629,20 @@ export default function App() {
         setStatus("Prava sandbox approval opened");
         setActionFeedback(`Prava sandbox opened. Enter OTP ${handoff.sandbox_otp}; no SMS is sent. No real merchant charge can occur.`);
         if (approvalWindow) {
-          approvalWindow.location.replace(handoff.approval_url);
+          try {
+            const btn = approvalWindow.document.getElementById("prava-direct-link");
+            if (btn) {
+              btn.setAttribute("href", handoff.approval_url);
+              (btn as HTMLElement).style.display = "inline-block";
+            }
+          } catch {}
+          try {
+            approvalWindow.location.href = handoff.approval_url;
+          } catch {
+            try {
+              approvalWindow.location.replace(handoff.approval_url);
+            } catch {}
+          }
         } else {
           setActionFeedback("Prava approval is ready. Choose Open Prava above to continue in a separate tab.");
         }
