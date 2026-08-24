@@ -156,8 +156,10 @@ def test_create_session_uses_documented_request_contract(monkeypatch) -> None:
     assert captured["method"] == "POST"
     assert captured["authorization"] == "Bearer sk_test_unit_key"
     assert captured["timeout"] == 20
-    assert len(captured["payload"]["purchase_context"]) == 1
-    context = captured["payload"]["purchase_context"][0]
+    raw_ctx = captured["payload"]["purchase_context"]
+    assert "custom" in raw_ctx
+    assert len(raw_ctx["custom"]) == 1
+    context = raw_ctx["custom"][0]
     assert context["merchant_details"]["country_code_iso2"] == "IN"
     assert context["product_details"] == [
         {

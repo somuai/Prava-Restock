@@ -253,17 +253,19 @@ def _create_session(
         "total_amount": format(parsed_total, "f"),
         "currency": str(currency).upper(),
         "integration_type": "full_checkout",
-        "purchase_context": [
-            {
-                "merchant_details": {
-                    "name": str(merchant_name),
-                    "url": str(merchant_url),
-                    "country_code_iso2": str(merchant_country_iso2).upper(),
-                },
-                "product_details": [product],
-                "effective_until_minutes": effective_until_minutes,
-            }
-        ],
+        "purchase_context": {
+            "custom": [
+                {
+                    "merchant_details": {
+                        "name": str(merchant_name),
+                        "url": str(merchant_url),
+                        "country_code_iso2": str(merchant_country_iso2).upper(),
+                    },
+                    "product_details": [product],
+                    "effective_until_minutes": effective_until_minutes,
+                }
+            ]
+        },
     }
     api_key, base_url = _load_prava_config()
     request = Request(
