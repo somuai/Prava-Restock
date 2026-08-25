@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Opening Prava Sandbox Approval</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f4f4ef;
+      --card-bg: #fffefa;
+      --border: #deded5;
+      --text: #161714;
+      --text-muted: #6a6c65;
+      --accent: #5b21b6;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: var(--bg);
+      color: var(--text);
+      padding: 20px;
+    }
+    .card {
+      width: min(440px, calc(100vw - 40px));
+      padding: 40px 32px;
+      border: 1px solid var(--border);
+      border-top: 5px solid var(--accent);
+      border-radius: 24px;
+      background: var(--card-bg);
+      box-shadow: 0 28px 80px rgba(35, 37, 31, .14);
+      text-align: center;
+    }
+    .logo {
+      display: block;
+      width: 64px;
+      height: 64px;
+      object-fit: contain;
+      margin: 0 auto 20px;
+    }
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 0;
+      font-size: 26px;
+      letter-spacing: -.03em;
+      font-weight: 800;
+    }
+    .copy {
+      margin: 14px auto 0;
+      max-width: 340px;
+      color: var(--text-muted);
+      line-height: 1.55;
+      font-size: 14px;
+    }
+    .copy strong {
+      color: var(--text);
+    }
+    .progress {
+      width: 100%;
+      height: 4px;
+      margin-top: 24px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--accent) 58%, #e7e7df 58%);
+      animation: pulse 1.5s infinite ease-in-out;
+    }
+    @keyframes pulse {
+      0% { opacity: 0.6; }
+      50% { opacity: 1; }
+      100% { opacity: 0.6; }
+    }
+    .btn-continue {
+      display: none;
+      margin-top: 24px;
+      padding: 14px 28px;
+      background: #10b981;
+      color: #ffffff;
+      border-radius: 14px;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 15px;
+      box-shadow: 0 4px 14px rgba(16, 185, 129, 0.3);
+      transition: all 0.2s ease;
+    }
+    .btn-continue:hover {
+      background: #059669;
+      transform: translateY(-1px);
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <img src="/app/assets/restock-mark.png" alt="Merchant logo" class="logo" id="brand-logo">
+    <p class="eyebrow" id="brand-eyebrow">Zepto purchase</p>
+    <h1>Opening secure approval</h1>
+    <p class="copy">
+      You’ll continue on Prava’s protected payment surface. In sandbox, enter OTP <strong>456789</strong> — no SMS will be sent.
+    </p>
+    <div class="progress" role="progressbar" id="progress-bar"></div>
+    <a href="#" class="btn-continue" id="btn-continue" target="_self">
+      Continue to Prava Sandbox &rarr;
+    </a>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const brand = params.get('brand') || 'Zepto';
+    const logoUrl = params.get('logo') || '/app/assets/product-surf-excel.gif';
+    const accent = params.get('accent') || '#5b21b6';
+    const directUrl = params.get('url');
+
+    document.getElementById('brand-eyebrow').textContent = `${brand} purchase`;
+    document.querySelector('.card').style.borderTopColor = accent;
+    document.getElementById('brand-eyebrow').style.color = accent;
+
+    function navigateToUrl(url) {
+      if (!url) return;
+      const btn = document.getElementById('btn-continue');
+      btn.href = url;
+      btn.style.display = 'inline-block';
+      document.getElementById('progress-bar').style.display = 'none';
+
+      // Automatic redirection in current window
+      try {
+        window.location.replace(url);
+      } catch (err) {
+        window.location.href = url;
+      }
+    }
+
+    // 1. Direct URL in query params
+    if (directUrl) {
+      navigateToUrl(directUrl);
+    }
+
+    // 2. Listen for postMessage from parent opener window
+    window.addEventListener('message', (event) => {
+      if (event.data && event.data.type === 'PRAVA_APPROVAL_URL' && event.data.url) {
+        navigateToUrl(event.data.url);
+      }
+    });
+
+    // 3. Check localStorage fallback (in case postMessage is missed)
+    const checkStorage = () => {
+      try {
+        const stored = localStorage.getItem('prava_handoff_pending_url');
+        if (stored) {
+          localStorage.removeItem('prava_handoff_pending_url');
+          navigateToUrl(stored);
+        }
+      } catch (e) {}
+    };
+    checkStorage();
+    const interval = setInterval(checkStorage, 400);
+    setTimeout(() => clearInterval(interval), 10000);
+  </script>
+</body>
+</html>

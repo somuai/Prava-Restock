@@ -3560,9 +3560,8 @@ export default function App() {
   };
 
   const prepareApprovalWindow = (brand: ProviderBrand): Window | null => {
-    const target = window.open("about:blank", "_blank");
-    if (target) renderApprovalHandoff(target, brand);
-    return target;
+    const handoffUrl = `/app/prava-handoff.html?brand=${encodeURIComponent(brand.name)}&accent=${encodeURIComponent(brand.accent || '#10b981')}`;
+    return window.open(handoffUrl, "_blank");
   };
 
   const openPravaApproval = async (runId: string, brand: ProviderBrand) => {
@@ -3574,17 +3573,12 @@ export default function App() {
     try {
       const { approval_url } = await api.approvalUrl(runId);
       try {
-        const btn = target.document.getElementById("prava-direct-link");
-        if (btn) {
-          btn.setAttribute("href", approval_url);
-          (btn as HTMLElement).style.display = "inline-block";
-        }
+        localStorage.setItem("prava_handoff_pending_url", approval_url);
+        target.postMessage({ type: "PRAVA_APPROVAL_URL", url: approval_url }, "*");
       } catch {}
       try {
         target.location.href = approval_url;
-      } catch {
-        target.location.replace(approval_url);
-      }
+      } catch {}
     } catch (error) {
       target.close();
       setActionFeedback(error instanceof Error ? error.message : "Prava approval could not be opened.");
@@ -3630,19 +3624,12 @@ export default function App() {
         setActionFeedback(`Prava sandbox opened. Enter OTP ${handoff.sandbox_otp}; no SMS is sent. No real merchant charge can occur.`);
         if (approvalWindow) {
           try {
-            const btn = approvalWindow.document.getElementById("prava-direct-link");
-            if (btn) {
-              btn.setAttribute("href", handoff.approval_url);
-              (btn as HTMLElement).style.display = "inline-block";
-            }
+            localStorage.setItem("prava_handoff_pending_url", handoff.approval_url);
+            approvalWindow.postMessage({ type: "PRAVA_APPROVAL_URL", url: handoff.approval_url, otp: handoff.sandbox_otp }, "*");
           } catch {}
           try {
             approvalWindow.location.href = handoff.approval_url;
-          } catch {
-            try {
-              approvalWindow.location.replace(handoff.approval_url);
-            } catch {}
-          }
+          } catch {}
         } else {
           setActionFeedback("Prava approval is ready. Choose Open Prava above to continue in a separate tab.");
         }
