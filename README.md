@@ -8,9 +8,11 @@
 [![FastAPI](https://img.shields.io/badge/backend-FastAPI-009688.svg)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-61DAFB.svg)](https://react.dev)
 [![Database](https://img.shields.io/badge/database-PostgreSQL%20(Neon)-336791.svg)](https://neon.tech)
-[![Deployment](https://img.shields.io/badge/deployment-Render%20(Live)-46E3B7.svg)](https://prava-restock.onrender.com/app/)
+[![Deployment](https://img.shields.io/badge/deployment-Render%20(Sandbox)-46E3B7.svg)](https://prava-restock.onrender.com/app/)
 
-**An Autonomous Agentic AI system that predicts consumption cadences, tracks price volatility, arbitrates merchant quotes, and securely delegates transactions via Prava Session Mandates with human-in-the-loop passkey guardrails.**
+**An autonomous replenishment and SaaS renewal system that calculates consumption cadences, tracks price volatility, arbitrates merchant quotes, and delegates transactions via Prava Session Mandates with human-in-the-loop approval on Prava's hosted payment surface.**
+
+> **Notice on Real-Money Execution & AI Safety:** Real-money execution is strictly disabled by default (`real_money_enabled: false`). All payment workflows route exclusively through the Prava Sandbox API using test OTP `456789`. No LLM makes decisions on the purchase path; forecasting uses an Exponentially Weighted Moving Average (EWMA), and while an OpenAI Agents SDK tool surface is defined in `agent/orchestrator.py`, runtime purchase execution in `workflow/service.py` is entirely deterministic.
 
 [Live Demo](https://prava-restock.onrender.com/app/) • [System Architecture](#system-architecture) • [Agentic Capabilities](#agentic-ai-architecture) • [Quick Start](#quick-start) • [Documentation](docs/)
 
@@ -22,7 +24,7 @@
 
 ---
 
-## Live Production Demo
+## Live Sandbox Demo
 
 The application is deployed live with full PostgreSQL ACID persistence, Prava sandbox integration, and an automated 15-minute keep-alive scheduler:
 
@@ -31,27 +33,27 @@ The application is deployed live with full PostgreSQL ACID persistence, Prava sa
 | **Live Web App** | [**https://prava-restock.onrender.com/app/**](https://prava-restock.onrender.com/app/) |
 | **Public Waitlist** | [**https://prava-restock.onrender.com/**](https://prava-restock.onrender.com/) |
 | **Reviewer Password** | `reviewer123` |
-| **Sandbox Test OTP** | `456789` |
+| **Sandbox Test OTP** | `456789` (entered on Prava's hosted sandbox page) |
 | **Health / Ready** | `/health` (liveness) • `/ready` (DB readiness) • `/capabilities` |
 
 ---
 
 ## Agentic AI Architecture
 
-Unlike rigid auto-debits (which blindly charge fixed amounts on static calendar dates) or passive generative AI chatbots, Prava-Restock operates as an **Autonomous Financial & Commerce Agent**:
+Unlike rigid auto-debits (which blindly charge fixed amounts on static calendar dates) or passive generative AI chatbots, Prava-Restock operates as an **autonomous replenishment and renewal workflow**:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                      AGENTIC AI LOOP                        │
 │                                                             │
 │   1. SENSE / PERCEIVE         2. REASON & PLAN              │
-│   (Predictive Depletion,       (Compare Merchants,          │
+│   (EWMA Depletion Math,        (Compare Merchants,          │
 │    Price Spikes, Renewals)      Evaluate Budget Fences)     │
 │             │                            │                  │
 │             ▼                            ▼                  │
 │   3. ACT / TOOL USE           4. HUMAN-IN-THE-LOOP          │
-│   (Fetch Live Quotes,          (Passkey / Sandbox OTP       │
-│    Create Mandates)             Threshold Approvals)        │
+│   (Fetch Live Quotes,          (Prava Hosted Approval Page, │
+│    Create Mandates)             Sandbox OTP Verification)   │
 │             │                            │                  │
 │             └───────────► 5. PERSIST ◄───┘                  │
 │                        (State Machine,                      │
@@ -61,18 +63,19 @@ Unlike rigid auto-debits (which blindly charge fixed amounts on static calendar 
 
 ### The 5 Agentic Pillars
 
-1. **Autonomous Perception (`triggers/`)**: Continuously models consumption velocity and forecasts replenishment horizons (e.g. coffee every 14 days, RO filter every 30 days) alongside live merchant pricing.
-2. **Multi-Merchant Reasoning (`workflow/service.py`)**: Gathers quotes across merchants (Zepto, Swiggy, SaaS providers), evaluates prices against historical thresholds, and arbitrates the best available option.
-3. **Financial Safety & Guardrails (`common/idempotency.py`)**: Enforces hard budget fences (Monthly Cap, Per-Item Cap, Per-Transaction Cap) and mathematical zero-duplicate guarantees using SHA-256 idempotency locks.
-4. **Tool Use & Execution (`payments/prava_client.py`)**: Dynamically tokenizes purchase contexts into Prava Session Mandates with scoped merchant boundaries.
-5. **Durable State Machine (`workflow/fsm.py`)**: Transactional ACID Finite State Machine (PostgreSQL) guaranteeing safe recovery across server restarts with zero orphaned credentials.
+1. **Autonomous Perception (`triggers/`)**: Models consumption velocity using Exponentially Weighted Moving Average (EWMA) to forecast replenishment windows (e.g. coffee every 14 days, RO filter every 30 days) alongside live merchant pricing. No generative LLM is in the loop.
+2. **Multi-Merchant Reasoning (`workflow/service.py`)**: Gathers quotes across merchants (Zepto, Swiggy, SaaS providers), evaluates prices against thresholds, and selects the lowest-cost available option deterministically.
+3. **Financial Safety & Guardrails (`common/` & `storage/`)**: Enforces hard budget fences (Monthly Cap, Per-Item Cap, Per-Transaction Cap). Prevents duplicate orders via PostgreSQL row-level locks (`SELECT ... FOR UPDATE`), a primary-key constraint on `merchant_checkout_attempts.idempotency_key`, and SHA-256 request fingerprinting.
+4. **Tool Use & Execution (`payments/prava_client.py`)**: Tokenizes purchase contexts into Prava Session Mandates with scoped merchant boundaries. Owner approval occurs on Prava's hosted payment page using test OTP `456789`; the internal state machine uses the state name `PASSKEY_PENDING`, but no WebAuthn browser API is implemented.
+5. **Durable State Machine (`workflow/service.py`)**: Transactional ACID Finite State Machine (PostgreSQL) designed for safe recovery across server restarts and designed to avoid orphaned credentials.
 
 ---
 
 ## Key Highlights & Concurrency Benchmarks
 
 - **446/446 Automated Tests Passing (100% Green)**: Comprehensive test suite validating FSM transitions, upstream rate-limit recoveries (HTTP 429), and schema boundaries.
-- **Zero Duplicate Orders (100% Deduplication)**: Concurrency stress tests with 16 parallel requests across 8 worker threads collapsed into **exactly 1 order**.
+- **Concurrency & Idempotency Testing**: Tested in `tests/test_mock_subscription_checkout.py` (`test_concurrent_same_key_calls_create_exactly_one_order`): 16 parallel requests across 8 worker threads using one idempotency key produce exactly one order against the mock merchant checkout, backed by database row-level locking and an idempotency-key primary key.
+- **Deterministic Purchase Path**: No LLM makes decisions or generates text that affects purchases. The OpenAI Agents SDK tool surface is defined in `agent/orchestrator.py`, but runtime purchase execution in `workflow/service.py` is entirely deterministic.
 - **Two Distinct Operating Tracks**:
   - **Home Track**: Physical consumables (Blue Tokai Coffee, Aquaguard RO Kits, Copier Paper, Toiletries) via Zepto/Swiggy.
   - **Teams Track**: SaaS Subscriptions (GitHub Copilot Business) with automated tier optimization.
