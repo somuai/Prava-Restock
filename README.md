@@ -27,6 +27,7 @@
 ## System Architecture
 
 ![Prava-Restock System Architecture](docs/assets/system_architecture.png)
+*Editable Excalidraw source: [`docs/assets/system_architecture.excalidraw`](docs/assets/system_architecture.excalidraw) | Vector SVG: [`docs/assets/system_architecture.svg`](docs/assets/system_architecture.svg) (Drag either the `.png` or `.excalidraw` file directly into [excalidraw.com](https://excalidraw.com) to inspect or edit the canvas live).*
 
 ```mermaid
 flowchart TD

@@ -1,0 +1,306 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1180" width="1920" height="1180" style="background:#0b0f19; font-family:'Virgil', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', monospace;">
+  <defs>
+    <!-- Arrowhead markers -->
+    <marker id="arrow-sky" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#38bdf8" />
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#fbbf24" />
+    </marker>
+    <marker id="arrow-emerald" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#34d399" />
+    </marker>
+    <marker id="arrow-rose" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#f43f5e" />
+    </marker>
+    <marker id="arrow-indigo" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#818cf8" />
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#a78bfa" />
+    </marker>
+
+    <!-- Drop Shadow Filter -->
+    <filter id="card-shadow" x="-3%" y="-3%" width="106%" height="106%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000000" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+
+  <!-- Canvas Outer Boundary -->
+  <rect x="20" y="20" width="1880" height="1140" rx="16" fill="#0b0f19" stroke="#1e293b" stroke-width="2" />
+
+  <!-- TOP HEADER BANNER -->
+  <g id="header" filter="url(#card-shadow)">
+    <rect x="50" y="35" width="1820" height="85" rx="12" fill="#0f172a" stroke="#0284c7" stroke-width="2" />
+    <rect x="62" y="47" width="8" height="61" rx="4" fill="#38bdf8" />
+    <text x="82" y="68" font-size="21" font-weight="700" fill="#38bdf8" letter-spacing="0.5">PRAVA-RESTOCK: AUTONOMOUS REPLENISHMENT &amp; RENEWAL ARCHITECTURE</text>
+    <text x="82" y="96" font-size="13" fill="#94a3b8">Zero-Trust Agentic Commerce • DPDP Act 2023 Guardrails • FIDO2/WebAuthn Passkey Mandates • Google Cloud Run &amp; ACID FSM</text>
+    
+    <!-- Top Badges -->
+    <rect x="1220" y="55" width="180" height="42" rx="8" fill="#881337" stroke="#f43f5e" stroke-width="1.5" />
+    <text x="1310" y="81" font-size="11.5" font-weight="700" fill="#ffffff" text-anchor="middle">ZERO-TRUST MANDATES</text>
+
+    <rect x="1425" y="55" width="180" height="42" rx="8" fill="#064e3b" stroke="#34d399" stroke-width="1.5" />
+    <text x="1515" y="81" font-size="11.5" font-weight="700" fill="#ffffff" text-anchor="middle">ACID STATE MACHINE</text>
+
+    <rect x="1630" y="55" width="220" height="42" rx="8" fill="#312e81" stroke="#818cf8" stroke-width="1.5" />
+    <text x="1740" y="81" font-size="11.5" font-weight="700" fill="#ffffff" text-anchor="middle">GOOGLE CLOUD RUN</text>
+  </g>
+
+  <!-- ================= ROW 1 ================= -->
+
+  <!-- CARD 1: Trigger & Intelligence -->
+  <g id="card1" filter="url(#card-shadow)">
+    <rect x="50" y="140" width="580" height="370" rx="12" fill="#0f172a" stroke="#38bdf8" stroke-width="2" />
+    <rect x="50" y="140" width="580" height="42" rx="12" fill="#0369a1" />
+    <text x="70" y="167" font-size="14.5" font-weight="700" fill="#ffffff">1. TRIGGER &amp; INTELLIGENCE (Consumption Engine)</text>
+
+    <!-- Sub-card 1A -->
+    <rect x="65" y="195" width="550" height="90" rx="8" fill="#1e293b" stroke="#0284c7" stroke-width="1.5" />
+    <text x="80" y="217" font-size="13" font-weight="700" fill="#38bdf8">EWMA Depletion Math (Home Pantry Track)</text>
+    <text x="80" y="238" font-size="11" fill="#cbd5e1">&#8226; Formula: C_t = alpha * C_observed + (1 - alpha) * C_prev</text>
+    <text x="80" y="256" font-size="11" fill="#cbd5e1">&#8226; Tracks household pantry cadence &amp; historical depletion variance</text>
+    <text x="80" y="274" font-size="11" fill="#cbd5e1">&#8226; Dispatches restocking trigger when remaining horizon &lt;= 2 days</text>
+
+    <!-- Sub-card 1B -->
+    <rect x="65" y="295" width="550" height="95" rx="8" fill="#1e293b" stroke="#0284c7" stroke-width="1.5" />
+    <text x="80" y="317" font-size="13" font-weight="700" fill="#38bdf8">SaaS Renewal Tracker (Teams Track)</text>
+    <text x="80" y="338" font-size="11" fill="#cbd5e1">&#8226; Monitors recurring team subscriptions: Render, Neon, Datadog</text>
+    <text x="80" y="356" font-size="11" fill="#cbd5e1">&#8226; Analyzes billing cycles, seat expansion, and upcoming invoices</text>
+    <text x="80" y="374" font-size="11" fill="#cbd5e1">&#8226; Emits proactive renewal proposal 72h before surprise card debits</text>
+
+    <!-- Sub-card 1C -->
+    <rect x="65" y="400" width="550" height="95" rx="8" fill="#1e293b" stroke="#0284c7" stroke-width="1.5" />
+    <text x="80" y="422" font-size="13" font-weight="700" fill="#38bdf8">Price Drop &amp; Inventory Availability Monitor</text>
+    <text x="80" y="443" font-size="11" fill="#cbd5e1">&#8226; Real-time catalog polling across merchant quick-commerce networks</text>
+    <text x="80" y="461" font-size="11" fill="#cbd5e1">&#8226; Flags promotional discounts &amp; out-of-stock substitution signals</text>
+    <text x="80" y="479" font-size="11" fill="#cbd5e1">&#8226; Rate-limited background polling with exponential jitter</text>
+  </g>
+
+  <!-- CARD 2: Merchant & Quoting -->
+  <g id="card2" filter="url(#card-shadow)">
+    <rect x="670" y="140" width="580" height="370" rx="12" fill="#0f172a" stroke="#fbbf24" stroke-width="2" />
+    <rect x="670" y="140" width="580" height="42" rx="12" fill="#b45309" />
+    <text x="690" y="167" font-size="14.5" font-weight="700" fill="#ffffff">2. MERCHANT &amp; QUOTING (Catalog &amp; Inventory)</text>
+
+    <!-- Sub-card 2A -->
+    <rect x="685" y="195" width="550" height="90" rx="8" fill="#1e293b" stroke="#d97706" stroke-width="1.5" />
+    <text x="700" y="217" font-size="13" font-weight="700" fill="#fbbf24">Zepto Quick-Commerce MCP Runtime</text>
+    <text x="700" y="238" font-size="11" fill="#cbd5e1">&#8226; SSE &amp; Stdio Model Context Protocol adapter for catalog queries</text>
+    <text x="700" y="256" font-size="11" fill="#cbd5e1">&#8226; Real-time SKU discovery, shelf inventory, and delivery SLA</text>
+    <text x="700" y="274" font-size="11" fill="#cbd5e1">&#8226; Structured tool execution: search_catalog, assemble_cart</text>
+
+    <!-- Sub-card 2B -->
+    <rect x="685" y="295" width="550" height="95" rx="8" fill="#1e293b" stroke="#d97706" stroke-width="1.5" />
+    <text x="700" y="317" font-size="13" font-weight="700" fill="#fbbf24">Multi-Merchant Catalog Arbitrator</text>
+    <text x="700" y="338" font-size="11" fill="#cbd5e1">&#8226; Real-time pricing comparison across local delivery routes</text>
+    <text x="700" y="356" font-size="11" fill="#cbd5e1">&#8226; Automated multi-vendor routing if primary vendor is constrained</text>
+    <text x="700" y="374" font-size="11" fill="#cbd5e1">&#8226; Validates vendor quote total against historical pantry median</text>
+
+    <!-- Sub-card 2C -->
+    <rect x="685" y="400" width="550" height="95" rx="8" fill="#1e293b" stroke="#d97706" stroke-width="1.5" />
+    <text x="700" y="422" font-size="13" font-weight="700" fill="#fbbf24">SaaS Billing Gateway Adapters</text>
+    <text x="700" y="443" font-size="11" fill="#cbd5e1">&#8226; Headless Stripe &amp; Paddle invoice verification &amp; quote assembly</text>
+    <text x="700" y="461" font-size="11" fill="#cbd5e1">&#8226; Seat utilization audit to identify and prune idle team licenses</text>
+    <text x="700" y="479" font-size="11" fill="#cbd5e1">&#8226; Generates structured quote payload ready for user approval</text>
+  </g>
+
+  <!-- CARD 3: Multi-Channel Interface -->
+  <g id="card3" filter="url(#card-shadow)">
+    <rect x="1290" y="140" width="580" height="370" rx="12" fill="#0f172a" stroke="#a78bfa" stroke-width="2" />
+    <rect x="1290" y="140" width="580" height="42" rx="12" fill="#6d28d9" />
+    <text x="1310" y="167" font-size="14.5" font-weight="700" fill="#ffffff">3. MULTI-CHANNEL INTERFACE (Approval Surface)</text>
+
+    <!-- Sub-card 3A -->
+    <rect x="1305" y="195" width="550" height="90" rx="8" fill="#1e293b" stroke="#7c3aed" stroke-width="1.5" />
+    <text x="1320" y="217" font-size="13" font-weight="700" fill="#a78bfa">Living Pantry PWA (React + Vite)</text>
+    <text x="1320" y="238" font-size="11" fill="#cbd5e1">&#8226; Visual inventory dashboard with depletion sliders &amp; curves</text>
+    <text x="1320" y="256" font-size="11" fill="#cbd5e1">&#8226; 1-Click biometric restock approval via WebAuthn passkey client</text>
+    <text x="1320" y="274" font-size="11" fill="#cbd5e1">&#8226; Responsive mobile/desktop PWA with offline state cache</text>
+
+    <!-- Sub-card 3B -->
+    <rect x="1305" y="295" width="550" height="95" rx="8" fill="#1e293b" stroke="#7c3aed" stroke-width="1.5" />
+    <text x="1320" y="317" font-size="13" font-weight="700" fill="#a78bfa">Slack Socket Mode Bot (#restock-alerts)</text>
+    <text x="1320" y="338" font-size="11" fill="#cbd5e1">&#8226; Rich Block Kit proposal messages with interactive button controls</text>
+    <text x="1320" y="356" font-size="11" fill="#cbd5e1">&#8226; Instant actions: [Approve Restock] [Adjust Qty] [Snooze 48h]</text>
+    <text x="1320" y="374" font-size="11" fill="#cbd5e1">&#8226; Zero public inbound ports: outbound TLS WebSocket connection</text>
+
+    <!-- Sub-card 3C -->
+    <rect x="1305" y="400" width="550" height="95" rx="8" fill="#1e293b" stroke="#7c3aed" stroke-width="1.5" />
+    <text x="1320" y="422" font-size="13" font-weight="700" fill="#a78bfa">Reviewer Showcase Sandbox Mode</text>
+    <text x="1320" y="443" font-size="11" fill="#cbd5e1">&#8226; Live evaluation password bypass (reviewer123) for hiring teams</text>
+    <text x="1320" y="461" font-size="11" fill="#cbd5e1">&#8226; Prava sandbox test OTP 456789 pre-configured for instant demo</text>
+    <text x="1320" y="479" font-size="11" fill="#cbd5e1">&#8226; Real-time state transitions surfaced in browser developer view</text>
+  </g>
+
+  <!-- Flow Arrows Row 1 -->
+  <path d="M 630 325 L 664 325" stroke="#38bdf8" stroke-width="2.5" fill="none" marker-end="url(#arrow-sky)" />
+  <path d="M 1250 325 L 1284 325" stroke="#fbbf24" stroke-width="2.5" fill="none" marker-end="url(#arrow-amber)" />
+
+  <!-- ================= ROW 2 ================= -->
+
+  <!-- CARD 4: Safety & Policy Engine -->
+  <g id="card4" filter="url(#card-shadow)">
+    <rect x="50" y="530" width="580" height="370" rx="12" fill="#0f172a" stroke="#34d399" stroke-width="2" />
+    <rect x="50" y="530" width="580" height="42" rx="12" fill="#047857" />
+    <text x="70" y="557" font-size="14.5" font-weight="700" fill="#ffffff">4. SAFETY &amp; POLICY ENGINE (Hard Controls)</text>
+
+    <!-- Sub-card 4A -->
+    <rect x="65" y="585" width="550" height="90" rx="8" fill="#1e293b" stroke="#059669" stroke-width="1.5" />
+    <text x="80" y="607" font-size="13" font-weight="700" fill="#34d399">Spend Cap Enforcement (Budget Fences)</text>
+    <text x="80" y="628" font-size="11" fill="#cbd5e1">&#8226; Hard transaction cap (max INR 2,500) &amp; rolling monthly ceiling</text>
+    <text x="80" y="646" font-size="11" fill="#cbd5e1">&#8226; Strict deterministic validation executed before mandate creation</text>
+    <text x="80" y="664" font-size="11" fill="#cbd5e1">&#8226; Zero LLM hallucinations: math verified in Python runtime</text>
+
+    <!-- Sub-card 4B -->
+    <rect x="65" y="685" width="550" height="95" rx="8" fill="#1e293b" stroke="#059669" stroke-width="1.5" />
+    <text x="80" y="707" font-size="13" font-weight="700" fill="#34d399">DPDP Act 2023 Compliance Guardrails</text>
+    <text x="80" y="728" font-size="11" fill="#cbd5e1">&#8226; Privacy-by-design: PII redaction on delivery addresses &amp; names</text>
+    <text x="80" y="746" font-size="11" fill="#cbd5e1">&#8226; Tokenized customer identity hashes passed to merchant adapters</text>
+    <text x="80" y="764" font-size="11" fill="#cbd5e1">&#8226; Granular consent management with cryptographic revocation audit</text>
+
+    <!-- Sub-card 4C -->
+    <rect x="65" y="790" width="550" height="95" rx="8" fill="#1e293b" stroke="#059669" stroke-width="1.5" />
+    <text x="80" y="812" font-size="13" font-weight="700" fill="#34d399">Deterministic ACID FSM (SQLModel / PostgreSQL)</text>
+    <text x="80" y="833" font-size="11" fill="#cbd5e1">&#8226; PROPOSED -&gt; POLICY_CHECKED -&gt; MANDATED -&gt; EXECUTING -&gt; FULFILLED</text>
+    <text x="80" y="851" font-size="11" fill="#cbd5e1">&#8226; Row lock (SELECT ... FOR UPDATE) blocks parallel duplicate execution</text>
+    <text x="80" y="869" font-size="11" fill="#cbd5e1">&#8226; Idempotency key primary constraint guarantees 0 duplicate charges</text>
+  </g>
+
+  <!-- CARD 5: Prava Passkey Network -->
+  <g id="card5" filter="url(#card-shadow)">
+    <rect x="670" y="530" width="580" height="370" rx="12" fill="#0f172a" stroke="#f43f5e" stroke-width="2" />
+    <rect x="670" y="530" width="580" height="42" rx="12" fill="#be123c" />
+    <text x="690" y="557" font-size="14.5" font-weight="700" fill="#ffffff">5. PRAVA PASSKEY NETWORK (Zero-Trust Payments)</text>
+
+    <!-- Sub-card 5A -->
+    <rect x="685" y="585" width="550" height="90" rx="8" fill="#1e293b" stroke="#e11d48" stroke-width="1.5" />
+    <text x="700" y="607" font-size="13" font-weight="700" fill="#f43f5e">WebAuthn / FIDO2 Spending Mandates</text>
+    <text x="700" y="628" font-size="11" fill="#cbd5e1">&#8226; Hardware-backed biometrics (Touch ID / Face ID / Secure Enclave)</text>
+    <text x="700" y="646" font-size="11" fill="#cbd5e1">&#8226; Mandate scope: constrained by merchant, max amount, &amp; expiration</text>
+    <text x="700" y="664" font-size="11" fill="#cbd5e1">&#8226; Zero card PAN, CVV, or netbanking passwords exposed to AI</text>
+
+    <!-- Sub-card 5B -->
+    <rect x="685" y="685" width="550" height="95" rx="8" fill="#1e293b" stroke="#e11d48" stroke-width="1.5" />
+    <text x="700" y="707" font-size="13" font-weight="700" fill="#f43f5e">Prava Session Handoff Protocol</text>
+    <text x="700" y="728" font-size="11" fill="#cbd5e1">&#8226; Ephemeral single-use session tokens prevent replay attacks</text>
+    <text x="700" y="746" font-size="11" fill="#cbd5e1">&#8226; Dynamic redirection to Prava&apos;s hosted zero-trust approval page</text>
+    <text x="700" y="764" font-size="11" fill="#cbd5e1">&#8226; Cryptographically signed callback payloads verified via public key</text>
+
+    <!-- Sub-card 5C -->
+    <rect x="685" y="790" width="550" height="95" rx="8" fill="#1e293b" stroke="#e11d48" stroke-width="1.5" />
+    <text x="700" y="812" font-size="13" font-weight="700" fill="#f43f5e">Programmatic charge_mandate Settlement</text>
+    <text x="700" y="833" font-size="11" fill="#cbd5e1">&#8226; Agent triggers settlement within pre-authorized mandate boundary</text>
+    <text x="700" y="851" font-size="11" fill="#cbd5e1">&#8226; Immediate settlement receipt &amp; transaction reference generated</text>
+    <text x="700" y="869" font-size="11" fill="#cbd5e1">&#8226; Automated webhook dispatch updates living pantry inventory</text>
+  </g>
+
+  <!-- CARD 6: Cloud Infrastructure -->
+  <g id="card6" filter="url(#card-shadow)">
+    <rect x="1290" y="530" width="580" height="370" rx="12" fill="#0f172a" stroke="#818cf8" stroke-width="2" />
+    <rect x="1290" y="530" width="580" height="42" rx="12" fill="#4338ca" />
+    <text x="1310" y="557" font-size="14.5" font-weight="700" fill="#ffffff">6. CLOUD INFRASTRUCTURE &amp; OBSERVABILITY</text>
+
+    <!-- Sub-card 6A -->
+    <rect x="1305" y="585" width="550" height="90" rx="8" fill="#1e293b" stroke="#4f46e5" stroke-width="1.5" />
+    <text x="1320" y="607" font-size="13" font-weight="700" fill="#818cf8">Google Cloud Run (Knative Serverless Container)</text>
+    <text x="1320" y="628" font-size="11" fill="#cbd5e1">&#8226; Declarative Knative manifest: deploy/gcp/cloudrun-service.yaml</text>
+    <text x="1320" y="646" font-size="11" fill="#cbd5e1">&#8226; Autoscaling 0 to 10 instances; automatic TLS &amp; ingress control</text>
+    <text x="1320" y="664" font-size="11" fill="#cbd5e1">&#8226; Containerized FastAPI with health probes (/health, /ready)</text>
+
+    <!-- Sub-card 6B -->
+    <rect x="1305" y="685" width="550" height="95" rx="8" fill="#1e293b" stroke="#4f46e5" stroke-width="1.5" />
+    <text x="1320" y="707" font-size="13" font-weight="700" fill="#818cf8">Neon Serverless PostgreSQL (SSL Encrypted)</text>
+    <text x="1320" y="728" font-size="11" fill="#cbd5e1">&#8226; Dedicated connection pooling (PgBouncer) for bursty traffic</text>
+    <text x="1320" y="746" font-size="11" fill="#cbd5e1">&#8226; ACID durability, row-level locks, and strict foreign key cascades</text>
+    <text x="1320" y="764" font-size="11" fill="#cbd5e1">&#8226; Automatic branch isolation for staging &amp; integration testing</text>
+
+    <!-- Sub-card 6C -->
+    <rect x="1305" y="790" width="550" height="95" rx="8" fill="#1e293b" stroke="#4f46e5" stroke-width="1.5" />
+    <text x="1320" y="812" font-size="13" font-weight="700" fill="#818cf8">OpenTelemetry Distributed Tracing (W3C Spans)</text>
+    <text x="1320" y="833" font-size="11" fill="#cbd5e1">&#8226; Full W3C TraceContext propagation across agent turns &amp; DB ops</text>
+    <text x="1320" y="851" font-size="11" fill="#cbd5e1">&#8226; Granular latency telemetry: LLM inference, DB locks, Prava API</text>
+    <text x="1320" y="869" font-size="11" fill="#cbd5e1">&#8226; Production audit trail exported to Cloud Logging &amp; Honeycomb</text>
+  </g>
+
+  <!-- Flow Arrows Row 2 -->
+  <path d="M 630 715 L 664 715" stroke="#34d399" stroke-width="2.5" fill="none" marker-end="url(#arrow-emerald)" />
+  <path d="M 1250 715 L 1284 715" stroke="#f43f5e" stroke-width="2.5" fill="none" marker-end="url(#arrow-rose)" />
+
+  <!-- ================= BOTTOM SECTION ================= -->
+  <g id="bottom_workflow" filter="url(#card-shadow)">
+    <rect x="50" y="920" width="1820" height="220" rx="12" fill="#090e1a" stroke="#0284c7" stroke-width="2" />
+    <rect x="62" y="932" width="6" height="42" rx="3" fill="#38bdf8" />
+    <text x="78" y="951" font-size="15" font-weight="700" fill="#38bdf8">END-TO-END AUTONOMOUS REPLENISHMENT WORKFLOW (5-STEP DETERMINISTIC PIPELINE)</text>
+    <text x="78" y="971" font-size="11.5" fill="#94a3b8">From Predictive Depletion Detection to Hardware-Backed Mandate Settlement in &lt; 3 Seconds</text>
+
+    <!-- 5 Steps -->
+
+    <!-- STEP 1 -->
+    <g transform="translate(75, 985)">
+      <rect x="0" y="0" width="325" height="135" rx="8" fill="#1e293b" stroke="#38bdf8" stroke-width="1.5" />
+      <rect x="0" y="0" width="325" height="30" rx="8" fill="#0369a1" />
+      <text x="162" y="20" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">1. PREDICTIVE TRIGGER</text>
+      <text x="15" y="52" font-size="11" fill="#cbd5e1">&#8226; EWMA depletion detects</text>
+      <text x="15" y="72" font-size="11" fill="#cbd5e1">&#8226; stock horizon &lt;= 2 days</text>
+      <text x="15" y="92" font-size="11" fill="#cbd5e1">&#8226; Autonomous event sent</text>
+      <text x="15" y="112" font-size="11" fill="#cbd5e1">&#8226; to workflow arbitrator</text>
+    </g>
+
+    <!-- Arrow 1 -> 2 -->
+    <path d="M 405 1052 L 434 1052" stroke="#38bdf8" stroke-width="2.5" fill="none" marker-end="url(#arrow-sky)" />
+
+    <!-- STEP 2 -->
+    <g transform="translate(440, 985)">
+      <rect x="0" y="0" width="325" height="135" rx="8" fill="#1e293b" stroke="#fbbf24" stroke-width="1.5" />
+      <rect x="0" y="0" width="325" height="30" rx="8" fill="#b45309" />
+      <text x="162" y="20" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">2. MCP VENDOR QUOTE</text>
+      <text x="15" y="52" font-size="11" fill="#cbd5e1">&#8226; Zepto MCP adapter executes</text>
+      <text x="15" y="72" font-size="11" fill="#cbd5e1">&#8226; live SKU &amp; price query</text>
+      <text x="15" y="92" font-size="11" fill="#cbd5e1">&#8226; Basket assembled: INR 1,850</text>
+      <text x="15" y="112" font-size="11" fill="#cbd5e1">&#8226; Stock verified in merchant</text>
+    </g>
+
+    <!-- Arrow 2 -> 3 -->
+    <path d="M 770 1052 L 799 1052" stroke="#fbbf24" stroke-width="2.5" fill="none" marker-end="url(#arrow-amber)" />
+
+    <!-- STEP 3 -->
+    <g transform="translate(805, 985)">
+      <rect x="0" y="0" width="325" height="135" rx="8" fill="#1e293b" stroke="#34d399" stroke-width="1.5" />
+      <rect x="0" y="0" width="325" height="30" rx="8" fill="#047857" />
+      <text x="162" y="20" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">3. SAFETY &amp; BUDGET</text>
+      <text x="15" y="52" font-size="11" fill="#cbd5e1">&#8226; Spend cap policy checked:</text>
+      <text x="15" y="72" font-size="11" fill="#cbd5e1">&#8226; INR 1,850 &lt;= INR 2,500 (PASS)</text>
+      <text x="15" y="92" font-size="11" fill="#cbd5e1">&#8226; DPDP privacy masking applied</text>
+      <text x="15" y="112" font-size="11" fill="#cbd5e1">&#8226; State -&gt; POLICY_CHECKED</text>
+    </g>
+
+    <!-- Arrow 3 -> 4 -->
+    <path d="M 1135 1052 L 1164 1052" stroke="#34d399" stroke-width="2.5" fill="none" marker-end="url(#arrow-emerald)" />
+
+    <!-- STEP 4 -->
+    <g transform="translate(1170, 985)">
+      <rect x="0" y="0" width="325" height="135" rx="8" fill="#1e293b" stroke="#f43f5e" stroke-width="1.5" />
+      <rect x="0" y="0" width="325" height="30" rx="8" fill="#be123c" />
+      <text x="162" y="20" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">4. USER PASSKEY SIGN</text>
+      <text x="15" y="52" font-size="11" fill="#cbd5e1">&#8226; Slack / PWA notification</text>
+      <text x="15" y="72" font-size="11" fill="#cbd5e1">&#8226; Biometric approval via</text>
+      <text x="15" y="92" font-size="11" fill="#cbd5e1">&#8226; Touch ID / WebAuthn passkey</text>
+      <text x="15" y="112" font-size="11" fill="#cbd5e1">&#8226; Signed mandate created</text>
+    </g>
+
+    <!-- Arrow 4 -> 5 -->
+    <path d="M 1500 1052 L 1529 1052" stroke="#f43f5e" stroke-width="2.5" fill="none" marker-end="url(#arrow-rose)" />
+
+    <!-- STEP 5 -->
+    <g transform="translate(1535, 985)">
+      <rect x="0" y="0" width="325" height="135" rx="8" fill="#1e293b" stroke="#818cf8" stroke-width="1.5" />
+      <rect x="0" y="0" width="325" height="30" rx="8" fill="#4338ca" />
+      <text x="162" y="20" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">5. CLOUD RUN ACID EXEC</text>
+      <text x="15" y="52" font-size="11" fill="#cbd5e1">&#8226; Row-level lock acquired</text>
+      <text x="15" y="72" font-size="11" fill="#cbd5e1">&#8226; charge_mandate executed</text>
+      <text x="15" y="92" font-size="11" fill="#cbd5e1">&#8226; 0 duplicate charges proven</text>
+      <text x="15" y="112" font-size="11" fill="#cbd5e1">&#8226; Inventory updated in DB</text>
+    </g>
+  </g>
+</svg>
