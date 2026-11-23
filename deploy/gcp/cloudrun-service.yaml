@@ -1,0 +1,70 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: prava-restock
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/description: "Autonomous Replenishment & SaaS Renewal Agent with OpenTelemetry & Prava Mandate Safety"
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "10"
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/execution-environment: gen2
+        run.googleapis.com/cloudsql-instances: "${GCP_PROJECT_ID}:${GCP_REGION}:prava-restock-db"
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      serviceAccountName: prava-restock-runner@${GCP_PROJECT_ID}.iam.gserviceaccount.com
+      containers:
+        - image: gcr.io/${GCP_PROJECT_ID}/prava-restock:latest
+          resources:
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+          env:
+            - name: RESTOCK_ENV
+              value: "production"
+            - name: RESTOCK_DEMO_MODE
+              value: "0"
+            - name: RESTOCK_AUTH_MODE
+              value: "hybrid"
+            - name: RESTOCK_SERVE_WAITLIST
+              value: "1"
+            - name: PRAVA_SANDBOX_URL
+              value: "https://sandbox.api.prava.space"
+            - name: OTEL_SERVICE_NAME
+              value: "prava-restock-cloudrun"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://localhost:4317"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: prava-restock-db-url
+                  key: latest
+            - name: RESTOCK_SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: prava-restock-session-secret
+                  key: latest
+            - name: PRAVA_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: prava-api-key
+                  key: latest
+          startupProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3

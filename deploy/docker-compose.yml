@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  web:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: prava-restock-web
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - RESTOCK_ENV=production
+      - RESTOCK_DEMO_MODE=1
+      - RESTOCK_AUTH_MODE=hybrid
+      - DATABASE_URL=postgresql://postgres:test@postgres:5432/pravarestock
+      - RESTOCK_SESSION_SECRET=test-secret
+      - OTEL_SERVICE_NAME=prava-restock-web
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - restock-network
+
+  worker:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: prava-restock-worker
+    restart: unless-stopped
+    command: ["python", "scripts/run_worker.py"]
+    environment:
+      - RESTOCK_ENV=production
+      - RESTOCK_DEMO_MODE=1
+      - DATABASE_URL=postgresql://postgres:test@postgres:5432/pravarestock
+      - RESTOCK_SESSION_SECRET=test-secret
+      - OTEL_SERVICE_NAME=prava-restock-worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - restock-network
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: prava-restock-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: pravarestock
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pravarestock"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - restock-network
+
+volumes:
+  pgdata:
+    driver: local
+
+networks:
+  restock-network:
+    driver: bridge

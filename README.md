@@ -24,6 +24,59 @@
 
 ---
 
+## System Architecture
+
+![Prava-Restock System Architecture](docs/assets/system_architecture.png)
+
+```mermaid
+flowchart TD
+    classDef agent fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#01579b;
+    classDef safety fill:#ffebee,stroke:#b71c1c,stroke-width:2px,color:#b71c1c;
+    classDef fsm fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px,color:#1b5e20;
+    classDef ext fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#e65100;
+    classDef cloud fill:#ede7f6,stroke:#4a148c,stroke-width:2px,color:#4a148c;
+
+    subgraph "Perception & Ingestion"
+        Trigger["1. Predictive Trigger (triggers/)"]:::agent
+        EWMA["EWMA Depletion Math (forecasting/)"]:::agent
+        Trigger --> EWMA
+    end
+
+    subgraph "Reasoning & Policy Fences"
+        Orch["2. Multi-Merchant Arbitrator (workflow/service.py)"]:::agent
+        Fences["3. Financial Guardrails (common/policies.py)"]:::safety
+        EWMA --> Orch
+        Orch --> Fences
+    end
+
+    subgraph "Execution & Prava Session Protocol"
+        PravaClient["4. Prava Mandate Client (payments/prava_client.py)"]:::agent
+        HostedApproval["Prava Hosted Approval Page (OTP 456789)"]:::ext
+        Fences --> PravaClient
+        PravaClient --> HostedApproval
+    end
+
+    subgraph "Transactional Persistence (ACID)"
+        FSM[("PostgreSQL Finite State Machine")]:::fsm
+        Lock["SELECT ... FOR UPDATE (Row-Level Lock)"]:::safety
+        IdempKey["Idempotency PK Constraint (0 Duplicate Charges)"]:::safety
+        HostedApproval --> Lock
+        Lock --> IdempKey
+        IdempKey --> FSM
+    end
+
+    subgraph "Observability & Google Cloud Runtime"
+        CloudRun["Google Cloud Run Container"]:::cloud
+        OTel["OpenTelemetry Distributed Tracing (W3C Spans)"]:::cloud
+        CloudRun --- OTel
+        FSM -.-> OTel
+    end
+```
+
+Detailed concurrency proofs, 16-thread race benchmarks, and distributed tracing logs are documented in [EVALUATION.md](EVALUATION.md).
+
+---
+
 ## Live Sandbox Demo
 
 The application is deployed live with full PostgreSQL ACID persistence, Prava sandbox integration, and an automated 15-minute keep-alive scheduler:
@@ -118,6 +171,28 @@ npm run dev
 pytest -q
 # Output: 446 passed in ~24s
 ```
+
+### 4. Multi-Container Local Deployment (Docker Compose)
+Launch the web interface, background autonomous scheduler, and PostgreSQL database:
+```bash
+cd deploy
+docker compose up -d
+```
+
+### 5. Production Deployment (Google Cloud Run)
+Deploy the Knative service directly to Google Cloud Platform with Secret Manager and Cloud SQL bindings:
+```bash
+# Set GCP Project and Region
+export GCP_PROJECT_ID="your-gcp-project-id"
+export GCP_REGION="asia-south1"
+
+# Execute build and Cloud Run release
+bash deploy/gcp/deploy.sh
+```
+Deployment manifests:
+- [deploy/docker-compose.yml](deploy/docker-compose.yml): Local multi-service orchestration.
+- [deploy/gcp/cloudrun-service.yaml](deploy/gcp/cloudrun-service.yaml): Knative production manifest with Cloud SQL socket and OpenTelemetry sidecar.
+- [deploy/gcp/deploy.sh](deploy/gcp/deploy.sh): Cloud Build & Cloud Run deployment automation.
 
 ---
 
